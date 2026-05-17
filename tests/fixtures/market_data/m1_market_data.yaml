@@ -1,0 +1,167 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Market data sintético para M1.
+#
+# Cargado por MockMarketDataProvider.from_yaml().
+# Los valores son razonables pero NO son una predicción. Sirven solo para
+# que el pipeline cuantitativo tenga inputs deterministas.
+# ──────────────────────────────────────────────────────────────────────────
+
+snapshots:
+
+  - ticker: SGOV
+    expected_return_annual: 0.038
+    volatility_annual: 0.004
+    liquidity_score: 0.99
+    expense_ratio: 0.0009
+    duration: 0.25
+    asset_class: cash
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Treasuries 0-3 meses. Proxy de cash."
+
+  - ticker: BIL
+    expected_return_annual: 0.035
+    volatility_annual: 0.005
+    liquidity_score: 0.99
+    expense_ratio: 0.0014
+    duration: 0.20
+    asset_class: cash
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "T-Bills 1-3 meses."
+
+  - ticker: AGG
+    expected_return_annual: 0.045
+    volatility_annual: 0.055
+    liquidity_score: 0.95
+    expense_ratio: 0.0003
+    duration: 6.2
+    asset_class: bond
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Core US aggregate bond ETF."
+
+  - ticker: BND
+    expected_return_annual: 0.044
+    volatility_annual: 0.054
+    liquidity_score: 0.94
+    expense_ratio: 0.0003
+    duration: 6.3
+    asset_class: bond
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Total bond market ETF. Equivalente funcional a AGG."
+
+  - ticker: VT
+    expected_return_annual: 0.075
+    volatility_annual: 0.155
+    liquidity_score: 0.92
+    expense_ratio: 0.0007
+    duration: null
+    asset_class: equity
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Equity global diversificado."
+
+  - ticker: VEA
+    expected_return_annual: 0.072
+    volatility_annual: 0.165
+    liquidity_score: 0.90
+    expense_ratio: 0.0005
+    duration: null
+    asset_class: equity
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Equity internacional de mercados desarrollados."
+
+  - ticker: HYG
+    expected_return_annual: 0.065
+    volatility_annual: 0.085
+    liquidity_score: 0.85
+    expense_ratio: 0.0049
+    duration: 3.4
+    asset_class: high_yield
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "High yield corporate bond ETF."
+
+  - ticker: ARKK
+    expected_return_annual: 0.090
+    volatility_annual: 0.320
+    liquidity_score: 0.80
+    expense_ratio: 0.0075
+    duration: null
+    asset_class: equity
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Thematic equity. Alta volatilidad y concentración."
+
+  - ticker: XLE
+    expected_return_annual: 0.060
+    volatility_annual: 0.220
+    liquidity_score: 0.90
+    expense_ratio: 0.0010
+    duration: null
+    asset_class: sector_equity
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Sector energía."
+
+  - ticker: TLT
+    expected_return_annual: 0.040
+    volatility_annual: 0.130
+    liquidity_score: 0.93
+    expense_ratio: 0.0015
+    duration: 17.5
+    asset_class: bond
+    currency: USD
+    stale: false
+    missing_fields: []
+    notes:
+      - "Treasuries 20+ años. Duration extrema."
+
+  - ticker: STALE
+    expected_return_annual: 0.050
+    volatility_annual: 0.080
+    liquidity_score: 0.50
+    expense_ratio: 0.0020
+    duration: 5.0
+    asset_class: bond
+    currency: USD
+    stale: true
+    missing_fields: []
+    notes:
+      - "Snapshot marcado como stale para ejercitar el pipeline de calidad."
+
+  - ticker: BAD_MISSING
+    expected_return_annual: 0.0
+    volatility_annual: 0.0
+    liquidity_score: 0.0
+    expense_ratio: 0.0
+    duration: null
+    asset_class: equity
+    currency: USD
+    stale: false
+    missing_fields:
+      - expected_return_annual
+      - volatility_annual
+    notes:
+      - "Snapshot con campos críticos faltantes para ejercitar is_usable=False."
