@@ -1,0 +1,199 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Universo de productos aprobados — M1.
+#
+# Cargado por ApprovedProductUniverse.from_yaml(). Contiene productos en
+# distintos estados de governance para ejercitar el filtrado por perfil
+# y la generación de exclusion reports.
+#
+# Política M1: RESTRICTED, TEMPORARILY_SUSPENDED y PROHIBITED no pasan.
+# review_due_date vencido también bloquea.
+# ──────────────────────────────────────────────────────────────────────────
+
+products:
+
+  # ── Money market / cash-like ───────────────────────────────────────────
+  - ticker: BIL
+    name: SPDR Bloomberg 1-3 Month T-Bill ETF
+    instrument_type: money_market
+    status: approved
+    allowed_profiles:
+      - conservador
+      - moderado-defensivo
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles: []
+    review_due_date: "2099-12-31"
+    notes:
+      - "Liquidez muy alta. Apto como reserva de efectivo en cualquier perfil."
+    reason_code: null
+
+  - ticker: SHV
+    name: iShares Short Treasury Bond ETF
+    instrument_type: money_market
+    status: approved
+    allowed_profiles:
+      - conservador
+      - moderado-defensivo
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles: []
+    review_due_date: "2099-12-31"
+    notes:
+      - "Treasuries de muy corto plazo. Liquidez alta."
+    reason_code: null
+
+  # ── Bond ETFs ──────────────────────────────────────────────────────────
+  - ticker: AGG
+    name: iShares Core US Aggregate Bond ETF
+    instrument_type: bond_etf
+    status: approved
+    allowed_profiles:
+      - conservador
+      - moderado-defensivo
+      - moderado
+      - moderado-agresivo
+    restricted_profiles: []
+    review_due_date: "2099-12-31"
+    notes:
+      - "Core holding de renta fija agregada US."
+    reason_code: null
+
+  - ticker: IEF
+    name: iShares 7-10 Year Treasury Bond ETF
+    instrument_type: bond_etf
+    status: approved
+    allowed_profiles:
+      - moderado-defensivo
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+    review_due_date: "2099-12-31"
+    notes:
+      - "Duration intermedia. No apto para perfil conservador (duration > 2)."
+    reason_code: null
+
+  # ── Equity ETFs globales ───────────────────────────────────────────────
+  - ticker: VTI
+    name: Vanguard Total Stock Market ETF
+    instrument_type: equity_etf_global
+    status: approved
+    allowed_profiles:
+      - moderado-defensivo
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+    review_due_date: "2099-12-31"
+    notes:
+      - "ETF diversificado de equity US. No apto para conservador."
+    reason_code: null
+
+  - ticker: VEA
+    name: Vanguard FTSE Developed Markets ETF
+    instrument_type: equity_etf_global
+    status: approved
+    allowed_profiles:
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+      - moderado-defensivo
+    review_due_date: "2099-12-31"
+    notes:
+      - "Equity internacional desarrollado. Volatilidad incompatible con perfiles defensivos."
+    reason_code: null
+
+  # ── High yield ─────────────────────────────────────────────────────────
+  - ticker: HYG
+    name: iShares iBoxx High Yield Corporate Bond ETF
+    instrument_type: high_yield_bond
+    status: approved
+    allowed_profiles:
+      - moderado
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+      - moderado-defensivo
+    review_due_date: "2099-12-31"
+    notes:
+      - "Bonos high yield. Solo perfiles medios o superiores."
+    reason_code: null
+
+  # ── Thematic equity ────────────────────────────────────────────────────
+  - ticker: ARKK
+    name: ARK Innovation ETF
+    instrument_type: thematic_equity
+    status: watchlist
+    allowed_profiles:
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+      - moderado-defensivo
+      - moderado
+    review_due_date: "2099-12-31"
+    notes:
+      - "Watchlist por alta volatilidad y concentración temática."
+      - "Solo con justificación documentada del asesor."
+    reason_code: "GOV_006"
+
+  # ── Prohibido ──────────────────────────────────────────────────────────
+  - ticker: GBTC
+    name: Grayscale Bitcoin Trust
+    instrument_type: crypto_trust
+    status: prohibited
+    allowed_profiles: []
+    restricted_profiles: []
+    review_due_date: null
+    notes:
+      - "Prohibido por política institucional."
+    reason_code: "GOV_001"
+
+  # ── Suspendido temporalmente ───────────────────────────────────────────
+  - ticker: XLE
+    name: Energy Select Sector SPDR Fund
+    instrument_type: equity_etf_sector
+    status: temporarily_suspended
+    allowed_profiles: []
+    restricted_profiles: []
+    review_due_date: null
+    notes:
+      - "Suspendido temporalmente por revisión regulatoria del sector energético."
+    reason_code: "GOV_002"
+
+  # ── Restricted ─────────────────────────────────────────────────────────
+  - ticker: TLT
+    name: iShares 20+ Year Treasury Bond ETF
+    instrument_type: bond_etf
+    status: restricted
+    allowed_profiles:
+      - moderado-agresivo
+      - agresivo
+    restricted_profiles:
+      - conservador
+      - moderado-defensivo
+    review_due_date: "2099-12-31"
+    notes:
+      - "Restricted por duration extrema. Política M1 conservadora no admite."
+    reason_code: "GOV_004"
+
+  # ── Review vencida ─────────────────────────────────────────────────────
+  - ticker: STALE
+    name: Producto con revisión vencida
+    instrument_type: bond_etf
+    status: approved
+    allowed_profiles:
+      - moderado
+      - moderado-agresivo
+    restricted_profiles: []
+    review_due_date: "2020-01-01"
+    notes:
+      - "Producto con review vencida — debe ser re-aprobado por governance."
+    reason_code: "GOV_005"
