@@ -69,8 +69,7 @@ class AuditTrail:
         """Agrega un evento al trail. Falla si el trail ya está cerrado."""
         if self._closed:
             raise AuditTrailClosedError(
-                f"AuditTrail {self.session_id!r} ya está cerrado. "
-                "No se pueden agregar más eventos."
+                f"AuditTrail {self.session_id!r} ya está cerrado. No se pueden agregar más eventos."
             )
         if not event_type.strip():
             raise ValueError("event_type no puede estar vacío.")

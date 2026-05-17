@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-
 MIN_ADVISOR_COMMENT_LEN = 30
 
 
@@ -111,9 +110,7 @@ class ScriptedAdvisorInterface:
 
     def __init__(self, scripted_decisions: dict[str, Any]):
         if "profile_approval" not in scripted_decisions:
-            raise ValueError(
-                "advisor_script debe contener 'profile_approval'."
-            )
+            raise ValueError("advisor_script debe contener 'profile_approval'.")
         self._script = scripted_decisions
         self._advisor_id = scripted_decisions.get("advisor_id", "ADV-SCRIPTED")
 

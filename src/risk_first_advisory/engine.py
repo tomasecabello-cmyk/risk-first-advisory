@@ -38,7 +38,6 @@ from risk_first_advisory.human_layer.scripted_advisor_interface import (
 )
 from risk_first_advisory.kyc.models import FinancialGoal, KYCData
 
-
 MAX_FOLLOW_UP_ROUNDS = 3
 
 

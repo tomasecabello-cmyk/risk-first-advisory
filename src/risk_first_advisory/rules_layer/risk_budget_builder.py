@@ -18,7 +18,6 @@ from typing import Any
 from risk_first_advisory.kyc.models import FinancialGoal, KYCData
 from risk_first_advisory.models.risk_budget import RiskBudget
 
-
 # Parámetros base por perfil. Configuración en código por simplicidad de M1;
 # en producción esto vive en config/profiles_params.yaml.
 PROFILE_BASE_PARAMS: dict[str, dict[str, Any]] = {
@@ -170,9 +169,7 @@ class RiskBudgetBuilder:
                 )
             if budget_state["max_single_asset"] > 0.15:
                 budget_state["max_single_asset"] = 0.15
-                notes.append(
-                    "max_single_asset recortado a 15% por experiencia inversora 'basica'."
-                )
+                notes.append("max_single_asset recortado a 15% por experiencia inversora 'basica'.")
 
         # ── Regla 5: preferencia por productos simples ──────────────────
         if kyc.prefers_simple_products and budget_state["complex_products_allowed"]:

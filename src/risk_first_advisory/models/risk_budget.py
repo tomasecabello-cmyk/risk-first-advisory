@@ -36,13 +36,13 @@ class RiskBudget:
     profile_name: str
     target_volatility: float
     max_volatility: float
-    max_drawdown: float            # valor negativo
+    max_drawdown: float  # valor negativo
     min_liquidity: float
     max_equity: float
     max_high_yield: float
     max_single_asset: float
     max_sector_exposure: float
-    max_duration: float            # años
+    max_duration: float  # años
     complex_products_allowed: bool
     preferred_currency: str
     notes: list[str] = field(default_factory=list)
@@ -64,7 +64,9 @@ class RiskBudget:
                 f"max_drawdown debe ser <= 0 (es una pérdida). Recibido: {self.max_drawdown}."
             )
         if not 0.0 <= self.min_liquidity <= 1.0:
-            raise ValueError(f"min_liquidity debe estar en [0.0, 1.0]. Recibido: {self.min_liquidity}.")
+            raise ValueError(
+                f"min_liquidity debe estar en [0.0, 1.0]. Recibido: {self.min_liquidity}."
+            )
         for field_name in (
             "max_equity",
             "max_high_yield",
@@ -73,9 +75,7 @@ class RiskBudget:
         ):
             value = getattr(self, field_name)
             if not 0.0 <= value <= 1.0:
-                raise ValueError(
-                    f"{field_name} debe estar en [0.0, 1.0]. Recibido: {value}."
-                )
+                raise ValueError(f"{field_name} debe estar en [0.0, 1.0]. Recibido: {value}.")
         if self.max_duration < 0:
             raise ValueError(f"max_duration no puede ser negativo. Recibido: {self.max_duration}.")
 

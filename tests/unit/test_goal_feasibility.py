@@ -27,7 +27,6 @@ Valores pre-verificados antes de codificar los tests:
 
 import inspect
 import json
-import math
 
 import pytest
 
@@ -45,7 +44,6 @@ from risk_first_advisory.rules_layer.goal_feasibility import (
     FeasibilityStatus,
     GoalFeasibilityEngine,
 )
-
 
 # ── Helper ───────────────────────────────────────────────────────────────────
 
@@ -148,6 +146,7 @@ class TestCasoInviable:
 def MARGINAL_BAND_VALUE() -> float:
     """Devuelve el valor de la constante MARGINAL_BAND para las assertions."""
     from risk_first_advisory.rules_layer.goal_feasibility import MARGINAL_BAND
+
     return MARGINAL_BAND
 
 
@@ -184,8 +183,9 @@ class TestObjetivoYaAlcanzado:
 
     def test_target_mayor_que_initial_con_cero_retorno(self):
         """Capital inicial supera el objetivo: también required = 0."""
-        goal = make_goal(initial=200_000, target=150_000, horizon=5,
-                         contribution=5_000)  # necesario por validación
+        goal = make_goal(
+            initial=200_000, target=150_000, horizon=5, contribution=5_000
+        )  # necesario por validación
         report = GoalFeasibilityEngine().evaluate(goal, "moderado")
         assert report.required_return_annual == pytest.approx(0.0, abs=1e-9)
 
@@ -202,8 +202,7 @@ class TestCasoConAportes:
 
     def test_required_menor_con_aportes(self):
         goal_sin = make_goal(initial=100_000, target=160_000, horizon=5)
-        goal_con = make_goal(initial=100_000, target=160_000, horizon=5,
-                             contribution=5_000)
+        goal_con = make_goal(initial=100_000, target=160_000, horizon=5, contribution=5_000)
         engine = GoalFeasibilityEngine()
         r_sin = engine.evaluate(goal_sin, "moderado").required_return_annual
         r_con = engine.evaluate(goal_con, "moderado").required_return_annual
@@ -211,20 +210,17 @@ class TestCasoConAportes:
 
     def test_required_con_aportes_en_rango_razonable(self):
         # req ≈ 5.706 % → dentro de (4%, 10%)
-        goal = make_goal(initial=100_000, target=160_000, horizon=5,
-                         contribution=5_000)
+        goal = make_goal(initial=100_000, target=160_000, horizon=5, contribution=5_000)
         report = GoalFeasibilityEngine().evaluate(goal, "moderado")
         assert 0.04 < report.required_return_annual < 0.10
 
     def test_required_con_aportes_valor_exacto(self):
-        goal = make_goal(initial=100_000, target=160_000, horizon=5,
-                         contribution=5_000)
+        goal = make_goal(initial=100_000, target=160_000, horizon=5, contribution=5_000)
         report = GoalFeasibilityEngine().evaluate(goal, "moderado")
         assert report.required_return_annual == pytest.approx(0.05706, abs=0.0005)
 
     def test_gap_negativo_con_aportes(self):
-        goal = make_goal(initial=100_000, target=160_000, horizon=5,
-                         contribution=5_000)
+        goal = make_goal(initial=100_000, target=160_000, horizon=5, contribution=5_000)
         report = GoalFeasibilityEngine().evaluate(goal, "moderado")
         # gap = 5.706% - 7.0% = -1.294%
         assert report.gap < 0
@@ -323,8 +319,13 @@ class TestPerfilDesconocido:
     def test_perfiles_validos_no_lanzan_excepcion(self):
         goal = make_goal(initial=100_000, target=110_000, horizon=5)
         engine = GoalFeasibilityEngine()
-        for profile in ("conservador", "moderado-defensivo", "moderado",
-                        "moderado-agresivo", "agresivo"):
+        for profile in (
+            "conservador",
+            "moderado-defensivo",
+            "moderado",
+            "moderado-agresivo",
+            "agresivo",
+        ):
             report = engine.evaluate(goal, profile)
             assert isinstance(report, FeasibilityReport)
 
@@ -373,9 +374,7 @@ class TestSerializacion:
         d = self._report().to_dict()
         d2 = json.loads(json.dumps(d))
         assert d2["status"] == d["status"]
-        assert d2["required_return_annual"] == pytest.approx(
-            d["required_return_annual"], rel=1e-9
-        )
+        assert d2["required_return_annual"] == pytest.approx(d["required_return_annual"], rel=1e-9)
 
     def test_to_dict_no_contiene_objetos_enum(self):
         """El dict no debe contener instancias de Enum — solo str."""
@@ -387,11 +386,10 @@ class TestSerializacion:
         """Para status UNDETERMINED, los NaN se convierten a None en to_dict."""
         # Usamos un engine con un perfil custom y un goal físicamente imposible
         # (required > 500% anual)
-        engine = GoalFeasibilityEngine(
-            achievable_returns={"super-imposible": 0.03}
-        )
+        engine = GoalFeasibilityEngine(achievable_returns={"super-imposible": 0.03})
         # Con techo de bisección en 500%, un goal absurdo fuerza UNDETERMINED
         from risk_first_advisory.rules_layer.goal_feasibility import BISECTION_MAX_RATE
+
         goal_absurdo = FinancialGoal(
             initial_capital_usd=1.0,
             target_capital_usd=(1.0 + BISECTION_MAX_RATE) ** 10 * 10,  # > FV at max
@@ -417,13 +415,16 @@ class TestSerializacion:
 class TestDisclaimer:
     """El disclaimer debe existir y ser el texto exacto en todos los reportes."""
 
-    @pytest.mark.parametrize("profile,initial,target,horizon", [
-        ("conservador", 100_000, 105_000, 3),
-        ("moderado", 100_000, 200_000, 3),
-        ("agresivo", 100_000, 110_000, 5),
-        ("moderado-defensivo", 500_000, 550_000, 4),
-        ("moderado-agresivo", 200_000, 400_000, 8),
-    ])
+    @pytest.mark.parametrize(
+        "profile,initial,target,horizon",
+        [
+            ("conservador", 100_000, 105_000, 3),
+            ("moderado", 100_000, 200_000, 3),
+            ("agresivo", 100_000, 110_000, 5),
+            ("moderado-defensivo", 500_000, 550_000, 4),
+            ("moderado-agresivo", 200_000, 400_000, 8),
+        ],
+    )
     def test_disclaimer_siempre_presente_y_no_vacio(
         self, profile: str, initial: float, target: float, horizon: int
     ) -> None:

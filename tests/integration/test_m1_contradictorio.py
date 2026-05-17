@@ -36,7 +36,6 @@ from risk_first_advisory.kyc.models import (
     KYCData,
 )
 
-
 FIXTURE_PATH = (
     Path(__file__).parent.parent
     / "fixtures"
@@ -190,10 +189,7 @@ def test_preliminary_y_approved_son_objetos_distintos(m1_result):
     assert (
         m1_result.preliminary_profile_initial.profile_name
         != m1_result.approved_profile.profile_name
-    ), (
-        "El approved_profile debe diferir del preliminary_profile_initial "
-        "en este caso de prueba."
-    )
+    ), "El approved_profile debe diferir del preliminary_profile_initial en este caso de prueba."
     # Y aunque coincida con el revised, son objetos de tipos distintos:
     assert type(m1_result.preliminary_profile_initial).__name__ == "PreliminaryProfile"
     assert type(m1_result.approved_profile).__name__ == "ApprovedProfile"
@@ -308,10 +304,7 @@ def test_expected_outcome_del_fixture_coincide_con_resultado(m1_result, fixture_
     )
     assert m1_result.approved_profile.profile_name == expected["approved_profile"]
     assert m1_result.advisor_modified_profile == expected["advisor_modified_profile"]
-    assert (
-        m1_result.preliminary_profile_initial.binding_dimension
-        == expected["binding_dimension"]
-    )
+    assert m1_result.preliminary_profile_initial.binding_dimension == expected["binding_dimension"]
     assert (
         len(m1_result.preliminary_profile_initial.detected_contradictions)
         == expected["contradictions_count_initial"]

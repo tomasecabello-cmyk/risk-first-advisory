@@ -31,7 +31,6 @@ from risk_first_advisory.rules_layer.risk_budget_builder import (
     RiskBudgetBuilder,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
@@ -48,8 +47,8 @@ def _build_kyc(**overrides) -> KYCData:
         time_horizon_years=10,
         liquidity_need_pct=0.0,
         experience=InvestorExperience.MODERATE,
-        emotional_loss_tolerance_pct=50.0,   # alto: no dispara restricción
-        financial_loss_capacity_pct=50.0,    # alto: no dispara restricción
+        emotional_loss_tolerance_pct=50.0,  # alto: no dispara restricción
+        financial_loss_capacity_pct=50.0,  # alto: no dispara restricción
         preferred_currency="USD",
         needs_income=False,
         prefers_simple_products=False,
@@ -300,9 +299,7 @@ class TestCapacidadFinanciera:
             emotional_loss_tolerance_pct=50.0,
         )
         b = RiskBudgetBuilder().build("moderado", kyc, _build_goal(horizon_years=10))
-        assert any(
-            "capacidad" in n.lower() or "capacity" in n.lower() for n in b.notes
-        )
+        assert any("capacidad" in n.lower() or "capacity" in n.lower() for n in b.notes)
 
     def test_capacidad_mayor_no_modifica_drawdown(self):
         kyc = _build_neutral_kyc_for_profile(
@@ -473,12 +470,8 @@ class TestIndependenciaDeDeclaredReturnExpectation:
         assert b_sin.to_dict() == b_bajo.to_dict()
 
     def test_declared_return_no_modifica_volatilidad(self):
-        kyc_a = _build_neutral_kyc_for_profile(
-            "moderado", declared_return_expectation_pct=0.50
-        )
-        kyc_b = _build_neutral_kyc_for_profile(
-            "moderado", declared_return_expectation_pct=None
-        )
+        kyc_a = _build_neutral_kyc_for_profile("moderado", declared_return_expectation_pct=0.50)
+        kyc_b = _build_neutral_kyc_for_profile("moderado", declared_return_expectation_pct=None)
         b_a = RiskBudgetBuilder().build("moderado", kyc_a, _build_goal(horizon_years=10))
         b_b = RiskBudgetBuilder().build("moderado", kyc_b, _build_goal(horizon_years=10))
         assert b_a.target_volatility == b_b.target_volatility
@@ -615,7 +608,7 @@ class TestCombinacionDeReglas:
 
         assert b.profile_name == "moderado"
         assert b.min_liquidity == pytest.approx(0.25)
-        assert b.max_duration == pytest.approx(3.0)        # horizonte medio
+        assert b.max_duration == pytest.approx(3.0)  # horizonte medio
         assert b.complex_products_allowed is False
         assert b.max_single_asset <= 0.15
         # tolerancia emocional 10% → drawdown debe estar acotado a -0.10

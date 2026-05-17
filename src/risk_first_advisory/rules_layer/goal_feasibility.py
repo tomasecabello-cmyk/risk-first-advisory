@@ -32,12 +32,11 @@ Clasificación:
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from risk_first_advisory.kyc.models import FinancialGoal
-
 
 # ── Constantes públicas ──────────────────────────────────────────────────────
 
@@ -58,13 +57,14 @@ DEFAULT_ACHIEVABLE_RETURNS: dict[str, float] = {
 
 # ── Parámetros internos ──────────────────────────────────────────────────────
 
-MARGINAL_BAND: float = 0.015    # ±1.5 pp definen la zona marginal
+MARGINAL_BAND: float = 0.015  # ±1.5 pp definen la zona marginal
 BISECTION_MAX_RATE: float = 5.0  # 500 % — techo absurdo; si no alcanza → UNDETERMINED
 BISECTION_TOLERANCE: float = 1e-9
 BISECTION_MAX_ITER: int = 200
 
 
 # ── Modelos de output ────────────────────────────────────────────────────────
+
 
 class FeasibilityStatus(str, Enum):
     VIABLE = "viable"
@@ -106,6 +106,7 @@ class FeasibilityReport:
 
         Los valores NaN (caso UNDETERMINED) se convierten a None.
         """
+
         def _safe(v: float) -> float | None:
             return None if (isinstance(v, float) and math.isnan(v)) else v
 
@@ -122,6 +123,7 @@ class FeasibilityReport:
 
 
 # ── Motor principal ──────────────────────────────────────────────────────────
+
 
 class GoalFeasibilityEngine:
     """
@@ -140,8 +142,7 @@ class GoalFeasibilityEngine:
                                 DEFAULT_ACHIEVABLE_RETURNS.
         """
         self._achievable: dict[str, float] = (
-            achievable_returns if achievable_returns is not None
-            else DEFAULT_ACHIEVABLE_RETURNS
+            achievable_returns if achievable_returns is not None else DEFAULT_ACHIEVABLE_RETURNS
         )
 
     def evaluate(
@@ -338,6 +339,7 @@ class GoalFeasibilityEngine:
 
 
 # ── Excepción interna ────────────────────────────────────────────────────────
+
 
 class _ImpossibleGoalError(Exception):
     """Objetivo no alcanzable numéricamente dentro del rango de bisección."""

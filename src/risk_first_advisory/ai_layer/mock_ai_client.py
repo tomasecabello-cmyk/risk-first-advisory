@@ -98,9 +98,7 @@ class MockAIClient:
 
     def __init__(self, scripted_responses: dict[str, Any]):
         if "initial_profile_response" not in scripted_responses:
-            raise ValueError(
-                "ai_script debe contener 'initial_profile_response'."
-            )
+            raise ValueError("ai_script debe contener 'initial_profile_response'.")
         self._script = scripted_responses
         self._initial_call_count = 0
         self._revised_call_count = 0

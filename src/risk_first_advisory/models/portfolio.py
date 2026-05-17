@@ -18,7 +18,6 @@ en etapas posteriores del flujo.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 
 class PortfolioStatus(str, Enum):
@@ -42,7 +41,7 @@ class PortfolioCandidate:
     weights: dict[str, float]
     status: PortfolioStatus = PortfolioStatus.GENERATED
     generated_at: datetime = field(default_factory=datetime.utcnow)
-    discard_reason: Optional[str] = None
+    discard_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not self.variant.strip():
