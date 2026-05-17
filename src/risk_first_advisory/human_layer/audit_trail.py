@@ -13,7 +13,7 @@ generación y aprobación debe quedar registrada acá.
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -52,7 +52,7 @@ class AuditTrail:
     session_id: str
     client_id: str
     advisor_id: str
-    started_at_utc: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    started_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     _events: list[AuditEvent] = field(default_factory=list, repr=False)
     _closed: bool = field(default=False, repr=False)
     _closed_at_utc: str | None = field(default=None, repr=False)
@@ -76,7 +76,7 @@ class AuditTrail:
             raise ValueError("event_type no puede estar vacío.")
         event = AuditEvent(
             event_type=event_type,
-            timestamp_utc=datetime.utcnow().isoformat(),
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
             data=data if data is not None else {},
         )
         self._events.append(event)
@@ -86,7 +86,7 @@ class AuditTrail:
         if self._closed:
             return  # idempotente
         self._closed = True
-        self._closed_at_utc = datetime.utcnow().isoformat()
+        self._closed_at_utc = datetime.now(timezone.utc).isoformat()
 
     @property
     def is_closed(self) -> bool:

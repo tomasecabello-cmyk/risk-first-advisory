@@ -17,7 +17,7 @@ quede registrada correctamente en el audit trail.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -31,7 +31,7 @@ class FollowUpResponse:
     question: str
     answer: str
     answered_by: str  # "advisor" | "client_via_advisor"
-    timestamp_utc: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,7 +60,7 @@ class ApprovedProfile:
     original_profile: str  # el preliminary_profile INICIAL que la IA propuso
     advisor_id: str
     advisor_comment: str
-    approved_at_utc: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    approved_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __post_init__(self) -> None:
         if not self.profile_name.strip():
