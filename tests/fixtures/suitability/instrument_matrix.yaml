@@ -1,0 +1,357 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Matriz de suitability — M1.
+#
+# Combinaciones (instrument_type, profile_name) con su status, max_allocation,
+# requires_advisor_note y reason_code opcional.
+#
+# Si una combinación no está acá, evaluate() devuelve NOT_ALLOWED sintético
+# con reason_code SUITABILITY_RULE_MISSING.
+# ──────────────────────────────────────────────────────────────────────────
+
+rules:
+
+  # ── money_market: allowed para todos ────────────────────────────────────
+  - instrument_type: money_market
+    profile_name: conservador
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes:
+      - "Núcleo de la cartera conservadora."
+
+  - instrument_type: money_market
+    profile_name: moderado-defensivo
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: money_market
+    profile_name: moderado
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: money_market
+    profile_name: moderado-agresivo
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: money_market
+    profile_name: agresivo
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  # ── bond_etf: allowed en perfiles bajos/medios ──────────────────────────
+  - instrument_type: bond_etf
+    profile_name: conservador
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes:
+      - "Renta fija core para perfil conservador."
+
+  - instrument_type: bond_etf
+    profile_name: moderado-defensivo
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: bond_etf
+    profile_name: moderado
+    status: allowed
+    max_allocation: 1.0
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: bond_etf
+    profile_name: moderado-agresivo
+    status: limited
+    max_allocation: 0.60
+    requires_advisor_note: false
+    reason_code: null
+    notes:
+      - "Cap natural en perfiles agresivos para no diluir exposición a equity."
+
+  - instrument_type: bond_etf
+    profile_name: agresivo
+    status: limited
+    max_allocation: 0.40
+    requires_advisor_note: false
+    reason_code: null
+    notes:
+      - "Cap conservador en perfil agresivo."
+
+  # ── equity_etf_global ──────────────────────────────────────────────────
+  - instrument_type: equity_etf_global
+    profile_name: conservador
+    status: limited
+    max_allocation: 0.10
+    requires_advisor_note: true
+    reason_code: null
+    notes:
+      - "Exposición mínima permitida con justificación del asesor."
+
+  - instrument_type: equity_etf_global
+    profile_name: moderado-defensivo
+    status: limited
+    max_allocation: 0.25
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: equity_etf_global
+    profile_name: moderado
+    status: allowed
+    max_allocation: 0.40
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: equity_etf_global
+    profile_name: moderado-agresivo
+    status: allowed
+    max_allocation: 0.60
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: equity_etf_global
+    profile_name: agresivo
+    status: allowed
+    max_allocation: 0.80
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  # ── high_yield_bond ────────────────────────────────────────────────────
+  - instrument_type: high_yield_bond
+    profile_name: conservador
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "High yield incompatible con perfil conservador."
+
+  - instrument_type: high_yield_bond
+    profile_name: moderado-defensivo
+    status: limited
+    max_allocation: 0.05
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: high_yield_bond
+    profile_name: moderado
+    status: limited
+    max_allocation: 0.10
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: high_yield_bond
+    profile_name: moderado-agresivo
+    status: limited
+    max_allocation: 0.15
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: high_yield_bond
+    profile_name: agresivo
+    status: limited
+    max_allocation: 0.25
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  # ── thematic_equity ────────────────────────────────────────────────────
+  - instrument_type: thematic_equity
+    profile_name: conservador
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Thematic equity incompatible con perfil conservador."
+
+  - instrument_type: thematic_equity
+    profile_name: moderado-defensivo
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Thematic equity incompatible con perfil moderado-defensivo."
+
+  - instrument_type: thematic_equity
+    profile_name: moderado
+    status: limited
+    max_allocation: 0.05
+    requires_advisor_note: true
+    reason_code: "SUIT_003"
+    notes:
+      - "Permitido con cap del 5% y nota justificatoria del asesor."
+
+  - instrument_type: thematic_equity
+    profile_name: moderado-agresivo
+    status: limited
+    max_allocation: 0.10
+    requires_advisor_note: true
+    reason_code: "SUIT_003"
+    notes:
+      - "Permitido con cap del 10% y nota justificatoria del asesor."
+
+  - instrument_type: thematic_equity
+    profile_name: agresivo
+    status: limited
+    max_allocation: 0.15
+    requires_advisor_note: true
+    reason_code: "SUIT_003"
+    notes:
+      - "Permitido con cap del 15% y nota justificatoria del asesor."
+
+  # ── crypto_trust: prohibido para todos en M1 ────────────────────────────
+  - instrument_type: crypto_trust
+    profile_name: conservador
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Crypto no aprobada en política M1."
+
+  - instrument_type: crypto_trust
+    profile_name: moderado-defensivo
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Crypto no aprobada en política M1."
+
+  - instrument_type: crypto_trust
+    profile_name: moderado
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Crypto no aprobada en política M1."
+
+  - instrument_type: crypto_trust
+    profile_name: moderado-agresivo
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Crypto no aprobada en política M1."
+
+  - instrument_type: crypto_trust
+    profile_name: agresivo
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Crypto no aprobada en política M1."
+
+  # ── sector_equity ──────────────────────────────────────────────────────
+  - instrument_type: sector_equity
+    profile_name: conservador
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Concentración sectorial incompatible con perfil conservador."
+
+  - instrument_type: sector_equity
+    profile_name: moderado-defensivo
+    status: limited
+    max_allocation: 0.05
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: sector_equity
+    profile_name: moderado
+    status: limited
+    max_allocation: 0.10
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: sector_equity
+    profile_name: moderado-agresivo
+    status: limited
+    max_allocation: 0.15
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: sector_equity
+    profile_name: agresivo
+    status: limited
+    max_allocation: 0.20
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  # ── long_duration_bond ─────────────────────────────────────────────────
+  - instrument_type: long_duration_bond
+    profile_name: conservador
+    status: not_allowed
+    max_allocation: 0.0
+    requires_advisor_note: false
+    reason_code: "SUIT_001"
+    notes:
+      - "Duration extrema incompatible con perfil conservador."
+
+  - instrument_type: long_duration_bond
+    profile_name: moderado-defensivo
+    status: limited
+    max_allocation: 0.10
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: long_duration_bond
+    profile_name: moderado
+    status: limited
+    max_allocation: 0.15
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: long_duration_bond
+    profile_name: moderado-agresivo
+    status: limited
+    max_allocation: 0.20
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
+
+  - instrument_type: long_duration_bond
+    profile_name: agresivo
+    status: limited
+    max_allocation: 0.25
+    requires_advisor_note: false
+    reason_code: null
+    notes: []
