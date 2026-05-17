@@ -55,10 +55,10 @@ class ESGExclusion:
     def __post_init__(self) -> None:
         if not self.excluded_item.strip():
             raise ValueError("excluded_item no puede estar vacío.")
-        if self.exclusion_type not in {"sector", "activity", "issuer", "country"}:
+        if self.exclusion_type not in {"sector", "activity", "issuer", "country","tag", "controversy"}:
             raise ValueError(
                 f"exclusion_type inválido: {self.exclusion_type!r}. "
-                "Opciones: sector, activity, issuer, country."
+                "Opciones: sector, activity, issuer, country, tag, controversy."
             )
 
 

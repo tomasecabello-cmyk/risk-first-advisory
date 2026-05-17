@@ -1,0 +1,147 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Metadata ESG por instrumento — M1.
+#
+# Cargada por ESGMetadataStore.from_yaml(). UNKNOWN_TEST no se incluye
+# adrede para que los tests verifiquen el camino de metadata faltante.
+# ──────────────────────────────────────────────────────────────────────────
+
+instruments:
+
+  - ticker: SGOV
+    issuer: BlackRock
+    sectors:
+      - Government
+    tags:
+      - cash
+      - treasury
+      - short_duration
+    esg_score: 80.0
+    carbon_intensity: 5.0
+    controversies: []
+    notes:
+      - "Treasuries de muy corto plazo. Bajo carbono y buen ESG."
+
+  - ticker: AGG
+    issuer: BlackRock
+    sectors:
+      - Government
+      - Corporate
+    tags:
+      - bond_etf
+      - diversified
+      - investment_grade
+    esg_score: 70.0
+    carbon_intensity: 30.0
+    controversies: []
+    notes:
+      - "ETF agregado de renta fija."
+
+  - ticker: VT
+    issuer: Vanguard
+    sectors:
+      - Equity_Global
+      - Technology
+      - Financials
+      - Healthcare
+      - Energy
+    tags:
+      - equity_etf
+      - diversified
+      - global
+    esg_score: 60.0
+    carbon_intensity: 120.0
+    controversies: []
+    notes:
+      - "Equity global diversificado. Carbono medio."
+
+  - ticker: VEA
+    issuer: Vanguard
+    sectors:
+      - Equity_Developed
+      - Technology
+      - Financials
+    tags:
+      - equity_etf
+      - developed_markets
+      - international
+    esg_score: 62.0
+    carbon_intensity: 110.0
+    controversies: []
+    notes:
+      - "Equity internacional de mercados desarrollados."
+
+  - ticker: HYG
+    issuer: BlackRock
+    sectors:
+      - Corporate
+    tags:
+      - bond_etf
+      - high_yield
+      - speculative_grade
+    esg_score: 45.0
+    carbon_intensity: 80.0
+    controversies: []
+    notes:
+      - "High yield corporativo. Mayor riesgo crediticio."
+
+  - ticker: ARKK
+    issuer: ARK Invest
+    sectors:
+      - Equity_Sector
+      - Technology
+    tags:
+      - thematic_equity
+      - innovation
+      - active
+    esg_score: 55.0
+    carbon_intensity: 70.0
+    controversies: []
+    notes:
+      - "Thematic equity activo. Alta concentración."
+
+  - ticker: XLE
+    issuer: State Street
+    sectors:
+      - Energy
+    tags:
+      - equity_etf
+      - sector
+      - fossil_fuels
+      - high_carbon
+    esg_score: 25.0
+    carbon_intensity: 850.0
+    controversies:
+      - climate_impact
+    notes:
+      - "Sector energético con fuerte exposición a combustibles fósiles."
+
+  - ticker: MO
+    issuer: Altria Group
+    sectors:
+      - Tobacco
+      - Consumer_Staples
+    tags:
+      - single_equity
+      - tobacco
+    esg_score: 30.0
+    carbon_intensity: 40.0
+    controversies:
+      - public_health
+    notes:
+      - "Tabacalera. Sector excluido por casi todas las políticas ESG."
+
+  - ticker: LMT
+    issuer: Lockheed Martin
+    sectors:
+      - Defense
+      - Industrials
+    tags:
+      - single_equity
+      - weapons
+      - defense
+    esg_score: 40.0
+    carbon_intensity: 60.0
+    controversies:
+      - weapons_manufacturing
+    notes:
+      - "Fabricante de armamento."
