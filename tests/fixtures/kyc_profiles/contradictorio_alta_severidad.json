@@ -1,0 +1,125 @@
+{
+  "client_id": "FIX-004",
+  "description": "Caso estrella del MVP: IA detecta contradicción alta, propone moderado-defensivo. Tras follow-up con contexto del asesor, se aprueba moderado. Demuestra que IA y asesor pueden diferir y queda todo auditado.",
+
+  "kyc": {
+    "age": 42,
+    "annual_income_usd": 120000,
+    "approx_net_worth_usd": 500000,
+    "investment_objective": "growth",
+    "time_horizon_years": 8,
+    "liquidity_need_pct": 0.20,
+    "experience": "moderada",
+    "emotional_loss_tolerance_pct": 8.0,
+    "financial_loss_capacity_pct": 25.0,
+    "preferred_currency": "USD",
+    "needs_income": false,
+    "prefers_simple_products": true,
+    "jurisdiction": "AR",
+    "declared_return_expectation_pct": 0.12,
+    "open_investment_goal": "Quiero crecer mi patrimonio pero no soportaría ver el portfolio caer mucho.",
+    "open_risk_reaction": "Si veo que cae 10% probablemente venda todo.",
+    "open_past_experience": "Tuve un fondo balanceado en 2020 y mantuve posiciones aunque vi caídas grandes.",
+    "open_concerns": ""
+  },
+
+  "esg_profile": {
+    "strictness_level": "light",
+    "hard_exclusions": [
+      {
+        "excluded_item": "Tobacco",
+        "exclusion_type": "sector",
+        "source": "client_explicit",
+        "rationale": "Restricción moral explícita del cliente."
+      }
+    ],
+    "soft_preferences": []
+  },
+
+  "financial_goal": {
+    "initial_capital_usd": 500000,
+    "target_capital_usd": 850000,
+    "horizon_years": 8,
+    "periodic_contribution_usd": 12000,
+    "contribution_frequency_years": 1.0,
+    "target_is_flexible": true,
+    "horizon_is_flexible": true
+  },
+
+  "ai_script": {
+    "initial_profile_response": {
+      "profile_name": "moderado-defensivo",
+      "confidence": 0.62,
+      "binding_dimension": "tolerance",
+      "risk_tolerance": "media-baja",
+      "risk_capacity": "media",
+      "risk_need": "media-alta",
+      "advisor_review_required": true,
+      "detected_contradictions": [
+        {
+          "code": "KYC_001",
+          "description": "Objetivo growth con tolerancia emocional baja (8%). El cliente declara que vendería ante una caída del 10%.",
+          "severity": "alta",
+          "suggested_follow_up": "¿El cliente prioriza preservar capital o aceptaría volatilidad para crecimiento?"
+        }
+      ],
+      "follow_up_questions": [
+        "¿El cliente prioriza preservar capital o aceptaría volatilidad para crecimiento?",
+        "¿Ha experimentado caídas reales en cartera anteriormente y cómo reaccionó?"
+      ]
+    },
+
+    "revised_profile_after_followup": {
+      "profile_name": "moderado",
+      "confidence": 0.81,
+      "binding_dimension": "tolerance",
+      "risk_tolerance": "media",
+      "risk_capacity": "media",
+      "risk_need": "media",
+      "advisor_review_required": true,
+      "detected_contradictions": [],
+      "follow_up_questions": []
+    }
+  },
+
+  "advisor_script": {
+    "advisor_id": "ADV-DEMO-001",
+    "follow_up_responses": [
+      {
+        "question": "¿El cliente prioriza preservar capital o aceptaría volatilidad para crecimiento?",
+        "answer": "Tras conversación, cliente aclara que su comentario sobre vender ante -10% fue una reacción exagerada. Acepta volatilidad moderada si entiende el horizonte de 8 años.",
+        "answered_by": "advisor"
+      },
+      {
+        "question": "¿Ha experimentado caídas reales en cartera anteriormente y cómo reaccionó?",
+        "answer": "Cliente atravesó 2020 con un fondo balanceado y mantuvo posiciones aunque vio caídas grandes. Su reacción real fue mejor de la que declara verbalmente.",
+        "answered_by": "advisor"
+      }
+    ],
+    "profile_approval": {
+      "decision": "approve_as_revised",
+      "approved_profile": "moderado",
+      "advisor_comment": "Tras follow-up, la tolerancia real del cliente es mayor a la declarada inicialmente. Su comportamiento documentado durante 2020 confirma que sostiene posiciones bajo estrés. Se aprueba moderado en lugar de moderado-defensivo."
+    }
+  },
+
+  "expected_outcome": {
+    "preliminary_profile_initial": "moderado-defensivo",
+    "preliminary_profile_revised": "moderado",
+    "approved_profile": "moderado",
+    "advisor_modified_profile": true,
+    "binding_dimension": "tolerance",
+    "contradictions_count_initial": 1,
+    "contradictions_count_after_followup": 0,
+    "follow_up_rounds_executed": 1,
+    "audit_events_expected": [
+      "session_started",
+      "ai_output_initial",
+      "follow_up_cycle_1_started",
+      "follow_up_cycle_1_completed",
+      "ai_output_revised",
+      "advisor_profile_approval",
+      "session_closed"
+    ]
+  }
+}
