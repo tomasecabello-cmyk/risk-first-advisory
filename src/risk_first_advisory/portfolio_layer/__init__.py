@@ -4,6 +4,32 @@ En M1 contiene PortfolioOptimizer con objetivos MIN_VARIANCE, MAX_RETURN y
 MAX_UTILITY. En sprints posteriores se agregará PortfolioGenerationCoordinator
 para generar múltiples carteras candidatas.
 """
+"""Capa C — portfolios.
+
+Contiene optimizador, coordinador de generación y compuerta de factibilidad
+pre-optimizer.
+"""
+from risk_first_advisory.portfolio_layer.feasibility import (
+    FC_MAX_SINGLE_ASSET_TOO_LOW,
+    FC_MIN_VOL_EXCEEDS_BUDGET,
+    FC_NO_ASSETS,
+    FC_TICKER_MISMATCH,
+    HIGH_CONCENTRATION_THRESHOLD,
+    LOW_DIVERSIFICATION_THRESHOLD,
+    PortfolioFeasibilityChecker,
+    PortfolioFeasibilityResult,
+    PortfolioFeasibilityStatus,
+    WARN_CONCENTRATION_REQUIRED,
+    WARN_LOW_DIVERSIFICATION,
+    WARN_MIN_VOL_UNDETERMINED,
+)
+
+from risk_first_advisory.portfolio_layer.generation import (
+    PortfolioCandidateSet,
+    PortfolioGenerationCoordinator,
+    PortfolioVariant,
+    RC_VARIANT_INFEASIBLE,
+)
 
 from risk_first_advisory.portfolio_layer.optimizer import (
     UTILITY_LAMBDA,
@@ -15,10 +41,26 @@ from risk_first_advisory.portfolio_layer.optimizer import (
 )
 
 __all__ = [
+    "FC_MAX_SINGLE_ASSET_TOO_LOW",
+    "FC_MIN_VOL_EXCEEDS_BUDGET",
+    "FC_NO_ASSETS",
+    "FC_TICKER_MISMATCH",
+    "HIGH_CONCENTRATION_THRESHOLD",
+    "LOW_DIVERSIFICATION_THRESHOLD",
     "OptimizationInput",
     "OptimizationObjective",
     "OptimizedPortfolio",
+    "PortfolioCandidateSet",
+    "PortfolioFeasibilityChecker",
+    "PortfolioFeasibilityResult",
+    "PortfolioFeasibilityStatus",
+    "PortfolioGenerationCoordinator",
     "PortfolioOptimizer",
+    "PortfolioVariant",
+    "RC_VARIANT_INFEASIBLE",
+    "WARN_CONCENTRATION_REQUIRED",
+    "WARN_LOW_DIVERSIFICATION",
+    "WARN_MIN_VOL_UNDETERMINED",
     "UTILITY_LAMBDA",
     "WEIGHT_CLEANUP_THRESHOLD",
 ]
