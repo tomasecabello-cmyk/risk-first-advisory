@@ -44,6 +44,7 @@ from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityMatrix,
 )
 from risk_first_advisory.rules_layer.product_governance import ApprovedProductUniverse
+from risk_first_advisory.reporting_layer import MarkdownReportGenerator
 from risk_first_advisory.workflow_layer import (
     AdvisoryWorkflowCoordinator,
     AdvisoryWorkflowResult,
@@ -459,7 +460,14 @@ def main() -> None:
         market_data_provider=market_data,
     )
 
-    # ── 4. Impresión del resultado ────────────────────────────────────
+    # ── 4. Generar informe Markdown ───────────────────────────────────
+    REPORTS_DIR = ROOT / "reports"
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORTS_DIR / "demo_advisory_report.md"
+    report = MarkdownReportGenerator().generate_from_workflow_result(result)
+    report.save(report_path)
+
+    # ── 5. Impresión del resultado ────────────────────────────────────
     _print_header(result)
     _print_goal_feasibility(result)
     _print_risk_budget(result)
@@ -471,6 +479,9 @@ def main() -> None:
         _print_blocked_explanation(result)
 
     _print_audit(result)
+
+    _subsection("Report")
+    print(f"- markdown_report: {report_path.relative_to(ROOT)}")
 
     print()
     print(LINE)

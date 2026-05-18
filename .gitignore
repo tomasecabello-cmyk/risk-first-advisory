@@ -11,3 +11,4 @@ dist/
 *.zip
 *.zip
 .claude/
+reports/
