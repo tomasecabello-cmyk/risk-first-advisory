@@ -1,10 +1,15 @@
 """Capa de datos de mercado.
 
-En M1 contiene `MockMarketDataProvider`, `DataQualityGate` y `ReturnEstimator`.
+En M1 contiene `MockMarketDataProvider`, `DataQualityGate`, `ReturnEstimator`
+y `CovarianceEngine`.
 En sprints posteriores se agregarán CSVMarketDataProvider y
 BloombergMarketDataProvider, todos implementando el mismo contrato de provider.
 """
 
+from risk_first_advisory.data_layer.covariance import (
+    CovarianceEngine,
+    CovarianceMatrix,
+)
 from risk_first_advisory.data_layer.data_quality import (
     LOW_LIQUIDITY_THRESHOLD,
     REASON_CRITICAL_FIELD_MISSING,
@@ -31,6 +36,8 @@ from risk_first_advisory.data_layer.return_estimator import (
 )
 
 __all__ = [
+    "CovarianceEngine",
+    "CovarianceMatrix",
     "CRITICAL_FIELDS",
     "DataQualityGate",
     "DataQualityResult",
