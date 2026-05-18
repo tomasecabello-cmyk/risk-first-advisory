@@ -61,6 +61,10 @@ from risk_first_advisory.kyc.models import (
     InvestorExperience,
     KYCData,
 )
+from risk_first_advisory.portfolio_layer.feasibility import (
+    PortfolioFeasibilityChecker,
+    PortfolioFeasibilityResult,
+)
 from risk_first_advisory.portfolio_layer.generation import (
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
@@ -467,6 +471,50 @@ def _print_covariance_summary(cm: CovarianceMatrix) -> None:
         )
 
 
+def _print_feasibility_report(report: PortfolioFeasibilityResult) -> None:
+    """
+    Imprime el diagnóstico de PortfolioFeasibilityChecker para el RiskBudget
+    aprobado original ANTES de invocar al coordinator. Hace explícito que la
+    detección de infactibilidad NO viene del solver: viene de una capa de
+    diagnóstico determinista y auditable.
+    """
+    _subsection("Portfolio Feasibility — Approved RiskBudget")
+    print(f"- status:                          {report.status.value}")
+    print(f"- is_feasible:                     {report.is_feasible}")
+    print(f"- asset_count:                     {report.asset_count}")
+    print(
+        "- required_min_single_asset_cap:   "
+        f"{report.required_min_single_asset_cap:.6f}"
+    )
+    print(
+        "- actual_max_single_asset:         "
+        f"{report.actual_max_single_asset:.6f}"
+    )
+    if report.min_achievable_volatility is None:
+        min_vol_str = "n/a (no se pudo determinar)"
+    else:
+        min_vol_str = f"{report.min_achievable_volatility:.6f}"
+    print(f"- min_achievable_volatility:       {min_vol_str}")
+    print(
+        "- max_allowed_volatility:          "
+        f"{report.max_allowed_volatility:.6f}"
+    )
+    print(
+        "- failed_checks:                   "
+        f"{report.failed_checks if report.failed_checks else '[]'}"
+    )
+    print(
+        "- warnings:                        "
+        f"{report.warnings if report.warnings else '[]'}"
+    )
+    if report.suggested_actions:
+        print("- suggested_actions:")
+        for action in report.suggested_actions:
+            print(f"    · {action}")
+    else:
+        print("- suggested_actions:               []")
+
+
 def _print_portfolios(candidate_set: PortfolioCandidateSet) -> None:
     _subsection("Generated Portfolios")
     print(f"- client_id:               {candidate_set.client_id}")
@@ -639,15 +687,28 @@ def main() -> None:
     covariance = CovarianceEngine().build(snapshots)
     _print_covariance_summary(covariance)
 
+    # ── PortfolioFeasibilityChecker sobre el RiskBudget APROBADO ─────
+    # Esta capa hace el diagnóstico ANTES de cualquier ajuste local del
+    # demo, y muestra explícitamente por qué el RB aprobado puede no ser
+    # factible con el universo final. El RB aprobado NO se modifica.
+    feasibility_checker = PortfolioFeasibilityChecker()
+    feasibility_report = feasibility_checker.evaluate(
+        return_estimates=estimates,
+        covariance_matrix=covariance,
+        risk_budget=risk_budget,
+    )
+    _print_feasibility_report(feasibility_report)
+
     # ── Generación de los 3 portfolios ────────────────────────────────
-    # Estrategia de robustez del demo:
-    #   1) Intento con el RiskBudget aprobado tal como vino.
-    #   2) Si falla por infeasibilidad, calculo un cap por activo mínimo
-    #      factible (1/n + ε) y un max_volatility ampliado a la vol mínima
-    #      alcanzable del universo + margen. El RiskBudget aprobado NO se
-    #      modifica; sólo se construye un budget "demo-only" derivado.
-    # En producción el flujo de infeasibilidad lo maneja la capa humana
-    # (4 caminos tipificados), no el script.
+    # Rama A (FEASIBLE): generamos con el RB aprobado tal como vino,
+    #                    sin demo adjustment.
+    # Rama B (INFEASIBLE): mantenemos el ajuste demo-only existente para
+    #                    poder visualizar carteras. El RB aprobado NO se
+    #                    modifica; solo construimos un budget paralelo
+    #                    para el demo.
+    # En producción la rama B disparaba la capa humana de infeasibility
+    # resolution (4 caminos tipificados). Acá la simulamos solo para que
+    # el demo pueda mostrar las 3 variantes.
     coordinator = PortfolioGenerationCoordinator()
 
     def _try_generate(rb_to_use):
@@ -660,19 +721,50 @@ def main() -> None:
         )
 
     candidate_set: PortfolioCandidateSet | None = None
-    demo_adjustment_notes: list[str] = []
     rb_used = risk_budget
 
-    try:
-        candidate_set = _try_generate(risk_budget)
-    except ValueError:
-        # Intento de relajación local SOLO para el demo.
+    if feasibility_report.is_feasible:
+        # Rama A — feasible: generamos directamente con el RB aprobado.
+        try:
+            candidate_set = _try_generate(risk_budget)
+        except ValueError as exc:
+            # Caso borde: pre-check del RB original pasó, pero el coordinator
+            # internamente deriva budgets más estrictos para DEFENSIVE y/o el
+            # solver falla. No aplicamos demo adjustment porque el contrato
+            # del usuario es: si is_feasible=True, no relajamos nada.
+            _section("PORTFOLIO GENERATION FAILED")
+            print(
+                "PortfolioFeasibilityChecker dictaminó FEASIBLE para el "
+                "RiskBudget aprobado, pero la generación falló igual:"
+            )
+            print(f"  {exc}")
+            print(
+                "Causa típica: la variante DEFENSIVE deriva un sub-budget "
+                "más estricto que el coordinator considera infactible "
+                "internamente, y el resto de las variantes también fallaron "
+                "en el solver."
+            )
+            _print_audit(m1_result)
+            return
+    else:
+        # Rama B — infeasible: mensaje claro + demo adjustment.
+        print()
+        print(
+            "Approved RiskBudget is not directly feasible with the final "
+            "optimizer universe."
+        )
+        print(
+            "El RiskBudget aprobado NO se modifica. Para que el demo pueda "
+            "mostrar carteras, construimos un budget paralelo DEMO-ONLY a "
+            "partir del diagnóstico anterior."
+        )
+
         n_final = len(estimates)
         min_feasible_cap = (1.0 / n_final) + 1e-3
 
         # Vol mínima alcanzable del universo: w = (1/n,...,1/n) como cota
         # superior conservadora de la vol mínima (puede ser menor con
-        # optimización, pero asegura factibilidad). Le sumamos 5pp de margen.
+        # optimización, pero asegura factibilidad). Sumamos margen.
         eq_w = [1.0 / n_final] * n_final
         cov = covariance.covariance
         eq_var = sum(
@@ -711,22 +803,23 @@ def main() -> None:
             ],
         )
         demo_adjustment_notes = [
-            "El RiskBudget aprobado original NO es factible con este "
-            f"universo de {n_final} instrumentos y vols mock.",
-            "Causas típicas:",
-            f"  · max_single_asset ({risk_budget.max_single_asset:.4f}) "
-            f"< 1/N ({1.0/n_final:.4f}) → sum(w)=1 imposible.",
-            f"  · max_volatility ({risk_budget.max_volatility:.4f}) "
-            f"< vol mínima alcanzable del universo (≈ {eq_vol:.4f}).",
+            "Causas detectadas por el pre-check:",
+            *(
+                f"  · {fc}"
+                for fc in feasibility_report.failed_checks
+            ),
             "Ajustes locales del demo (NO modifican el RiskBudget aprobado):",
-            f"  · max_single_asset → {new_max_single:.4f}",
-            f"  · max_volatility   → {demo_max_vol:.4f}",
-            f"  · target_volatility → {new_target_vol:.4f}",
+            f"  · max_single_asset → {new_max_single:.4f} "
+            f"(original {risk_budget.max_single_asset:.4f})",
+            f"  · max_volatility   → {demo_max_vol:.4f} "
+            f"(original {risk_budget.max_volatility:.4f})",
+            f"  · target_volatility → {new_target_vol:.4f} "
+            f"(original {risk_budget.target_volatility:.4f})",
             "En producción esto dispara la capa de infeasibility "
             "(4 caminos tipificados).",
         ]
 
-        _subsection("Demo Adjustment")
+        _subsection("Demo Adjustment (DEMO-ONLY)")
         for line in demo_adjustment_notes:
             print(f"  {line}")
 
@@ -736,8 +829,8 @@ def main() -> None:
         except ValueError as exc:
             _section("PORTFOLIO GENERATION FAILED")
             print(
-                "Ni siquiera con un budget relajado se obtuvo solución "
-                f"factible: {exc}"
+                "Ni siquiera con un budget relajado DEMO-ONLY se obtuvo "
+                f"solución factible: {exc}"
             )
             _print_audit(m1_result)
             return
@@ -746,8 +839,10 @@ def main() -> None:
 
     if rb_used is not risk_budget:
         print()
-        print("(*) Portfolios generados con RiskBudget demo-relajado. "
-              "El RiskBudget aprobado original no fue modificado.")
+        print(
+            "(*) Portfolios generados con RiskBudget DEMO-ONLY relajado. "
+            "El RiskBudget aprobado original no fue modificado."
+        )
 
     # ── Audit final ───────────────────────────────────────────────────
     _print_audit(m1_result)
