@@ -13,6 +13,13 @@ from risk_first_advisory.data_layer.covariance import CovarianceEngine
 from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 from risk_first_advisory.data_layer.return_estimator import ReturnEstimate
 from risk_first_advisory.models.risk_budget import RiskBudget
+from risk_first_advisory.portfolio_layer.feasibility import (
+    FC_MAX_SINGLE_ASSET_TOO_LOW,
+    FC_MIN_VOL_EXCEEDS_BUDGET,
+    PortfolioFeasibilityChecker,
+    PortfolioFeasibilityResult,
+    PortfolioFeasibilityStatus,
+)
 from risk_first_advisory.portfolio_layer.generation import (
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
@@ -22,6 +29,7 @@ from risk_first_advisory.portfolio_layer.generation import (
 from risk_first_advisory.portfolio_layer.optimizer import (
     OptimizationObjective,
     OptimizedPortfolio,
+    PortfolioOptimizer,
 )
 
 
@@ -407,3 +415,348 @@ class TestPortfolioGenerationCoordinator:
         )
         with pytest.raises(ValueError, match="factible"):
             self.coordinator.generate("CLI-003", "Moderate", estimates, cm, rb)
+
+
+# ---------------------------------------------------------------------------
+# Tests de integración con PortfolioFeasibilityChecker
+# ---------------------------------------------------------------------------
+
+class _SpyOptimizer:
+    """Optimizer spy: registra cuántas veces se llamó y con qué objetivos."""
+
+    def __init__(self, delegate: PortfolioOptimizer | None = None):
+        self.delegate = delegate or PortfolioOptimizer()
+        self.calls: list[OptimizationObjective] = []
+
+    def optimize(self, input_data):
+        self.calls.append(input_data.objective)
+        return self.delegate.optimize(input_data)
+
+
+class _FakeFeasibilityChecker:
+    """
+    Feasibility checker mockeado para probar el flujo del coordinator
+    sin depender del solver auxiliar interno.
+
+    `result_by_call` se consume en orden: cada llamada a `evaluate` devuelve
+    el siguiente resultado. Si se agota, levanta IndexError.
+    """
+
+    def __init__(self, results: list[PortfolioFeasibilityResult]):
+        self.results = list(results)
+        self.evaluate_calls = 0
+
+    def evaluate(self, return_estimates, covariance_matrix, risk_budget):
+        result = self.results[self.evaluate_calls]
+        self.evaluate_calls += 1
+        return result
+
+
+def _make_feasibility(
+    status: PortfolioFeasibilityStatus,
+    asset_count: int = 4,
+    failed_checks=None,
+    warnings=None,
+    suggested_actions=None,
+    notes=None,
+) -> PortfolioFeasibilityResult:
+    return PortfolioFeasibilityResult(
+        status=status,
+        is_feasible=(status != PortfolioFeasibilityStatus.INFEASIBLE),
+        asset_count=asset_count,
+        required_min_single_asset_cap=(1.0 / asset_count) if asset_count else 0.0,
+        actual_max_single_asset=0.40,
+        min_achievable_volatility=0.05,
+        max_allowed_volatility=0.20,
+        failed_checks=failed_checks or [],
+        warnings=warnings or [],
+        suggested_actions=suggested_actions or [],
+        notes=notes or [],
+    )
+
+
+class TestCoordinatorIntegratesFeasibilityChecker:
+    """
+    Suite enfocada en la integración del pre-check de factibilidad.
+
+    Usa _FakeFeasibilityChecker para forzar exactamente el estado deseado
+    en cada variante, y _SpyOptimizer para verificar qué variantes
+    efectivamente llegaron al optimizer.
+    """
+
+    def setup_method(self):
+        self.estimates, self.cm, self.rb = _build_inputs()
+
+    # ── Caso: DEFENSIVE infactible por max_single_asset ──────────────────
+
+    def test_infeasible_defensive_skips_optimizer_call(self):
+        """Cuando DEFENSIVE es infeasible por pre-check, el optimizer NO debe llamarse para esa variante."""
+        spy = _SpyOptimizer()
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+                suggested_actions=["sugerencia X"],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(
+            feasibility_checker=fake_checker,
+            optimizer=spy,
+        )
+
+        result = coordinator.generate(
+            "CLI-INTEG-001", "Moderate", self.estimates, self.cm, self.rb
+        )
+
+        # DEFENSIVE no debe estar en candidates.
+        assert PortfolioVariant.DEFENSIVE not in result.candidates
+        # El optimizer fue llamado solo 2 veces (BALANCED y GROWTH), nunca MIN_VARIANCE.
+        assert len(spy.calls) == 2
+        assert OptimizationObjective.MIN_VARIANCE not in spy.calls
+        assert OptimizationObjective.MAX_UTILITY in spy.calls
+        assert OptimizationObjective.MAX_RETURN in spy.calls
+
+    def test_infeasible_defensive_reason_codes_include_variant_infeasible(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-002", "Moderate", self.estimates, self.cm, self.rb
+        )
+        assert RC_VARIANT_INFEASIBLE in result.reason_codes
+
+    def test_infeasible_defensive_reason_codes_include_specific_failed_check(self):
+        """Los failed_checks del feasibility deben acumularse en reason_codes del candidate set."""
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-003", "Moderate", self.estimates, self.cm, self.rb
+        )
+        assert FC_MAX_SINGLE_ASSET_TOO_LOW in result.reason_codes
+
+    def test_infeasible_defensive_notes_mention_pre_check(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-004", "Moderate", self.estimates, self.cm, self.rb
+        )
+        joined_notes = " ".join(result.notes).lower()
+        assert "pre-check" in joined_notes or "factibilidad" in joined_notes
+        assert "defensive" in joined_notes.lower() or "DEFENSIVE" in " ".join(result.notes)
+
+    def test_infeasible_defensive_notes_include_suggested_actions(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+                suggested_actions=["Aumentar max_single_asset o ampliar universo."],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-005", "Moderate", self.estimates, self.cm, self.rb
+        )
+        joined = " ".join(result.notes)
+        assert "Aumentar max_single_asset" in joined
+
+    # ── Caso: WARNING — la variante igual se intenta ─────────────────────
+
+    def test_warning_variant_is_still_optimized(self):
+        """Cuando feasibility devuelve WARNING, la variante debe llamar al optimizer y aparecer en candidates."""
+        spy = _SpyOptimizer()
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.WARNING,
+                warnings=["PORTFOLIO_CONCENTRATION_REQUIRED"],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(
+            feasibility_checker=fake_checker,
+            optimizer=spy,
+        )
+        result = coordinator.generate(
+            "CLI-INTEG-006", "Moderate", self.estimates, self.cm, self.rb
+        )
+        # DEFENSIVE entra al optimizer (status WARNING ≠ INFEASIBLE).
+        assert PortfolioVariant.DEFENSIVE in result.candidates
+        assert OptimizationObjective.MIN_VARIANCE in spy.calls
+        assert len(spy.calls) == 3
+
+    def test_warning_variant_propagates_warnings_to_notes(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.WARNING,
+                warnings=["PORTFOLIO_CONCENTRATION_REQUIRED"],
+            ),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-007", "Moderate", self.estimates, self.cm, self.rb
+        )
+        joined = " ".join(result.notes)
+        assert "PORTFOLIO_CONCENTRATION_REQUIRED" in joined
+
+    # ── Caso: FEASIBLE — generación normal ────────────────────────────────
+
+    def test_all_feasible_generates_three_variants_via_optimizer(self):
+        spy = _SpyOptimizer()
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(
+            feasibility_checker=fake_checker,
+            optimizer=spy,
+        )
+        result = coordinator.generate(
+            "CLI-INTEG-008", "Moderate", self.estimates, self.cm, self.rb
+        )
+        assert result.count == 3
+        assert len(spy.calls) == 3
+
+    def test_all_feasible_no_infeasible_reason_codes(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        result = coordinator.generate(
+            "CLI-INTEG-009", "Moderate", self.estimates, self.cm, self.rb
+        )
+        assert RC_VARIANT_INFEASIBLE not in result.reason_codes
+
+    # ── Caso: TODAS infactibles por pre-check ─────────────────────────────
+
+    def test_all_pre_check_infeasible_raises_value_error_and_skips_optimizer(self):
+        spy = _SpyOptimizer()
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+            _make_feasibility(
+                PortfolioFeasibilityStatus.INFEASIBLE,
+                failed_checks=[FC_MAX_SINGLE_ASSET_TOO_LOW],
+            ),
+        ])
+        coordinator = PortfolioGenerationCoordinator(
+            feasibility_checker=fake_checker,
+            optimizer=spy,
+        )
+        with pytest.raises(ValueError, match="factible"):
+            coordinator.generate(
+                "CLI-INTEG-010", "Moderate", self.estimates, self.cm, self.rb
+            )
+        # El optimizer nunca debe haber sido llamado.
+        assert spy.calls == []
+
+    # ── Caso: pre-check OK pero optimizer falla igual ─────────────────────
+
+    class _AlwaysFailingOptimizer:
+        """Optimizer que siempre lanza ValueError, simulando un solver que falla
+        pese a que el pre-check considere factible el problema."""
+
+        def __init__(self):
+            self.calls: list[OptimizationObjective] = []
+
+        def optimize(self, input_data):
+            self.calls.append(input_data.objective)
+            raise ValueError("solver failed: synthetic test failure")
+
+    def test_optimizer_failure_after_feasible_pre_check_is_handled(self):
+        """Si el pre-check pasa pero el optimizer falla, la variante se omite
+        con reason_code y nota que mencione el solver."""
+        failing = self._AlwaysFailingOptimizer()
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(
+            feasibility_checker=fake_checker,
+            optimizer=failing,
+        )
+        with pytest.raises(ValueError, match="factible"):
+            coordinator.generate(
+                "CLI-INTEG-011", "Moderate", self.estimates, self.cm, self.rb
+            )
+        # El optimizer fue llamado 3 veces (cada variante pasó el pre-check
+        # y falló en el solver).
+        assert len(failing.calls) == 3
+
+    # ── Caso: el checker se llama una vez por variante ────────────────────
+
+    def test_feasibility_checker_called_once_per_variant(self):
+        fake_checker = _FakeFeasibilityChecker(results=[
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+            _make_feasibility(PortfolioFeasibilityStatus.FEASIBLE),
+        ])
+        coordinator = PortfolioGenerationCoordinator(feasibility_checker=fake_checker)
+        coordinator.generate(
+            "CLI-INTEG-012", "Moderate", self.estimates, self.cm, self.rb
+        )
+        assert fake_checker.evaluate_calls == 3
+
+    # ── Caso real: smoke con checker real, sin mocks ──────────────────────
+
+    def test_real_checker_low_cap_infeasible_for_defensive(self):
+        """Smoke con PortfolioFeasibilityChecker real: con cap muy bajo
+        en el budget aprobado, las variantes con esos caps disparan
+        PORTFOLIO_MAX_SINGLE_ASSET_TOO_LOW.
+
+        Detalle de implementación que validamos: la DEFENSIVE deriva su
+        propio cap reduciendo el original, así que si el ORIGINAL ya es
+        infeasible, la DEFENSIVE también lo será.
+        """
+        # 4 activos con max_single_asset = 0.10 → 4*0.10=0.40 < 1.0 → todas
+        # las variantes (incluida DEFENSIVE que deriva un cap aún menor)
+        # disparan FC_MAX_SINGLE_ASSET_TOO_LOW.
+        estimates, cm, rb = _build_inputs(
+            max_single_asset=0.10,
+            max_volatility=0.20,
+            target_volatility=0.12,
+        )
+        spy = _SpyOptimizer()
+        coordinator = PortfolioGenerationCoordinator(optimizer=spy)
+        with pytest.raises(ValueError, match="factible"):
+            coordinator.generate(
+                "CLI-INTEG-013", "Moderate", estimates, cm, rb
+            )
+        # El optimizer NUNCA debe haber sido llamado: el pre-check
+        # cortocircuitó todas las variantes.
+        assert spy.calls == []

@@ -9,8 +9,31 @@ Variantes:
 Regla central: las 3 carteras surgen del risk_budget aprobado. No se
 inventan restricciones incompatibles ni se ignora el perfil aprobado.
 
-Si una variante no es factible se omite con reason_code; si ninguna lo
-es, se levanta ValueError.
+INVARIANTE NUEVO: el optimizer NO es la primera capa que detecta
+infactibilidad. Antes de cada llamada al optimizer, el coordinator corre
+PortfolioFeasibilityChecker sobre la combinación
+(return_estimates, covariance_matrix, budget de la variante). Si el
+pre-check devuelve INFEASIBLE, la variante se omite SIN invocar al
+optimizer y se registran:
+    - reason_code PORTFOLIO_VARIANT_INFEASIBLE en el candidate set
+    - reason_codes específicos del feasibility (p. ej.
+      PORTFOLIO_MAX_SINGLE_ASSET_TOO_LOW), acumulados sin reemplazar
+    - notas legibles que mencionan "pre-check de factibilidad"
+
+Esto produce mensajes accionables para el asesor en lugar de los
+mensajes crípticos del solver.
+
+Si el pre-check devuelve WARNING, la variante SÍ se intenta optimizar:
+WARNING significa "factible pero degradado" (universo chico,
+concentración alta, vol no determinada). Los warnings del pre-check se
+propagan a las notas del candidate set para auditoría.
+
+Si una variante pasa el pre-check pero el optimizer falla de todas formas
+(por numerología del solver o restricciones blandas no capturadas por el
+pre-check), se mantiene el comportamiento previo: omitir variante con
+RC_VARIANT_INFEASIBLE y nota con el mensaje del optimizer.
+
+Si ninguna variante queda disponible, se levanta ValueError.
 """
 
 from __future__ import annotations
@@ -22,6 +45,11 @@ from typing import Any
 from risk_first_advisory.data_layer.covariance import CovarianceMatrix
 from risk_first_advisory.data_layer.return_estimator import ReturnEstimate
 from risk_first_advisory.models.risk_budget import RiskBudget
+from risk_first_advisory.portfolio_layer.feasibility import (
+    PortfolioFeasibilityChecker,
+    PortfolioFeasibilityResult,
+    PortfolioFeasibilityStatus,
+)
 from risk_first_advisory.portfolio_layer.optimizer import (
     OptimizationInput,
     OptimizationObjective,
@@ -162,13 +190,38 @@ class PortfolioCandidateSet:
 
 class PortfolioGenerationCoordinator:
     """
-    Genera hasta 3 carteras candidatas para un cliente usando PortfolioOptimizer.
+    Genera hasta 3 carteras candidatas para un cliente.
+
+    Flujo por variante:
+        1. Construye el risk_budget de la variante (DEFENSIVE deriva uno
+           más estricto; BALANCED y GROWTH usan el budget aprobado tal cual).
+        2. Pre-check de factibilidad con PortfolioFeasibilityChecker.
+        3. Si el pre-check dice INFEASIBLE → variante omitida, no se llama
+           al optimizer, se registra reason_code y nota.
+        4. Si dice WARNING → se intenta optimizar y los warnings del
+           pre-check se propagan a notes del candidate set.
+        5. Si dice FEASIBLE → se intenta optimizar normalmente.
+        6. Si el optimizer falla aun habiendo pasado el pre-check → se
+           omite la variante con reason_code y nota con el mensaje del
+           solver (comportamiento previo preservado).
 
     No filtra instrumentos ni valida suitability: recibe datos ya preparados.
     """
 
-    def __init__(self) -> None:
-        self._optimizer = PortfolioOptimizer()
+    def __init__(
+        self,
+        feasibility_checker: PortfolioFeasibilityChecker | None = None,
+        optimizer: PortfolioOptimizer | None = None,
+    ) -> None:
+        """
+        Args:
+            feasibility_checker: instancia de PortfolioFeasibilityChecker.
+                Por defecto se construye una nueva. Aceptar la dependencia
+                facilita testear el coordinator con un checker mockeado.
+            optimizer: instancia de PortfolioOptimizer. Mismo criterio.
+        """
+        self._feasibility_checker = feasibility_checker or PortfolioFeasibilityChecker()
+        self._optimizer = optimizer or PortfolioOptimizer()
 
     def generate(
         self,
@@ -182,7 +235,8 @@ class PortfolioGenerationCoordinator:
         Genera las tres carteras candidatas.
 
         Raises:
-            ValueError: si ninguna variante es factible.
+            ValueError: si ninguna variante es factible (ni pasa el
+                        pre-check ni el optimizer logra resolver).
         """
         candidates: dict[PortfolioVariant, OptimizedPortfolio] = {}
         reason_codes: list[str] = []
@@ -208,6 +262,35 @@ class PortfolioGenerationCoordinator:
         ]
 
         for variant, objective, budget in variant_specs:
+            # ── Pre-check de factibilidad ─────────────────────────────────
+            # Casos borde: si len(return_estimates) == 0 el budget DEFENSIVE
+            # no se pudo construir (división por cero en _defensive_budget),
+            # pero ese fallo ocurriría arriba antes de entrar al loop. Para
+            # listas no vacías el pre-check siempre devuelve un resultado.
+            feasibility = self._feasibility_checker.evaluate(
+                return_estimates=return_estimates,
+                covariance_matrix=covariance_matrix,
+                risk_budget=budget,
+            )
+
+            if not feasibility.is_feasible:
+                self._record_pre_check_infeasibility(
+                    variant=variant,
+                    feasibility=feasibility,
+                    reason_codes=reason_codes,
+                    notes=notes,
+                )
+                continue
+
+            # WARNING: factible pero degradado → optimizar y propagar warnings.
+            if feasibility.status == PortfolioFeasibilityStatus.WARNING:
+                self._record_pre_check_warnings(
+                    variant=variant,
+                    feasibility=feasibility,
+                    notes=notes,
+                )
+
+            # ── Llamada al optimizer ──────────────────────────────────────
             try:
                 inp = OptimizationInput(
                     return_estimates=return_estimates,
@@ -218,9 +301,13 @@ class PortfolioGenerationCoordinator:
                 portfolio = self._optimizer.optimize(inp)
                 candidates[variant] = portfolio
             except ValueError as exc:
+                # El pre-check pasó pero el solver falla igual. Mantenemos
+                # el comportamiento previo: omitimos con reason_code y nota
+                # con el mensaje del solver.
                 reason_codes.append(RC_VARIANT_INFEASIBLE)
                 notes.append(
-                    f"Variante {variant.value} omitida por infactibilidad: {exc}"
+                    f"Variante {variant.value} omitida por fallo del "
+                    f"optimizer pese a pre-check OK: {exc}"
                 )
 
         if not candidates:
@@ -239,12 +326,60 @@ class PortfolioGenerationCoordinator:
             notes=notes,
         )
 
+    # ── Helpers de registro ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _record_pre_check_infeasibility(
+        variant: PortfolioVariant,
+        feasibility: PortfolioFeasibilityResult,
+        reason_codes: list[str],
+        notes: list[str],
+    ) -> None:
+        """Registra reason_codes y notes para una variante rechazada por el pre-check."""
+        reason_codes.append(RC_VARIANT_INFEASIBLE)
+        # También exponemos cada failed_check del feasibility en reason_codes,
+        # para que el consumidor pueda razonar sobre el motivo específico
+        # (PORTFOLIO_MAX_SINGLE_ASSET_TOO_LOW, etc.). Se acumulan sin
+        # reemplazar, conservando el orden de detección.
+        for fc in feasibility.failed_checks:
+            reason_codes.append(fc)
+
+        failed_list = ", ".join(feasibility.failed_checks) or "(sin códigos)"
+        notes.append(
+            f"Variante {variant.value} omitida por pre-check de factibilidad: "
+            f"{failed_list}."
+        )
+        for action in feasibility.suggested_actions:
+            notes.append(
+                f"Variante {variant.value} → sugerencia: {action}"
+            )
+        for n in feasibility.notes:
+            notes.append(f"Variante {variant.value} → {n}")
+
+    @staticmethod
+    def _record_pre_check_warnings(
+        variant: PortfolioVariant,
+        feasibility: PortfolioFeasibilityResult,
+        notes: list[str],
+    ) -> None:
+        """Propaga warnings del pre-check a notes (la variante igual se intenta)."""
+        warn_list = ", ".join(feasibility.warnings) or "(sin warnings)"
+        notes.append(
+            f"Variante {variant.value} con warnings de pre-check de "
+            f"factibilidad: {warn_list}. Se procede a optimizar."
+        )
+
+    # ── Construcción del budget DEFENSIVE ────────────────────────────────────
+
     @staticmethod
     def _defensive_budget(rb: RiskBudget, asset_count: int) -> RiskBudget:
         """Deriva un RiskBudget más conservador para la variante DEFENSIVE."""
         defensive_max_vol = min(rb.max_volatility, rb.target_volatility)
         minimum_feasible_single_asset = (1.0 / asset_count) + 1e-6
-        defensive_max_single = min(rb.max_single_asset, max( _DEFENSIVE_MAX_SINGLE_ASSET_CAP, minimum_feasible_single_asset))
+        defensive_max_single = min(
+            rb.max_single_asset,
+            max(_DEFENSIVE_MAX_SINGLE_ASSET_CAP, minimum_feasible_single_asset),
+        )
 
         # target_volatility para el budget derivado debe ser <= max_volatility
         # Como reducimos max_volatility, ajustamos también target_volatility
