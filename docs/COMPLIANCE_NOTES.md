@@ -114,3 +114,25 @@ Las siguientes funcionalidades no están implementadas en M1 y representan área
 | Sin persistencia de sesión | El `AuditTrail` se genera en memoria. En producción debe persistirse antes del cierre de sesión. | M2 |
 | Sin firma del asesor | `AdvisoryProfile.advisor_comment` es texto libre sin firma digital ni identificación verificada. | M3 |
 | Sin modelo de idoneidad regulatoria explícito (MiFID II / CNBV) | La suitability actual es por tipo de instrumento y perfil; no incluye el cuestionario MiFID II completo ni el análisis de conocimiento y experiencia detallado. | M3 |
+
+---
+
+## 11. KYC estandarizado y uso limitado de IA
+
+El sistema usa un `KYCData` estructurado como fuente primaria del perfil. Este diseño es una decisión de compliance, no solo una preferencia técnica.
+
+**Por qué KYC estructurado:**
+- Garantiza que todos los clientes respondan el mismo conjunto de variables mínimas, lo que hace los perfiles comparables entre sí.
+- Permite demostrar ante un auditor que dos clientes con características similares fueron tratados de forma consistente.
+- Los campos del KYC son la evidencia documental del proceso de perfilamiento; su ausencia o variación libre haría indefendible la recomendación final.
+
+**Rol acotado de la IA:**
+- La IA analiza el `KYCData` ya recolectado. No decide libremente qué preguntar como mecanismo primario de perfilamiento.
+- Las preguntas de follow-up que genera la IA son consecuencia de contradicciones o ambigüedades detectadas en el KYC estructurado, no una conversación libre.
+- Las respuestas abiertas (`open_investment_goal`, `open_risk_reaction`, `open_past_experience`, `open_concerns`) existen en `KYCData` como observaciones textuales para el asesor y la IA. No modifican automáticamente campos duros del perfil sin revisión del asesor.
+
+**Aprobación del asesor:**
+- El perfil final es siempre un `ApprovedProfile` firmado por el asesor. Ninguna propuesta de la IA —ni siquiera tras el follow-up— se convierte en decisión sin ese paso.
+- El `AuditTrail` registra la trazabilidad completa: KYC recibido → perfil propuesto por IA → follow-up (si aplica) → perfil revisado → aprobación del asesor.
+
+**Beneficio ante auditoría:** este diseño permite responder con evidencia documental a las preguntas regulatorias estándar: "¿Qué datos recopiló?", "¿Cómo llegó a este perfil?", "¿Por qué este cliente tiene este perfil y no otro?", y "¿Quién tomó la decisión final?"

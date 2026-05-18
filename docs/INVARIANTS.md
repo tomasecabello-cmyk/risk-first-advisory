@@ -70,3 +70,7 @@ El orden es fijo y significativo desde el punto de vista de compliance:
 4. Market data + Data quality: ¿hay datos suficientes y confiables para optimizar?
 
 Saltarse o reordenar pasos es una violación de compliance, no solo un bug.
+
+## I-015 — KYC estandarizado como base obligatoria
+
+El sistema debe partir de un `KYCData` estructurado. La IA no puede reemplazar el cuestionario base ni decidir libremente qué variables recolectar como mecanismo primario de perfilamiento. Puede detectar contradicciones entre los campos del KYC, generar preguntas de follow-up acotadas a esas contradicciones, y resumir o interpretar respuestas abiertas (`open_*`), siempre sujeto a revisión y aprobación del asesor. La comparabilidad entre clientes y la trazabilidad ante auditoría dependen de que todos partan del mismo conjunto de variables mínimas.

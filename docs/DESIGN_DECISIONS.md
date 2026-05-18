@@ -167,3 +167,24 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 **Alternativa descartada:** Silenciar el exceso de riesgo en `GROWTH`. Descartada: ocultar que una cartera excede el perfil aprobado es una violación de compliance.
 
 **Consecuencias (anticipadas):** Requiere cambios en `PortfolioGenerationCoordinator`, en `OptimizedPortfolio` (campos `requires_advisor_override`, `risk_budget_exceeded`), en `AdvisoryWorkflowCoordinator`, y en los tests de integración. Pendiente para M2. Ver también `docs/TODO_DESIGN_NOTES.md`.
+
+---
+
+## DD-011 — KYC estandarizado como fuente primaria del perfil
+
+**Estado:** Aceptado  
+**Fecha:** 2026-05-18  
+**Área:** `kyc`, `ai_layer`, suitability
+
+**Contexto:** El sistema podría permitir que la IA converse libremente con el cliente y decida qué preguntar en cada caso. Eso daría flexibilidad, pero reduce comparabilidad, trazabilidad y defensa ante auditoría: dos clientes con perfiles similares podrían haber respondido variables distintas, haciendo imposible justificar por qué fueron tratados de forma consistente.
+
+**Decisión:** El perfilamiento parte de un `KYCData` estructurado y estandarizado. La IA puede analizar el KYC, detectar contradicciones, generar preguntas de follow-up y ayudar a interpretar respuestas abiertas (`open_investment_goal`, `open_risk_reaction`, etc.), pero no reemplaza el cuestionario base ni decide libremente qué variables son necesarias para construir el perfil.
+
+**Alternativa descartada:** Permitir que la IA construya el KYC de forma libre para cada cliente, preguntando lo que considere relevante. Descartada porque elimina la comparabilidad entre clientes y dificulta la defensa ante auditoría regulatoria.
+
+**Consecuencias:**
+- Todos los clientes pasan por el mismo conjunto de variables mínimas comparables.
+- El sistema puede demostrar que dos clientes similares fueron tratados de forma consistente.
+- La IA queda limitada a interpretación, detección de contradicciones y follow-up acotado.
+- El asesor mantiene la aprobación final del perfil.
+- Las respuestas abiertas (`open_*`) pueden existir en `KYCData` como observaciones para el asesor y la IA, pero no son campos duros que determinen automáticamente el perfil sin revisión.
