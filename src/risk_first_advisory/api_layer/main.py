@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
@@ -497,3 +497,57 @@ def get_audit(record_id: str) -> StoredRecordResponse:
     except RepositoryError:
         raise HTTPException(status_code=500, detail="Persistence error")
     return _stored_record_to_response(record)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Listing endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/workflow", response_model=RecordListResponse)
+def list_workflows(
+    client_id: str | None = Query(default=None),
+) -> RecordListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            records = SQLiteWorkflowRunRepository(store).list_workflow_results(
+                client_id=client_id
+            )
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    items = [_stored_record_to_response(r) for r in records]
+    return RecordListResponse(records=items, count=len(items))
+
+
+@app.get("/reports", response_model=RecordListResponse)
+def list_reports(
+    client_id: str | None = Query(default=None),
+) -> RecordListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            records = SQLiteReportRepository(store).list_reports(client_id=client_id)
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    items = [_stored_record_to_response(r) for r in records]
+    return RecordListResponse(records=items, count=len(items))
+
+
+@app.get("/audit", response_model=RecordListResponse)
+def list_audit(
+    client_id: str | None = Query(default=None),
+) -> RecordListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            records = SQLiteAuditRepository(store).list_audit_trails(
+                client_id=client_id
+            )
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    items = [_stored_record_to_response(r) for r in records]
+    return RecordListResponse(records=items, count=len(items))
