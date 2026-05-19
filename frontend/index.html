@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Risk-First Advisory — Dev UI</title>
+  <style>
+    /* ── reset + base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      background: #f4f6f9;
+      color: #1a1d23;
+    }
+
+    /* ── layout ── */
+    header {
+      background: #1a2744;
+      color: #e8edf5;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.01em; }
+    header .badge {
+      background: #2e4a8a;
+      color: #a8c4f0;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .page { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    /* ── cards ── */
+    .card {
+      background: #fff;
+      border: 1px solid #dde2ea;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .card-header {
+      background: #f0f3f8;
+      border-bottom: 1px solid #dde2ea;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-header h2 { font-size: 14px; font-weight: 600; color: #1a2744; }
+    .card-body { padding: 20px; }
+
+    /* ── form grid ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px 24px;
+    }
+    .form-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .full-span { grid-column: 1 / -1; }
+
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #4a5568;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .field .hint { font-size: 11px; color: #718096; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+    input[type="text"], input[type="number"], select, textarea {
+      border: 1px solid #c8d0dc;
+      border-radius: 5px;
+      padding: 7px 10px;
+      font-size: 13px;
+      color: #1a1d23;
+      background: #fff;
+      width: 100%;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    select:focus,
+    textarea:focus { outline: none; border-color: #2e4a8a; box-shadow: 0 0 0 2px rgba(46,74,138,0.12); }
+
+    textarea { resize: vertical; min-height: 60px; }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #2e4a8a;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 6px;
+      margin-bottom: 2px;
+    }
+
+    /* ── buttons ── */
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 9px 20px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .btn-primary   { background: #2e4a8a; color: #fff; }
+    .btn-primary:hover { background: #243d76; }
+    .btn-secondary { background: #e2e8f0; color: #2d3748; }
+    .btn-secondary:hover { background: #cbd5e0; }
+    .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .actions { margin-top: 18px; display: flex; gap: 10px; align-items: center; }
+
+    /* ── status pills ── */
+    .pill {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .pill-green  { background: #d1fae5; color: #065f46; }
+    .pill-red    { background: #fee2e2; color: #991b1b; }
+    .pill-orange { background: #fef3c7; color: #92400e; }
+    .pill-blue   { background: #dbeafe; color: #1e40af; }
+    .pill-grey   { background: #e5e7eb; color: #374151; }
+
+    /* ── result box ── */
+    .result-box {
+      margin-top: 20px;
+      border: 1px solid #dde2ea;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .result-summary {
+      padding: 16px 20px;
+      background: #f8fafd;
+      border-bottom: 1px solid #dde2ea;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px 20px;
+      margin-top: 12px;
+    }
+    .summary-item label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #718096;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+    .summary-item .value { font-size: 13px; color: #1a1d23; word-break: break-word; }
+
+    .list-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+    .chip {
+      background: #eef2f9;
+      border: 1px solid #c8d5eb;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 11px;
+      color: #2d4a8a;
+      font-family: "Menlo", "Consolas", monospace;
+    }
+    .chip-warn { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+    .chip-err  { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+
+    /* ── json collapsible ── */
+    details { margin-top: 0; }
+    details summary {
+      padding: 10px 20px;
+      background: #f0f3f8;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4a5568;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+    details summary::before { content: "▶"; font-size: 10px; transition: transform 0.15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    details summary:hover { background: #e2e8f0; }
+
+    pre.json-block {
+      background: #1a1d23;
+      color: #a8d0a0;
+      font-family: "Menlo", "Consolas", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 16px 20px;
+      overflow-x: auto;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ── message boxes ── */
+    .msg {
+      padding: 10px 14px;
+      border-radius: 5px;
+      font-size: 13px;
+      margin-top: 10px;
+    }
+    .msg-error   { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
+    .msg-info    { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }
+    .msg-success { background: #f0fdf4; border: 1px solid #86efac; color: #166534; }
+
+    /* ── table ── */
+    .tbl-wrap { overflow-x: auto; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      background: #f0f3f8;
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #4a5568;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 2px solid #dde2ea;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #edf0f5; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafd; }
+    td.mono { font-family: "Menlo", "Consolas", monospace; font-size: 12px; }
+
+    /* ── filter row ── */
+    .filter-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .filter-row .field { flex: 1; min-width: 180px; }
+
+    /* ── spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── hidden ── */
+    .hidden { display: none !important; }
+
+    /* ── responsive ── */
+    @media (max-width: 640px) {
+      .form-grid, .form-grid.cols-3 { grid-template-columns: 1fr; }
+      .full-span { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Risk-First Advisory</h1>
+  <span class="badge">Dev UI — M1/M2-prep</span>
+</header>
+
+<div class="page">
+
+  <!-- ── 1. HEALTH ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>API Health</h2>
+    </div>
+    <div class="card-body">
+      <p style="color:#718096;font-size:13px;margin-bottom:14px;">
+        Verifica que el backend FastAPI esté corriendo en
+        <code style="background:#eef2f9;padding:1px 5px;border-radius:3px;">http://127.0.0.1:8000</code>.
+      </p>
+      <button class="btn-primary" onclick="checkHealth()">
+        Check API
+      </button>
+      <div id="health-result" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- ── 2. RUN WORKFLOW ────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Run Workflow — POST /workflow/run</h2>
+    </div>
+    <div class="card-body">
+
+      <form id="workflow-form" onsubmit="runWorkflow(event)">
+
+        <!-- identifiers -->
+        <div class="section-label" style="margin-bottom:12px;">Identifiers</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="f-client_id" value="CLI-123" required />
+          </div>
+          <div class="field">
+            <label>advisor_id</label>
+            <input type="text" id="f-advisor_id" value="ADV-001" required />
+          </div>
+        </div>
+
+        <!-- kyc scores -->
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>risk_tolerance_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-risk_tolerance_score" value="6" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>risk_capacity_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-risk_capacity_score" value="7" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>liquidity_need_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-liquidity_need_score" value="3" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>investment_horizon_years</label>
+            <input type="number" id="f-investment_horizon_years" value="10" min="1" max="50" step="1" required />
+          </div>
+          <div class="field">
+            <label>max_acceptable_drawdown_pct</label>
+            <input type="number" id="f-max_acceptable_drawdown_pct" value="25" min="0" max="100" step="0.5" required />
+          </div>
+          <div class="field">
+            <label>declared_return_expectation_pct <span class="hint">optional</span></label>
+            <input type="number" id="f-declared_return_expectation_pct" value="" min="0" max="100" step="0.1" placeholder="leave blank" />
+          </div>
+        </div>
+
+        <!-- kyc qualitative -->
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>investment_experience</label>
+            <select id="f-investment_experience">
+              <option value="ninguna">ninguna</option>
+              <option value="básica">básica</option>
+              <option value="moderada" selected>moderada</option>
+              <option value="avanzada">avanzada</option>
+              <option value="experto">experto</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>income_stability</label>
+            <select id="f-income_stability">
+              <option value="stable" selected>stable</option>
+              <option value="variable">variable</option>
+              <option value="unstable">unstable</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- kyc financial -->
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>net_worth</label>
+            <input type="number" id="f-net_worth" value="500000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>liquid_net_worth</label>
+            <input type="number" id="f-liquid_net_worth" value="200000" min="0" step="1000" required />
+          </div>
+        </div>
+
+        <!-- kyc open fields -->
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:#718096;">(optional)</span></div>
+        <div class="form-grid">
+          <div class="field">
+            <label>open_investment_goal</label>
+            <textarea id="f-open_investment_goal" placeholder="e.g. Save for retirement in 10 years"></textarea>
+          </div>
+          <div class="field">
+            <label>open_risk_reaction</label>
+            <textarea id="f-open_risk_reaction" placeholder="e.g. I'd hold through drawdowns up to 20%"></textarea>
+          </div>
+          <div class="field">
+            <label>open_past_experience</label>
+            <textarea id="f-open_past_experience" placeholder="e.g. Held ETFs for 5 years"></textarea>
+          </div>
+          <div class="field">
+            <label>open_concerns</label>
+            <textarea id="f-open_concerns" placeholder="e.g. Worried about inflation eroding savings"></textarea>
+          </div>
+        </div>
+
+        <!-- financial goal -->
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">Financial Goal</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>initial_amount</label>
+            <input type="number" id="f-initial_amount" value="100000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>target_amount</label>
+            <input type="number" id="f-target_amount" value="200000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>horizon_years</label>
+            <input type="number" id="f-goal_horizon_years" value="10" min="1" max="50" step="1" required />
+          </div>
+          <div class="field">
+            <label>annual_contribution</label>
+            <input type="number" id="f-annual_contribution" value="5000" min="0" step="500" required />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="btn-run">
+            Run Workflow
+          </button>
+          <button type="button" class="btn-secondary" onclick="clearWorkflowResult()">
+            Clear
+          </button>
+        </div>
+
+      </form>
+
+      <div id="workflow-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 3. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Persisted Workflows — GET /workflow</h2>
+    </div>
+    <div class="card-body">
+      <div class="filter-row">
+        <div class="field">
+          <label>Filter by client_id <span class="hint">optional</span></label>
+          <input type="text" id="filter-client_id" placeholder="e.g. CLI-123" />
+        </div>
+        <button class="btn-primary" onclick="loadWorkflows()">Load Workflows</button>
+        <button class="btn-secondary" onclick="clearWorkflowsTable()">Clear</button>
+      </div>
+      <div id="workflows-result"></div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+
+<script>
+  const API = "http://127.0.0.1:8000";
+
+  // ── utilities ────────────────────────────────────────────────
+
+  function el(id) { return document.getElementById(id); }
+
+  function formatJSON(obj) {
+    return JSON.stringify(obj, null, 2);
+  }
+
+  function statusPill(status) {
+    if (!status) return '<span class="pill pill-grey">—</span>';
+    const s = String(status).toLowerCase();
+    if (s.includes("completed") && !s.includes("warn")) return `<span class="pill pill-green">${status}</span>`;
+    if (s.includes("warn")) return `<span class="pill pill-orange">${status}</span>`;
+    if (s.includes("blocked")) return `<span class="pill pill-red">${status}</span>`;
+    if (s === "ok") return `<span class="pill pill-green">${status}</span>`;
+    return `<span class="pill pill-blue">${status}</span>`;
+  }
+
+  function boolPill(v) {
+    if (v === true)  return '<span class="pill pill-green">yes</span>';
+    if (v === false) return '<span class="pill pill-grey">no</span>';
+    return '<span class="pill pill-grey">—</span>';
+  }
+
+  function chips(arr, cls = "chip") {
+    if (!arr || !arr.length) return '<span style="color:#a0aec0;font-size:12px;">none</span>';
+    return `<div class="list-chips">${arr.map(x => `<span class="${cls}">${x}</span>`).join("")}</div>`;
+  }
+
+  function apiError(err) {
+    if (err.name === "TypeError" && err.message.includes("fetch")) {
+      return `<div class="msg msg-error">
+        <strong>API not reachable.</strong> Start uvicorn first:<br>
+        <code style="font-size:12px;">uvicorn risk_first_advisory.api_layer.main:app --reload</code><br><br>
+        If you're opening this file via <code>file://</code>, the browser may also block requests due to CORS.
+        Serve the frontend instead:<br>
+        <code style="font-size:12px;">python -m http.server 5500 -d frontend</code>
+        then open <code>http://127.0.0.1:5500</code>
+      </div>`;
+    }
+    return `<div class="msg msg-error"><strong>Error:</strong> ${err.message}</div>`;
+  }
+
+  function setButtonLoading(btnId, loading) {
+    const btn = el(btnId);
+    if (!btn) return;
+    btn.disabled = loading;
+    btn.innerHTML = loading
+      ? `<span class="spinner"></span>Running…`
+      : "Run Workflow";
+  }
+
+  // ── 1. health ────────────────────────────────────────────────
+
+  async function checkHealth() {
+    const out = el("health-result");
+    out.className = "msg msg-info";
+    out.textContent = "Checking…";
+    out.classList.remove("hidden");
+
+    try {
+      const r = await fetch(`${API}/health`);
+      const data = await r.json();
+      if (r.ok) {
+        out.className = "msg msg-success";
+        out.innerHTML = `<strong>OK</strong> — ${JSON.stringify(data)}`;
+      } else {
+        out.className = "msg msg-error";
+        out.innerHTML = `<strong>HTTP ${r.status}</strong> — ${JSON.stringify(data)}`;
+      }
+    } catch (err) {
+      out.className = "";
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  // ── 2. run workflow ──────────────────────────────────────────
+
+  function buildPayload() {
+    const v = id => el(id).value.trim();
+    const n = id => parseFloat(el(id).value) || 0;
+
+    const kyc = {
+      risk_tolerance_score:      parseInt(el("f-risk_tolerance_score").value),
+      risk_capacity_score:       parseInt(el("f-risk_capacity_score").value),
+      liquidity_need_score:      parseInt(el("f-liquidity_need_score").value),
+      investment_horizon_years:  parseInt(el("f-investment_horizon_years").value),
+      investment_experience:     v("f-investment_experience"),
+      income_stability:          v("f-income_stability"),
+      net_worth:                 n("f-net_worth"),
+      liquid_net_worth:          n("f-liquid_net_worth"),
+      max_acceptable_drawdown_pct: parseFloat(el("f-max_acceptable_drawdown_pct").value),
+    };
+
+    // optional fields — only include if non-empty
+    const drep = el("f-declared_return_expectation_pct").value.trim();
+    if (drep !== "") kyc.declared_return_expectation_pct = parseFloat(drep);
+
+    const openFields = [
+      ["open_investment_goal", "f-open_investment_goal"],
+      ["open_risk_reaction",   "f-open_risk_reaction"],
+      ["open_past_experience", "f-open_past_experience"],
+      ["open_concerns",        "f-open_concerns"],
+    ];
+    for (const [field, id] of openFields) {
+      const val = el(id).value.trim();
+      if (val) kyc[field] = val;
+    }
+
+    return {
+      client_id:  v("f-client_id"),
+      advisor_id: v("f-advisor_id"),
+      kyc_data:   kyc,
+      financial_goal: {
+        initial_amount:      n("f-initial_amount"),
+        target_amount:       n("f-target_amount"),
+        horizon_years:       parseInt(el("f-goal_horizon_years").value),
+        annual_contribution: n("f-annual_contribution"),
+      },
+    };
+  }
+
+  async function runWorkflow(evt) {
+    evt.preventDefault();
+    const out = el("workflow-result");
+    out.innerHTML = "";
+    out.classList.remove("hidden");
+    setButtonLoading("btn-run", true);
+
+    let payload;
+    try { payload = buildPayload(); } catch (e) {
+      out.innerHTML = `<div class="msg msg-error">${e.message}</div>`;
+      setButtonLoading("btn-run", false);
+      return;
+    }
+
+    try {
+      const r = await fetch(`${API}/workflow/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        let errHtml = `<div class="msg msg-error"><strong>HTTP ${r.status}</strong>`;
+        if (data) {
+          if (r.status === 422 && data.detail) {
+            errHtml += `<br><br><strong>Validation errors:</strong><ul style="margin-top:6px;padding-left:18px;">`;
+            const detail = Array.isArray(data.detail) ? data.detail : [data.detail];
+            for (const d of detail) {
+              const loc = d.loc ? d.loc.join(" → ") : "";
+              errHtml += `<li>${loc ? `<code>${loc}</code>: ` : ""}${d.msg}</li>`;
+            }
+            errHtml += `</ul>`;
+          } else {
+            errHtml += `<pre style="margin-top:8px;font-size:12px;">${formatJSON(data)}</pre>`;
+          }
+        }
+        errHtml += `</div>`;
+        out.innerHTML = errHtml;
+        setButtonLoading("btn-run", false);
+        return;
+      }
+
+      out.innerHTML = renderWorkflowResult(data);
+
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    } finally {
+      setButtonLoading("btn-run", false);
+    }
+  }
+
+  function renderWorkflowResult(data) {
+    const records = data.records || {};
+
+    const tickers = data.final_optimizer_tickers || [];
+    const reasonCodes = data.reason_codes || [];
+    const warnings = data.warnings || [];
+
+    return `
+      <div class="result-box">
+        <div class="result-summary">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <strong style="font-size:15px;">Result</strong>
+            ${statusPill(data.status)}
+          </div>
+          <div class="summary-grid">
+            <div class="summary-item">
+              <label>client_id</label>
+              <div class="value">${data.client_id ?? "—"}</div>
+            </div>
+            <div class="summary-item">
+              <label>approved_profile_name</label>
+              <div class="value">${data.approved_profile_name ?? "—"}</div>
+            </div>
+            <div class="summary-item">
+              <label>has_portfolios</label>
+              <div class="value">${boolPill(data.has_portfolios)}</div>
+            </div>
+            <div class="summary-item">
+              <label>portfolio_feasibility_status</label>
+              <div class="value">${statusPill(data.portfolio_feasibility_status)}</div>
+            </div>
+            <div class="summary-item">
+              <label>candidate_count</label>
+              <div class="value">${data.candidate_count ?? "—"}</div>
+            </div>
+            <div class="summary-item">
+              <label>workflow_record_id</label>
+              <div class="value" style="font-family:monospace;font-size:12px;">${records.workflow_record_id ?? "—"}</div>
+            </div>
+            <div class="summary-item">
+              <label>audit_record_id</label>
+              <div class="value" style="font-family:monospace;font-size:12px;">${records.audit_record_id ?? "—"}</div>
+            </div>
+            <div class="summary-item">
+              <label>report_record_id</label>
+              <div class="value" style="font-family:monospace;font-size:12px;">${records.report_record_id ?? "—"}</div>
+            </div>
+            <div class="summary-item" style="grid-column:1/-1;">
+              <label>report_path</label>
+              <div class="value" style="font-family:monospace;font-size:11px;word-break:break-all;">${data.report_path ?? "—"}</div>
+            </div>
+            <div class="summary-item" style="grid-column:1/-1;">
+              <label>final_optimizer_tickers (${tickers.length})</label>
+              <div class="value">${chips(tickers)}</div>
+            </div>
+            <div class="summary-item" style="grid-column:1/-1;">
+              <label>reason_codes (${reasonCodes.length})</label>
+              <div class="value">${chips(reasonCodes, "chip chip-err")}</div>
+            </div>
+            <div class="summary-item" style="grid-column:1/-1;">
+              <label>warnings (${warnings.length})</label>
+              <div class="value">${chips(warnings, "chip chip-warn")}</div>
+            </div>
+          </div>
+        </div>
+
+        <details>
+          <summary>Full JSON response</summary>
+          <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+        </details>
+      </div>
+    `;
+  }
+
+  function clearWorkflowResult() {
+    const out = el("workflow-result");
+    out.innerHTML = "";
+    out.classList.add("hidden");
+  }
+
+  function escapeHTML(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // ── 3. persisted workflows ───────────────────────────────────
+
+  async function loadWorkflows() {
+    const out = el("workflows-result");
+    out.innerHTML = `<div class="msg msg-info">Loading…</div>`;
+
+    const clientId = el("filter-client_id").value.trim();
+    const url = clientId
+      ? `${API}/workflow?client_id=${encodeURIComponent(clientId)}`
+      : `${API}/workflow`;
+
+    try {
+      const r = await fetch(url);
+      const data = await r.json();
+
+      if (!r.ok) {
+        out.innerHTML = `<div class="msg msg-error"><strong>HTTP ${r.status}</strong> — ${JSON.stringify(data)}</div>`;
+        return;
+      }
+
+      const records = data.records || [];
+      if (!records.length) {
+        out.innerHTML = `<div class="msg msg-info">No workflows found${clientId ? ` for client <strong>${clientId}</strong>` : ""}.</div>`;
+        return;
+      }
+
+      let rows = records.map(rec => {
+        const payload = rec.payload || {};
+        const meta    = rec.metadata || {};
+        const status  = payload.status ?? "—";
+        const client  = meta.client_id ?? payload.client_id ?? "—";
+        const created = rec.created_at_utc ?? "—";
+        return `<tr>
+          <td class="mono">${rec.record_id ?? "—"}</td>
+          <td>${client}</td>
+          <td>${statusPill(status)}</td>
+          <td style="font-size:12px;color:#718096;">${created}</td>
+        </tr>`;
+      }).join("");
+
+      out.innerHTML = `
+        <div class="msg msg-success" style="margin-bottom:10px;">
+          Loaded <strong>${records.length}</strong> workflow${records.length !== 1 ? "s" : ""}
+          ${clientId ? ` for client <strong>${clientId}</strong>` : ""}.
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>record_id</th>
+                <th>client_id</th>
+                <th>status</th>
+                <th>created_at_utc</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <details style="margin-top:10px;">
+          <summary>Full JSON response</summary>
+          <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+        </details>
+      `;
+
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  function clearWorkflowsTable() {
+    el("workflows-result").innerHTML = "";
+  }
+</script>
+
+</body>
+</html>
