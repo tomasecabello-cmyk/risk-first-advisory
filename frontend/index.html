@@ -384,6 +384,97 @@
     }
     .live-status-box .status-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
     .live-status-box .status-msg   { font-size: 13px; color: #4a5568; }
+
+    /* ── AI profile demo ── */
+    .ai-disclaimer {
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      color: #1e40af;
+      line-height: 1.7;
+    }
+    .ai-disclaimer strong { color: #1e3a8a; }
+    .ai-disclaimer ul { margin: 6px 0 0 16px; }
+
+    .ai-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #4a5568;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .contradiction-card {
+      padding: 10px 14px;
+      border-radius: 5px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .contradiction-card:last-child { margin-bottom: 0; }
+    .contradiction-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .contradiction-field {
+      font-weight: 700;
+      font-family: "Menlo", "Consolas", monospace;
+      font-size: 12px;
+      color: #1a2744;
+    }
+    .contradiction-explanation { color: #374151; line-height: 1.5; }
+
+    .severity-high   { border-left: 3px solid #ef4444; background: #fef2f2; }
+    .severity-medium { border-left: 3px solid #f59e0b; background: #fffbeb; }
+    .severity-low    { border-left: 3px solid #93c5fd; background: #eff6ff; }
+
+    .confidence-bar-track {
+      flex: 1;
+      background: #e2e8f0;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .confidence-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #2e4a8a, #3b82f6);
+    }
+
+    .numbered-list {
+      counter-reset: item;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .numbered-list li {
+      counter-increment: item;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 7px 0;
+      border-bottom: 1px solid #f0f3f8;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .numbered-list li:last-child { border-bottom: none; }
+    .numbered-list li::before {
+      content: counter(item);
+      background: #2e4a8a;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
   </style>
 </head>
 <body>
@@ -613,7 +704,139 @@
     </div>
   </div>
 
-  <!-- ── 4. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <!-- ── 4. AI PROFILE DEMO ────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>AI Profile Demo — POST /ai/profile-demo</h2>
+      <span class="pill pill-blue" style="font-size:10px;">OpenAI · no persist</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
+        Ver comando de inicio más abajo.
+        <ul>
+          <li>La IA <strong>no aprueba</strong> el perfil final — solo el asesor puede hacerlo.</li>
+          <li>La IA <strong>no recomienda</strong> productos, tickers ni ETFs.</li>
+          <li>La IA <strong>no genera</strong> portfolios ni allocations.</li>
+          <li>La IA <strong>no usa</strong> <code>declared_return_expectation_pct</code> para construir el perfil.</li>
+          <li>Solo analiza coherencia del KYC y propone follow-up questions para el asesor.</li>
+          <li>No persiste resultados. Sin SQLite, sin reporte.</li>
+        </ul>
+        <div style="margin-top:8px;padding:7px 10px;background:#dbeafe;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#1e40af;">
+          $env:OPENAI_API_KEY="your_key_here"<br>
+          uvicorn risk_first_advisory.api_layer.main:app --reload
+        </div>
+      </div>
+
+      <!-- identifiers -->
+      <div class="section-label" style="margin-bottom:12px;">Identifier</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>client_id</label>
+          <input type="text" id="ai-client_id" value="CLI-AI-001" required />
+        </div>
+      </div>
+
+      <!-- scores -->
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>risk_tolerance_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-risk_tolerance_score" value="4" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>risk_capacity_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-risk_capacity_score" value="8" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>liquidity_need_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-liquidity_need_score" value="7" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>investment_horizon_years</label>
+          <input type="number" id="ai-investment_horizon_years" value="15" min="1" max="50" step="1" required />
+        </div>
+        <div class="field">
+          <label>max_acceptable_drawdown_pct</label>
+          <input type="number" id="ai-max_acceptable_drawdown_pct" value="10" min="0" max="100" step="0.5" required />
+        </div>
+        <div class="field">
+          <label>declared_return_expectation_pct <span class="hint">optional</span></label>
+          <input type="number" id="ai-declared_return_expectation_pct" value="15" min="0" max="100" step="0.1" placeholder="leave blank" />
+        </div>
+      </div>
+
+      <!-- qualitative -->
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>investment_experience</label>
+          <select id="ai-investment_experience">
+            <option value="ninguna">ninguna</option>
+            <option value="basica">basica</option>
+            <option value="moderada" selected>moderada</option>
+            <option value="avanzada">avanzada</option>
+            <option value="experto">experto</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>income_stability</label>
+          <select id="ai-income_stability">
+            <option value="stable" selected>stable</option>
+            <option value="variable">variable</option>
+            <option value="unstable">unstable</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- financials -->
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>net_worth</label>
+          <input type="number" id="ai-net_worth" value="500000" min="0" step="1000" required />
+        </div>
+        <div class="field">
+          <label>liquid_net_worth</label>
+          <input type="number" id="ai-liquid_net_worth" value="150000" min="0" step="1000" required />
+        </div>
+      </div>
+
+      <!-- open fields -->
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:#718096;">(optional)</span></div>
+      <div class="form-grid">
+        <div class="field">
+          <label>open_investment_goal</label>
+          <textarea id="ai-open_investment_goal">Quiero crecer mi capital para jubilacion, pero sin asumir perdidas grandes.</textarea>
+        </div>
+        <div class="field">
+          <label>open_risk_reaction</label>
+          <textarea id="ai-open_risk_reaction">Me preocuparia mucho una caida mayor al 10 por ciento.</textarea>
+        </div>
+        <div class="field">
+          <label>open_past_experience</label>
+          <textarea id="ai-open_past_experience">Vendi durante una caida fuerte de mercado.</textarea>
+        </div>
+        <div class="field">
+          <label>open_concerns</label>
+          <textarea id="ai-open_concerns">Me preocupa la inflacion y perder capital.</textarea>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-ai" onclick="runAIProfile()">
+          Analyze KYC with AI
+        </button>
+        <button class="btn-secondary" onclick="clearAIProfileResult()">Clear</button>
+      </div>
+
+      <div id="ai-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 5. PERSISTED WORKFLOWS ────────────────────────────── -->
   <div class="card">
     <div class="card-header">
       <h2>Persisted Workflows — GET /workflow</h2>
@@ -1138,6 +1361,237 @@
 
     return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${candidatesHtml}${jsonHtml}</div>`;
   }
+
+  // ── 4. AI profile demo ──────────────────────────────────────
+
+  function setAIButtonLoading(loading) {
+    const btn = el("btn-ai");
+    if (!btn) return;
+    btn.disabled = loading;
+    btn.innerHTML = loading
+      ? `<span class="spinner"></span>Calling OpenAI profile analysis…`
+      : "Analyze KYC with AI";
+  }
+
+  function buildAIProfilePayload() {
+    const v  = id => el(id).value.trim();
+    const n  = id => parseFloat(el(id).value) || 0;
+    const ni = id => parseInt(el(id).value);
+
+    const kyc = {
+      risk_tolerance_score:        ni("ai-risk_tolerance_score"),
+      risk_capacity_score:         ni("ai-risk_capacity_score"),
+      liquidity_need_score:        ni("ai-liquidity_need_score"),
+      investment_horizon_years:    ni("ai-investment_horizon_years"),
+      max_acceptable_drawdown_pct: parseFloat(el("ai-max_acceptable_drawdown_pct").value),
+      investment_experience:       v("ai-investment_experience"),
+      income_stability:            v("ai-income_stability"),
+      net_worth:                   n("ai-net_worth"),
+      liquid_net_worth:            n("ai-liquid_net_worth"),
+    };
+
+    const drep = el("ai-declared_return_expectation_pct").value.trim();
+    if (drep !== "") kyc.declared_return_expectation_pct = parseFloat(drep);
+
+    const openFields = [
+      ["open_investment_goal", "ai-open_investment_goal"],
+      ["open_risk_reaction",   "ai-open_risk_reaction"],
+      ["open_past_experience", "ai-open_past_experience"],
+      ["open_concerns",        "ai-open_concerns"],
+    ];
+    for (const [field, id] of openFields) {
+      const val = el(id).value.trim();
+      if (val) kyc[field] = val;
+    }
+
+    return { client_id: v("ai-client_id"), kyc_payload: kyc };
+  }
+
+  async function runAIProfile() {
+    const out = el("ai-result");
+    out.innerHTML = `<div class="msg msg-info" style="margin-top:16px;">
+      <span class="spinner" style="border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>
+      Calling OpenAI profile analysis…
+    </div>`;
+    out.classList.remove("hidden");
+    setAIButtonLoading(true);
+
+    let payload;
+    try { payload = buildAIProfilePayload(); } catch (e) {
+      out.innerHTML = `<div class="msg msg-error" style="margin-top:16px;">${e.message}</div>`;
+      setAIButtonLoading(false);
+      return;
+    }
+
+    try {
+      const r = await fetch(`${API}/ai/profile-demo`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        let errHtml = `<div class="msg msg-error" style="margin-top:16px;">`;
+
+        if (r.status === 400) {
+          errHtml += `<strong>⚠ OPENAI_API_KEY is not configured in the backend terminal.</strong><br>
+            <span style="font-size:12px;">Set the environment variable before starting uvicorn:</span>
+            <div style="margin-top:8px;padding:7px 10px;background:#fee2e2;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#991b1b;">
+              $env:OPENAI_API_KEY="your_key_here"<br>
+              uvicorn risk_first_advisory.api_layer.main:app --reload
+            </div>`;
+        } else if (r.status === 502) {
+          errHtml += `<strong>AI profile analysis failed.</strong> Check backend logs or API key.<br>
+            <span style="font-size:12px;color:#718096;">${data && data.detail ? escapeHTML(String(data.detail)) : ""}</span>`;
+        } else if (r.status === 422 && data && data.detail) {
+          errHtml += `<strong>HTTP 422 — Validation errors:</strong><ul style="margin-top:6px;padding-left:18px;">`;
+          const detail = Array.isArray(data.detail) ? data.detail : [data.detail];
+          for (const d of detail) {
+            const loc = d.loc ? d.loc.join(" → ") : "";
+            errHtml += `<li>${loc ? `<code>${loc}</code>: ` : ""}${escapeHTML(d.msg)}</li>`;
+          }
+          errHtml += `</ul>`;
+        } else {
+          errHtml += `<strong>HTTP ${r.status}</strong>`;
+          if (data) errHtml += `<pre style="margin-top:8px;font-size:12px;">${escapeHTML(formatJSON(data))}</pre>`;
+        }
+
+        errHtml += `</div>`;
+        out.innerHTML = errHtml;
+        return;
+      }
+
+      out.innerHTML = renderAIProfileResult(data);
+
+    } catch (err) {
+      if (err.name === "TypeError" && err.message.includes("fetch")) {
+        out.innerHTML = `<div class="msg msg-error" style="margin-top:16px;">
+          <strong>API not reachable.</strong> Start uvicorn first:<br>
+          <code style="font-size:12px;">uvicorn risk_first_advisory.api_layer.main:app --reload</code>
+        </div>`;
+      } else {
+        out.innerHTML = `<div style="margin-top:16px;">${apiError(err)}</div>`;
+      }
+    } finally {
+      setAIButtonLoading(false);
+    }
+  }
+
+  function clearAIProfileResult() {
+    const out = el("ai-result");
+    out.innerHTML = "";
+    out.classList.add("hidden");
+    setAIButtonLoading(false);
+  }
+
+  function severityPill(sev) {
+    const s = String(sev ?? "").toLowerCase();
+    if (s === "high")   return `<span class="pill pill-red"   style="font-size:10px;">HIGH</span>`;
+    if (s === "medium") return `<span class="pill pill-orange" style="font-size:10px;">MED</span>`;
+    return `<span class="pill pill-grey" style="font-size:10px;">LOW</span>`;
+  }
+
+  function severityClass(sev) {
+    const s = String(sev ?? "").toLowerCase();
+    if (s === "high")   return "contradiction-card severity-high";
+    if (s === "medium") return "contradiction-card severity-medium";
+    return "contradiction-card severity-low";
+  }
+
+  function renderAIProfileResult(data) {
+    const contradictions = data.contradictions        ?? [];
+    const followUps      = data.follow_up_questions   ?? [];
+    const advisorNotes   = data.advisor_notes         ?? [];
+    const confidence     = typeof data.confidence === "number" ? data.confidence : 0;
+    const confidencePct  = Math.round(confidence * 100);
+
+    // ── profile summary ──────────────────────────────────
+    const summaryHtml = `
+      <div class="result-summary">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <strong style="font-size:15px;">AI Preliminary Profile</strong>
+          <span class="pill pill-blue" style="font-size:12px;padding:3px 10px;">${escapeHTML(data.preliminary_profile ?? "—")}</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <label>client_id</label>
+            <div class="value">${escapeHTML(data.client_id ?? "—")}</div>
+          </div>
+          <div class="summary-item">
+            <label>preliminary_profile</label>
+            <div class="value"><strong>${escapeHTML(data.preliminary_profile ?? "—")}</strong></div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>confidence</label>
+            <div class="value">
+              <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                <span style="font-size:17px;font-weight:700;color:#1a2744;min-width:46px;">${confidencePct}%</span>
+                <div class="confidence-bar-track">
+                  <div class="confidence-bar-fill" style="width:${confidencePct}%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ── contradictions ────────────────────────────────────
+    const contradictionsHtml = contradictions.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Contradictions (${contradictions.length})</div>
+        ${contradictions.map(c => `
+          <div class="${severityClass(c.severity)}">
+            <div class="contradiction-header">
+              ${severityPill(c.severity)}
+              <span class="contradiction-field">${escapeHTML(c.field ?? "")}</span>
+            </div>
+            <div class="contradiction-explanation">${escapeHTML(c.explanation ?? "")}</div>
+          </div>
+        `).join("")}
+      </div>
+    ` : `
+      <div style="padding:12px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Contradictions</div>
+        <span style="color:#a0aec0;font-size:12px;">None detected.</span>
+      </div>
+    `;
+
+    // ── follow-up questions ──────────────────────────────
+    const followUpHtml = followUps.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Follow-up Questions (${followUps.length})</div>
+        <ol class="numbered-list">
+          ${followUps.map(q => `<li>${escapeHTML(q)}</li>`).join("")}
+        </ol>
+      </div>
+    ` : "";
+
+    // ── advisor notes ────────────────────────────────────
+    const advisorNotesHtml = advisorNotes.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Advisor Notes (${advisorNotes.length})</div>
+        <ol class="numbered-list">
+          ${advisorNotes.map(n => `<li>${escapeHTML(n)}</li>`).join("")}
+        </ol>
+      </div>
+    ` : "";
+
+    // ── json collapsible ─────────────────────────────────
+    const jsonHtml = `
+      <details>
+        <summary>Full JSON response</summary>
+        <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+      </details>
+    `;
+
+    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${contradictionsHtml}${followUpHtml}${advisorNotesHtml}${jsonHtml}</div>`;
+  }
+
+  // ── 5. portfolio candidate renderer ─────────────────────────
 
   function renderPortfolioCandidate(c) {
     const meta = c.metadata ?? {};

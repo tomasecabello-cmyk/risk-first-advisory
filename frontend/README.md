@@ -73,6 +73,7 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | API Health | `GET` | `/health` | Verifica que el backend responde |
 | Run Workflow | `POST` | `/workflow/run` | Ejecuta el workflow con el formulario |
 | Live Portfolio Demo | `POST` | `/live/portfolio-demo` | Portfolios reales con datos de yfinance |
+| AI Profile Demo | `POST` | `/ai/profile-demo` | Análisis KYC con OpenAI (requiere API key) |
 | Persisted Workflows | `GET` | `/workflow` | Lista todos los workflows |
 | Persisted Workflows | `GET` | `/workflow?client_id=...` | Filtra workflows por cliente |
 
@@ -114,6 +115,42 @@ Al ejecutar:
 - Los parámetros del Risk Budget (volatilidades, límites de asset class) se toman directamente de `PROFILE_BASE_PARAMS` sin ajustes de KYC.
 - El universo fijo es 11 ETFs: BIL, SHV, AGG, BND, IEF, VTI, SPY, VEA, VWO, HYG, GLD.
 
+### AI Profile Demo
+
+Llama a `POST /ai/profile-demo` usando el **OpenAIProfileClient** del backend.
+
+**Requiere OPENAI_API_KEY** en la terminal donde corre uvicorn. Sin la key, el endpoint devuelve HTTP 400 y el frontend muestra el mensaje de error con el comando de inicio correcto.
+
+Para iniciar el backend con la key:
+
+**PowerShell:**
+```powershell
+$env:OPENAI_API_KEY="your_key_here"
+uvicorn risk_first_advisory.api_layer.main:app --reload
+```
+
+> ⚠ No subir la key a Git. No crear `.env`. No hardcodear secretos.
+
+Si la key no está configurada, el frontend muestra:
+> "OPENAI_API_KEY is not configured in the backend terminal."
+
+Si el endpoint devuelve 502, el frontend muestra:
+> "AI profile analysis failed. Check backend logs or API key."
+
+**Características de esta demo:**
+- Usa `OpenAIProfileClient` con modelo `gpt-4o-mini`, `temperature=0.2`.
+- Analiza coherencia del KYC y detecta contradicciones entre campos.
+- Devuelve: `preliminary_profile`, `confidence`, `contradictions`, `follow_up_questions`, `advisor_notes`.
+- **No persiste** resultados en SQLite ni genera reporte Markdown.
+- **No aprueba** el perfil final — solo el asesor humano puede hacerlo.
+- **No genera** portfolios ni asset allocations.
+- **No recomienda** productos, tickers ni ETFs.
+- **No usa** `declared_return_expectation_pct` para construir el perfil (es información para el asesor, no para la IA).
+
+Los valores por defecto del formulario corresponden al test manual con KYC contradictorio:
+- `risk_tolerance_score=4` (bajo) pero `risk_capacity_score=8` (alto) → contradicción intencionada.
+- `liquidity_need_score=7` (alta liquidez) con horizonte de 15 años → tensión detectada por la IA.
+
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.
 
@@ -125,6 +162,6 @@ Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestr
 - **Sin producción.** No usar contra un backend expuesto en red pública.
 - **Frontend estático de demo.** No persiste estado entre recargas.
 - **CORS.** Si el navegador bloquea requests desde `file://`, usar `python -m http.server 5500 -d frontend`.
-- **MockAIClient y MockMarketDataProvider.** El backend usa respuestas scripted y datos de fixture. No hay IA real ni datos de mercado en tiempo real.
+- **AI Profile Demo requiere OPENAI_API_KEY.** Sin la key, el endpoint responde HTTP 400. La sección Live Portfolio Demo descarga datos reales de Yahoo Finance (requiere internet).
 - **SQLite local.** Los IDs de workflow (`workflow_000001`, etc.) son secuenciales por sesión de backend. Se resetean si el servidor se reinicia sin persistencia previa.
-- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo` y `GET /workflow`. Los endpoints `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
+- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo`, `/ai/profile-demo` y `GET /workflow`. Los endpoints `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
