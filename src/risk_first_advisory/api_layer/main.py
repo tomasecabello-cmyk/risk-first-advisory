@@ -27,6 +27,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
+    AIContradictionResponse,
+    AIProfileRequest,
+    AIProfileResponse,
     DemoRunResponse,
     FinancialGoalRequest,
     HealthResponse,
@@ -585,6 +588,27 @@ def _run_live_portfolio_demo(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Factory para /ai/profile-demo (privada, monkeypatcheable en tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _get_openai_profile_client():
+    """
+    Crea y devuelve un OpenAIProfileClient real.
+
+    Separada del endpoint para permitir monkeypatch en tests sin llamar
+    a OpenAI ni requerir OPENAI_API_KEY en el entorno de CI.
+
+    Raises:
+        ValueError: si OPENAI_API_KEY no está configurada.
+        ImportError: si el paquete openai no está instalado.
+    """
+    from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+    return OpenAIProfileClient()
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="risk-first-advisory")
@@ -646,6 +670,68 @@ def demo_run() -> DemoRunResponse:
         candidate_count=cs.count if cs is not None else 0,
         records=records,
         report_path=report_path_str,
+    )
+
+
+@app.post("/ai/profile-demo", response_model=AIProfileResponse)
+def ai_profile_demo(req: AIProfileRequest) -> AIProfileResponse:
+    """
+    Analiza KYC estructurado con IA real (OpenAI) y devuelve:
+        - preliminary_profile : perfil preliminar sugerido por la IA
+        - confidence          : confianza de la IA (0-1)
+        - contradictions      : contradicciones detectadas en el KYC
+        - follow_up_questions : preguntas de follow-up para el asesor
+        - advisor_notes       : notas adicionales para el asesor
+
+    La IA NO aprueba el perfil. La aprobación siempre corresponde al asesor.
+    No persiste nada. No genera portfolios. No llama al workflow.
+    """
+    # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
+        )
+
+    # ── 2. Construir payload KYC como dict (excluye campos None) ──────────
+    kyc_dict = req.kyc_payload.model_dump(exclude_none=True)
+    # El client_id ayuda a la IA a contextualizar el caso (no lo usa para aprobar)
+    kyc_dict["client_id"] = req.client_id
+
+    # ── 3. Llamar a la IA ─────────────────────────────────────────────────
+    try:
+        result = ai_client.analyze_kyc(kyc_dict)
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile analysis failed. The AI returned an invalid response.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile analysis failed due to an unexpected error.",
+        )
+
+    # ── 4. Construir respuesta ─────────────────────────────────────────────
+    contradictions = [
+        AIContradictionResponse(
+            field=c.get("field", ""),
+            severity=c.get("severity", ""),
+            explanation=c.get("explanation", ""),
+        )
+        for c in result.get("contradictions", [])
+        if isinstance(c, dict)
+    ]
+
+    return AIProfileResponse(
+        client_id=req.client_id,
+        preliminary_profile=result["preliminary_profile"],
+        confidence=float(result["confidence"]),
+        contradictions=contradictions,
+        follow_up_questions=[str(q) for q in result.get("follow_up_questions", [])],
+        advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
     )
 
 

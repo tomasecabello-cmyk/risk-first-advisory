@@ -194,3 +194,45 @@ class LivePortfolioResponse(BaseModel):
     candidates: list[LivePortfolioCandidateResponse]
     candidate_count: int
     message: str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /ai/profile-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIProfileKYCRequest(BaseModel):
+    risk_tolerance_score: int = Field(ge=1, le=10)
+    risk_capacity_score: int = Field(ge=1, le=10)
+    liquidity_need_score: int = Field(ge=1, le=10)
+    investment_horizon_years: int = Field(gt=0)
+    max_acceptable_drawdown_pct: float = Field(ge=0.0)
+    investment_experience: str
+    income_stability: str
+    net_worth: float = Field(ge=0.0)
+    liquid_net_worth: float = Field(ge=0.0)
+    declared_return_expectation_pct: float | None = None
+    open_investment_goal: str | None = None
+    open_risk_reaction: str | None = None
+    open_past_experience: str | None = None
+    open_concerns: str | None = None
+
+
+class AIProfileRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    kyc_payload: AIProfileKYCRequest
+
+
+class AIContradictionResponse(BaseModel):
+    field: str
+    severity: str
+    explanation: str
+
+
+class AIProfileResponse(BaseModel):
+    client_id: str
+    preliminary_profile: str
+    confidence: float
+    contradictions: list[AIContradictionResponse]
+    follow_up_questions: list[str]
+    advisor_notes: list[str]
