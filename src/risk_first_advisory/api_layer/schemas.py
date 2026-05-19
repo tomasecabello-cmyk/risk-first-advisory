@@ -143,3 +143,54 @@ class WorkflowRunResponse(BaseModel):
     candidate_count: int
     records: PersistenceRecordIds
     report_path: str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /live/portfolio-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class LivePortfolioRequest(BaseModel):
+    profile: str = "moderado"
+    period: str = "3y"
+    interval: str = "1d"
+
+
+class LivePortfolioWeightResponse(BaseModel):
+    ticker: str
+    weight: float
+
+
+class LivePortfolioMetadataResponse(BaseModel):
+    risk_budget_exceeded: bool
+    requires_advisor_override: bool
+    exceeded_constraints: list[str]
+    reason_codes: list[str]
+    notes: list[str]
+
+
+class LivePortfolioCandidateResponse(BaseModel):
+    variant: str
+    objective: str
+    expected_return_annual: float
+    volatility_annual: float
+    risk_score: float
+    constraints_satisfied: bool
+    reason_codes: list[str]
+    notes: list[str]
+    metadata: LivePortfolioMetadataResponse
+    weights: list[LivePortfolioWeightResponse]
+
+
+class LivePortfolioResponse(BaseModel):
+    status: str
+    profile: str
+    period: str
+    interval: str
+    total_tickers: int
+    usable_snapshots: int
+    failed_or_missing: int
+    dq_warnings: list[str]
+    candidates: list[LivePortfolioCandidateResponse]
+    candidate_count: int
+    message: str

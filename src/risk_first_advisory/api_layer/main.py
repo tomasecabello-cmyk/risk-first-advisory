@@ -31,6 +31,11 @@ from risk_first_advisory.api_layer.schemas import (
     FinancialGoalRequest,
     HealthResponse,
     KYCDataRequest,
+    LivePortfolioCandidateResponse,
+    LivePortfolioMetadataResponse,
+    LivePortfolioRequest,
+    LivePortfolioResponse,
+    LivePortfolioWeightResponse,
     PersistenceRecordIds,
     RecordListResponse,
     StoredRecordResponse,
@@ -121,6 +126,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Universo ETF para /live/portfolio-demo (mismo que scripts/run_live_portfolio_demo.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LIVE_TICKERS: list[str] = [
+    "BIL", "SHV", "AGG", "BND", "IEF",
+    "VTI", "SPY", "VEA", "VWO", "HYG", "GLD",
+]
+
+_LIVE_ASSET_CLASS_MAP: dict[str, str] = {
+    "BIL": "cash", "SHV": "cash",
+    "AGG": "bond", "BND": "bond", "IEF": "bond",
+    "VTI": "equity", "SPY": "equity", "VEA": "equity", "VWO": "equity",
+    "HYG": "high_yield",
+    "GLD": "commodity",
+}
+
+_LIVE_CURRENCY_MAP: dict[str, str] = {t: "USD" for t in _LIVE_TICKERS}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,6 +359,228 @@ def _persist_workflow(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers para /live/portfolio-demo (privados, inyectables en tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_live_provider(period: str, interval: str):
+    """
+    Crea un FreeMarketDataProvider con el universo de ETFs live.
+
+    Función separada para facilitar monkeypatch en tests sin llamar internet.
+    """
+    from risk_first_advisory.data_layer.free_market_data import FreeMarketDataProvider
+
+    return FreeMarketDataProvider(
+        tickers=_LIVE_TICKERS,
+        asset_class_map=_LIVE_ASSET_CLASS_MAP,
+        currency_map=_LIVE_CURRENCY_MAP,
+        lookback_period=period,
+        interval=interval,
+    )
+
+
+def _build_live_risk_budget(profile_name: str):
+    """
+    Construye un RiskBudget directamente desde PROFILE_BASE_PARAMS, sin KYCData.
+    min_liquidity=0.0 y preferred_currency=USD como defaults.
+    """
+    from risk_first_advisory.models.risk_budget import RiskBudget
+    from risk_first_advisory.rules_layer.risk_budget_builder import PROFILE_BASE_PARAMS
+
+    params = dict(PROFILE_BASE_PARAMS[profile_name])
+    return RiskBudget(
+        profile_name=profile_name,
+        target_volatility=params["target_volatility"],
+        max_volatility=params["max_volatility"],
+        max_drawdown=params["max_drawdown"],
+        min_liquidity=0.0,
+        max_equity=params["max_equity"],
+        max_high_yield=params["max_high_yield"],
+        max_single_asset=params["max_single_asset"],
+        max_sector_exposure=params["max_sector_exposure"],
+        max_duration=params["max_duration"],
+        complex_products_allowed=params["complex_products_allowed"],
+        preferred_currency="USD",
+        notes=["source=live_portfolio_demo_api"],
+    )
+
+
+def _run_live_portfolio_demo(
+    profile: str,
+    period: str,
+    interval: str,
+    provider=None,
+) -> LivePortfolioResponse:
+    """
+    Ejecuta el pipeline live completo:
+        provider → DataQualityGate → ReturnEstimator
+        → CovarianceEngine → RiskBudget → PortfolioGenerationCoordinator
+
+    El parámetro ``provider`` permite inyectar un proveedor fake en tests.
+    Si es None se crea un FreeMarketDataProvider real mediante _make_live_provider.
+    """
+    from risk_first_advisory.data_layer.covariance import CovarianceEngine
+    from risk_first_advisory.data_layer.data_quality import DataQualityGate
+    from risk_first_advisory.data_layer.return_estimator import ReturnEstimator
+    from risk_first_advisory.portfolio_layer.generation import (
+        PortfolioGenerationCoordinator,
+        PortfolioVariant,
+    )
+
+    _variant_order = [
+        PortfolioVariant.DEFENSIVE,
+        PortfolioVariant.BALANCED,
+        PortfolioVariant.GROWTH,
+    ]
+
+    base_kwargs = {"profile": profile, "period": period, "interval": interval}
+
+    # ── Proveedor ──────────────────────────────────────────────────────────
+    if provider is None:
+        provider = _make_live_provider(period, interval)
+
+    # ── DQ pass ───────────────────────────────────────────────────────────
+    dq_gate = DataQualityGate()
+    usable_snapshots = []
+    dq_results_map: dict = {}
+    dq_warnings: list[str] = []
+    failed_or_missing = 0
+
+    for ticker in _LIVE_TICKERS:
+        try:
+            snapshot = provider.get_snapshot(ticker)
+        except Exception:
+            failed_or_missing += 1
+            continue
+
+        if snapshot is None:
+            failed_or_missing += 1
+            continue
+
+        try:
+            dq_result = dq_gate.evaluate(snapshot)
+        except Exception:
+            failed_or_missing += 1
+            continue
+
+        dq_results_map[ticker] = dq_result
+        if dq_result.warnings:
+            dq_warnings.extend(
+                f"{ticker}: {w}" for w in dq_result.warnings
+            )
+
+        if dq_result.is_usable:
+            usable_snapshots.append(snapshot)
+        else:
+            failed_or_missing += 1
+
+    if len(usable_snapshots) < 3:
+        return LivePortfolioResponse(
+            **base_kwargs,
+            status="insufficient_data",
+            total_tickers=len(_LIVE_TICKERS),
+            usable_snapshots=len(usable_snapshots),
+            failed_or_missing=failed_or_missing,
+            dq_warnings=dq_warnings,
+            candidates=[],
+            candidate_count=0,
+            message=(
+                f"Solo {len(usable_snapshots)} snapshot(s) usables de "
+                f"{len(_LIVE_TICKERS)} configurados. "
+                "Se necesitan al menos 3. Verificar conexión a internet."
+            ),
+        )
+
+    # ── Return estimates ──────────────────────────────────────────────────
+    return_estimates = ReturnEstimator().estimate_many(
+        usable_snapshots,
+        data_quality_results_by_ticker=dq_results_map,
+    )
+
+    # ── Covariance matrix ─────────────────────────────────────────────────
+    covariance_matrix = CovarianceEngine().build(usable_snapshots)
+
+    # ── Risk budget ───────────────────────────────────────────────────────
+    risk_budget = _build_live_risk_budget(profile)
+
+    # ── Portfolio generation ──────────────────────────────────────────────
+    try:
+        candidate_set = PortfolioGenerationCoordinator().generate(
+            client_id="LIVE-API-DEMO",
+            approved_profile_name=profile,
+            return_estimates=return_estimates,
+            covariance_matrix=covariance_matrix,
+            risk_budget=risk_budget,
+        )
+    except ValueError as exc:
+        return LivePortfolioResponse(
+            **base_kwargs,
+            status="infeasible",
+            total_tickers=len(_LIVE_TICKERS),
+            usable_snapshots=len(usable_snapshots),
+            failed_or_missing=failed_or_missing,
+            dq_warnings=dq_warnings,
+            candidates=[],
+            candidate_count=0,
+            message=f"Ninguna variante factible: {exc}",
+        )
+
+    # ── Serializar candidatos ─────────────────────────────────────────────
+    candidates_out: list[LivePortfolioCandidateResponse] = []
+    for variant in _variant_order:
+        if variant not in candidate_set.candidates:
+            continue
+        portfolio = candidate_set.candidates[variant]
+        meta = candidate_set.metadata.get(variant)
+
+        # Pesos ordenados mayor → menor, solo > 0
+        sorted_weights = sorted(
+            ((t, w) for t, w in portfolio.weights.items() if w > 1e-6),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )
+
+        meta_out = LivePortfolioMetadataResponse(
+            risk_budget_exceeded=meta.risk_budget_exceeded if meta else False,
+            requires_advisor_override=meta.requires_advisor_override if meta else False,
+            exceeded_constraints=list(meta.exceeded_constraints) if meta else [],
+            reason_codes=list(meta.reason_codes) if meta else [],
+            notes=list(meta.notes) if meta else [],
+        )
+
+        candidates_out.append(
+            LivePortfolioCandidateResponse(
+                variant=variant.value,
+                objective=portfolio.objective.value,
+                expected_return_annual=portfolio.expected_return_annual,
+                volatility_annual=portfolio.volatility_annual,
+                risk_score=portfolio.risk_score,
+                constraints_satisfied=portfolio.constraints_satisfied,
+                reason_codes=list(portfolio.reason_codes),
+                notes=list(portfolio.notes),
+                metadata=meta_out,
+                weights=[
+                    LivePortfolioWeightResponse(ticker=t, weight=w)
+                    for t, w in sorted_weights
+                ],
+            )
+        )
+
+    return LivePortfolioResponse(
+        **base_kwargs,
+        status="completed",
+        total_tickers=len(_LIVE_TICKERS),
+        usable_snapshots=len(usable_snapshots),
+        failed_or_missing=failed_or_missing,
+        dq_warnings=dq_warnings,
+        candidates=candidates_out,
+        candidate_count=len(candidates_out),
+        message=f"{len(candidates_out)} portfolio(s) generado(s) para perfil '{profile}'.",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -399,6 +646,23 @@ def demo_run() -> DemoRunResponse:
         candidate_count=cs.count if cs is not None else 0,
         records=records,
         report_path=report_path_str,
+    )
+
+
+@app.post("/live/portfolio-demo", response_model=LivePortfolioResponse)
+def live_portfolio_demo(req: LivePortfolioRequest) -> LivePortfolioResponse:
+    from risk_first_advisory.rules_layer.risk_budget_builder import VALID_PROFILES
+
+    if req.profile not in VALID_PROFILES:
+        valid = ", ".join(sorted(VALID_PROFILES))
+        raise HTTPException(
+            status_code=422,
+            detail=f"Perfil desconocido: {req.profile!r}. Válidos: {valid}",
+        )
+    return _run_live_portfolio_demo(
+        profile=req.profile,
+        period=req.period,
+        interval=req.interval,
     )
 
 
