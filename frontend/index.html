@@ -273,6 +273,117 @@
       .form-grid, .form-grid.cols-3 { grid-template-columns: 1fr; }
       .full-span { grid-column: 1; }
     }
+
+    /* ── live portfolio — candidate cards ── */
+    .portfolio-card {
+      border: 1px solid #dde2ea;
+      border-radius: 6px;
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .portfolio-card:last-child { margin-bottom: 0; }
+
+    .portfolio-card-header {
+      background: #f0f3f8;
+      border-bottom: 1px solid #dde2ea;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .portfolio-card-header .variant-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1a2744;
+      margin-right: 4px;
+    }
+    .portfolio-card-body { padding: 16px; }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px 16px;
+      margin-bottom: 14px;
+    }
+    .metric-item label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #718096;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+    .metric-item .metric-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1a2744;
+    }
+
+    .override-banner {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 5px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: #92400e;
+    }
+    .override-banner .override-title {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .weight-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid #f0f3f8;
+    }
+    .weight-row:last-child { border-bottom: none; }
+    .weight-ticker {
+      font-family: "Menlo","Consolas",monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1a2744;
+      width: 44px;
+      flex-shrink: 0;
+    }
+    .weight-pct {
+      font-size: 12px;
+      color: #4a5568;
+      width: 52px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .weight-bar-track {
+      flex: 1;
+      background: #e2e8f0;
+      border-radius: 3px;
+      height: 6px;
+      overflow: hidden;
+    }
+    .weight-bar-fill {
+      height: 100%;
+      background: #2e4a8a;
+      border-radius: 3px;
+    }
+
+    .status-insufficient { background: #eff6ff; border: 1px solid #93c5fd; }
+    .status-infeasible   { background: #fef2f2; border: 1px solid #fca5a5; }
+    .live-status-box {
+      padding: 14px 18px;
+      border-radius: 6px;
+      margin-bottom: 14px;
+    }
+    .live-status-box .status-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .live-status-box .status-msg   { font-size: 13px; color: #4a5568; }
   </style>
 </head>
 <body>
@@ -446,7 +557,63 @@
     </div>
   </div>
 
-  <!-- ── 3. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <!-- ── 3. LIVE PORTFOLIO DEMO ───────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Live Portfolio Demo — POST /live/portfolio-demo</h2>
+      <span class="pill pill-blue" style="font-size:10px;">yfinance · free data</span>
+    </div>
+    <div class="card-body">
+
+      <p style="color:#718096;font-size:13px;margin-bottom:16px;">
+        Descarga datos históricos de ETFs reales desde <strong>yfinance</strong>, los pasa por
+        DataQualityGate + ReturnEstimator + CovarianceEngine y genera hasta 3 portfolios candidatos
+        (DEFENSIVE / BALANCED / GROWTH) para el perfil seleccionado.
+        <br><span style="color:#92400e;">⏱ Puede tardar 5–15 s. Requiere internet. No usa IA ni KYC.</span>
+      </p>
+
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>profile</label>
+          <select id="lp-profile">
+            <option value="conservador">conservador</option>
+            <option value="moderado-defensivo">moderado-defensivo</option>
+            <option value="moderado" selected>moderado</option>
+            <option value="moderado-agresivo">moderado-agresivo</option>
+            <option value="agresivo">agresivo</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>period <span class="hint">lookback histórico</span></label>
+          <select id="lp-period">
+            <option value="1y">1y</option>
+            <option value="2y">2y</option>
+            <option value="3y" selected>3y</option>
+            <option value="5y">5y</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>interval <span class="hint">frecuencia</span></label>
+          <select id="lp-interval">
+            <option value="1d" selected>1d (daily)</option>
+            <option value="1wk">1wk (weekly)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-live" onclick="runLivePortfolio()">
+          Run Live Portfolio
+        </button>
+        <button class="btn-secondary" onclick="clearLivePortfolioResult()">Clear</button>
+      </div>
+
+      <div id="live-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 4. PERSISTED WORKFLOWS ────────────────────────────── -->
   <div class="card">
     <div class="card-header">
       <h2>Persisted Workflows — GET /workflow</h2>
@@ -805,6 +972,281 @@
   function clearWorkflowsTable() {
     el("workflows-result").innerHTML = "";
   }
+
+  // ── 3. live portfolio demo ───────────────────────────────────
+
+  function setLiveButtonLoading(loading) {
+    const btn = el("btn-live");
+    if (!btn) return;
+    btn.disabled = loading;
+    btn.innerHTML = loading
+      ? `<span class="spinner"></span>Downloading & generating…`
+      : "Run Live Portfolio";
+  }
+
+  async function runLivePortfolio() {
+    const out = el("live-result");
+    out.innerHTML = `<div class="msg msg-info" style="margin-top:16px;">
+      <span class="spinner" style="border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>
+      Downloading market data and generating portfolios…
+    </div>`;
+    out.classList.remove("hidden");
+    setLiveButtonLoading(true);
+
+    const payload = {
+      profile:  el("lp-profile").value,
+      period:   el("lp-period").value,
+      interval: el("lp-interval").value.split(" ")[0],   // strip "(daily)" suffix
+    };
+
+    try {
+      const r = await fetch(`${API}/live/portfolio-demo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        let errHtml = `<div class="msg msg-error" style="margin-top:16px;"><strong>HTTP ${r.status}</strong>`;
+        if (data) {
+          if (r.status === 422 && data.detail) {
+            errHtml += `<br><strong>Detail:</strong> ${typeof data.detail === "string"
+              ? data.detail
+              : JSON.stringify(data.detail)}`;
+          } else {
+            errHtml += `<pre style="margin-top:8px;font-size:12px;">${escapeHTML(formatJSON(data))}</pre>`;
+          }
+        }
+        errHtml += `</div>`;
+        out.innerHTML = errHtml;
+        return;
+      }
+
+      out.innerHTML = renderLivePortfolioResult(data);
+
+    } catch (err) {
+      out.innerHTML = `<div style="margin-top:16px;">${apiError(err)}</div>`;
+    } finally {
+      setLiveButtonLoading(false);
+    }
+  }
+
+  function clearLivePortfolioResult() {
+    const out = el("live-result");
+    out.innerHTML = "";
+    out.classList.add("hidden");
+    setLiveButtonLoading(false);
+  }
+
+  function pct(v) {
+    return (v * 100).toFixed(2) + "%";
+  }
+
+  function liveStatusPill(status) {
+    if (status === "completed")        return `<span class="pill pill-green">completed</span>`;
+    if (status === "insufficient_data") return `<span class="pill pill-orange">insufficient_data</span>`;
+    if (status === "infeasible")       return `<span class="pill pill-red">infeasible</span>`;
+    return `<span class="pill pill-grey">${status}</span>`;
+  }
+
+  function renderLivePortfolioResult(data) {
+    const status = data.status ?? "—";
+    const candidates = data.candidates ?? [];
+    const dqWarnings = data.dq_warnings ?? [];
+
+    // ── summary section ──────────────────────────────────────
+    let summaryHtml = `
+      <div class="result-summary">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <strong style="font-size:15px;">Result</strong>
+          ${liveStatusPill(status)}
+        </div>
+
+        ${(status === "insufficient_data" || status === "infeasible") ? `
+          <div class="live-status-box ${status === "infeasible" ? "status-infeasible" : "status-insufficient"}" style="margin-bottom:10px;">
+            <div class="status-title">${status === "infeasible" ? "⚠ No feasible portfolio" : "⚠ Insufficient market data"}</div>
+            <div class="status-msg">${escapeHTML(data.message ?? "")}</div>
+          </div>
+        ` : ""}
+
+        <div class="summary-grid">
+          <div class="summary-item">
+            <label>profile</label>
+            <div class="value"><strong>${data.profile ?? "—"}</strong></div>
+          </div>
+          <div class="summary-item">
+            <label>period / interval</label>
+            <div class="value">${data.period ?? "—"} · ${data.interval ?? "—"}</div>
+          </div>
+          <div class="summary-item">
+            <label>total_tickers</label>
+            <div class="value">${data.total_tickers ?? "—"}</div>
+          </div>
+          <div class="summary-item">
+            <label>usable_snapshots</label>
+            <div class="value">${data.usable_snapshots ?? "—"}</div>
+          </div>
+          <div class="summary-item">
+            <label>failed_or_missing</label>
+            <div class="value">${data.failed_or_missing ?? "—"}</div>
+          </div>
+          <div class="summary-item">
+            <label>candidate_count</label>
+            <div class="value"><strong>${data.candidate_count ?? 0}</strong></div>
+          </div>
+          ${status === "completed" ? `
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>message</label>
+            <div class="value" style="color:#166534;">${escapeHTML(data.message ?? "")}</div>
+          </div>` : ""}
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>dq_warnings (${dqWarnings.length})</label>
+            <div class="value">
+              ${dqWarnings.length
+                ? `<div class="list-chips">${dqWarnings.map(w => `<span class="chip chip-warn">${escapeHTML(w)}</span>`).join("")}</div>`
+                : `<span style="color:#a0aec0;font-size:12px;">none</span>`
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ── candidate portfolios ─────────────────────────────────
+    let candidatesHtml = "";
+    if (candidates.length > 0) {
+      candidatesHtml = `
+        <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+          <div style="font-size:13px;font-weight:700;color:#1a2744;margin-bottom:12px;">
+            Candidate Portfolios
+          </div>
+          ${candidates.map(renderPortfolioCandidate).join("")}
+        </div>
+      `;
+    }
+
+    // ── json collapsible ─────────────────────────────────────
+    const jsonHtml = `
+      <details>
+        <summary>Full JSON response</summary>
+        <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+      </details>
+    `;
+
+    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${candidatesHtml}${jsonHtml}</div>`;
+  }
+
+  function renderPortfolioCandidate(c) {
+    const meta = c.metadata ?? {};
+    const weights = c.weights ?? [];
+    const needsOverride = meta.requires_advisor_override === true;
+    const exceededConstraints = meta.exceeded_constraints ?? [];
+    const metaReasonCodes = meta.reason_codes ?? [];
+    const metaNotes = meta.notes ?? [];
+
+    // header pill colors per variant
+    const variantPillClass = {
+      DEFENSIVE: "pill-blue",
+      BALANCED:  "pill-green",
+      GROWTH:    "pill-orange",
+    }[c.variant] ?? "pill-grey";
+
+    // ── override warning banner ──────────────────────────────
+    const overrideBanner = needsOverride ? `
+      <div class="override-banner">
+        <div class="override-title">
+          <span>⚠</span> Advisor Override Required
+        </div>
+        <div style="margin-bottom:5px;">
+          <strong>Exceeded constraints:</strong>
+          ${exceededConstraints.length
+            ? exceededConstraints.map(x => `<span class="chip chip-warn" style="margin-left:4px;">${escapeHTML(x)}</span>`).join("")
+            : "<em>none listed</em>"}
+        </div>
+        <div>
+          <strong>Reason codes:</strong>
+          ${metaReasonCodes.length
+            ? metaReasonCodes.map(x => `<span class="chip chip-err" style="margin-left:4px;">${escapeHTML(x)}</span>`).join("")
+            : "<em>none</em>"}
+        </div>
+        ${metaNotes.length ? `<div style="margin-top:5px;color:#78350f;font-size:11px;">${escapeHTML(metaNotes.join(" · "))}</div>` : ""}
+      </div>
+    ` : "";
+
+    // ── weights list ─────────────────────────────────────────
+    const weightsHtml = weights.length ? `
+      <div style="margin-top:10px;">
+        <div style="font-size:11px;font-weight:700;color:#718096;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">
+          Weights (${weights.length} assets)
+        </div>
+        ${weights.map(w => {
+          const barPct = Math.round(w.weight * 100 * 2);  // scale ×2 for visual
+          return `
+            <div class="weight-row">
+              <span class="weight-ticker">${escapeHTML(w.ticker)}</span>
+              <span class="weight-pct">${pct(w.weight)}</span>
+              <div class="weight-bar-track">
+                <div class="weight-bar-fill" style="width:${Math.min(barPct, 100)}%;"></div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    ` : `<div style="color:#a0aec0;font-size:12px;margin-top:8px;">No weights available.</div>`;
+
+    // ── metadata collapsible ─────────────────────────────────
+    const metaHtml = `
+      <details style="margin-top:10px;">
+        <summary style="font-size:12px;">Variant metadata</summary>
+        <div style="padding:10px 0 0 4px;">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-bottom:6px;">
+            <span><strong>risk_budget_exceeded:</strong> ${boolPill(meta.risk_budget_exceeded)}</span>
+            <span><strong>requires_advisor_override:</strong> ${boolPill(meta.requires_advisor_override)}</span>
+          </div>
+          ${exceededConstraints.length ? `<div style="margin-bottom:4px;font-size:12px;"><strong>exceeded_constraints:</strong> ${chips(exceededConstraints, "chip chip-warn")}</div>` : ""}
+          ${metaReasonCodes.length ? `<div style="margin-bottom:4px;font-size:12px;"><strong>reason_codes:</strong> ${chips(metaReasonCodes, "chip chip-err")}</div>` : ""}
+          ${metaNotes.length ? `<div style="font-size:12px;"><strong>notes:</strong> ${chips(metaNotes)}</div>` : ""}
+        </div>
+      </details>
+    `;
+
+    return `
+      <div class="portfolio-card${needsOverride ? ' style="border-color:#fcd34d;"' : ''}">
+        <div class="portfolio-card-header">
+          <span class="variant-name">${escapeHTML(c.variant)}</span>
+          <span class="pill ${variantPillClass}" style="font-size:10px;">${escapeHTML(c.objective)}</span>
+          ${needsOverride ? `<span class="pill pill-orange" style="font-size:10px;">⚠ override required</span>` : `<span class="pill pill-green" style="font-size:10px;">✓ within budget</span>`}
+        </div>
+        <div class="portfolio-card-body">
+          ${overrideBanner}
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <label>Expected Return</label>
+              <div class="metric-value">${pct(c.expected_return_annual)}</div>
+            </div>
+            <div class="metric-item">
+              <label>Volatility</label>
+              <div class="metric-value">${pct(c.volatility_annual)}</div>
+            </div>
+            <div class="metric-item">
+              <label>Risk Score</label>
+              <div class="metric-value">${c.risk_score.toFixed(4)}</div>
+            </div>
+            <div class="metric-item">
+              <label>Constraints OK</label>
+              <div class="metric-value">${boolPill(c.constraints_satisfied)}</div>
+            </div>
+          </div>
+          ${weightsHtml}
+          ${metaHtml}
+        </div>
+      </div>
+    `;
+  }
+
 </script>
 
 </body>

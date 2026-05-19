@@ -72,6 +72,7 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 |---|---|---|---|
 | API Health | `GET` | `/health` | Verifica que el backend responde |
 | Run Workflow | `POST` | `/workflow/run` | Ejecuta el workflow con el formulario |
+| Live Portfolio Demo | `POST` | `/live/portfolio-demo` | Portfolios reales con datos de yfinance |
 | Persisted Workflows | `GET` | `/workflow` | Lista todos los workflows |
 | Persisted Workflows | `GET` | `/workflow?client_id=...` | Filtra workflows por cliente |
 
@@ -89,6 +90,30 @@ Al ejecutar:
 - Muestra un resumen estructurado: status, perfil aprobado, portfolios generados, tickers, reason codes, warnings, IDs persistidos.
 - Muestra el JSON completo de la respuesta en un bloque colapsable.
 
+### Live Portfolio Demo
+Descarga datos históricos reales de ETFs vía **yfinance** y genera hasta 3 portfolios candidatos (DEFENSIVE / BALANCED / GROWTH) para el perfil seleccionado.
+
+Selectores:
+- **profile** — perfil de riesgo aprobado (conservador → agresivo)
+- **period** — período histórico de descarga (1y / 2y / 3y / 5y)
+- **interval** — frecuencia de datos (1d daily / 1wk weekly)
+
+Al ejecutar:
+- Muestra un summary: status, tickers usables/fallidos, DQ warnings.
+- Por cada variante generada: retorno esperado, volatilidad, risk score, barra de pesos, metadata de risk budget.
+- Si GROWTH requiere advisor override (siempre relaja `max_volatility`), se muestra un banner de advertencia con los constraints excedidos.
+- Si `status=insufficient_data` o `status=infeasible`, se muestra el mensaje de error en lugar de portfolios.
+- Muestra el JSON completo colapsable.
+
+**Notas importantes:**
+- Usa datos **gratuitos de Yahoo Finance** vía yfinance. No es una fuente de producción.
+- La descarga puede tardar **5–15 segundos** según la velocidad de conexión.
+- **Requiere conexión a internet.** Sin ella, todos los snapshots fallan y el status será `insufficient_data`.
+- **No persiste resultados** en SQLite ni genera reporte Markdown.
+- **No usa IA** ni KYC del cliente. El perfil se selecciona directamente.
+- Los parámetros del Risk Budget (volatilidades, límites de asset class) se toman directamente de `PROFILE_BASE_PARAMS` sin ajustes de KYC.
+- El universo fijo es 11 ETFs: BIL, SHV, AGG, BND, IEF, VTI, SPY, VEA, VWO, HYG, GLD.
+
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.
 
@@ -102,4 +127,4 @@ Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestr
 - **CORS.** Si el navegador bloquea requests desde `file://`, usar `python -m http.server 5500 -d frontend`.
 - **MockAIClient y MockMarketDataProvider.** El backend usa respuestas scripted y datos de fixture. No hay IA real ni datos de mercado en tiempo real.
 - **SQLite local.** Los IDs de workflow (`workflow_000001`, etc.) son secuenciales por sesión de backend. Se resetean si el servidor se reinicia sin persistencia previa.
-- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run` y `GET /workflow`. Los endpoints `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
+- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo` y `GET /workflow`. Los endpoints `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
