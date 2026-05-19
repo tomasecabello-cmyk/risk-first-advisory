@@ -140,11 +140,11 @@ Convención: un reason code en `AdvisoryWorkflowResult.reason_codes` que corresp
 - **Capa:** `portfolio_layer` (`PortfolioGenerationCoordinator`).
 - **Acción esperada:** Informativo. El asesor revisa qué variantes están disponibles.
 
-### `PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET` *(pendiente M2)*
-- **Significado:** La variante GROWTH excede uno o más límites del RiskBudget aprobado. Requiere override explícito del asesor.
-- **Bloquea:** No bloquea la variante, pero la marca como que requiere override.
-- **Capa:** `portfolio_layer` (M2).
-- **Acción esperada:** El asesor revisa los límites excedidos y decide si aprueba la variante con override documentado. La variante no puede presentarse como recomendación base.
+### `PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`
+- **Significado:** La variante `GROWTH` fue construida con un budget derivado que relaja `max_volatility` por encima del `RiskBudget` aprobado para el cliente. La cartera GROWTH resultante excede la volatilidad máxima aprobada.
+- **Bloquea:** No bloquea la variante, pero la marca con `risk_budget_exceeded=True` y `requires_advisor_override=True` en `PortfolioVariantMetadata`. Los campos excedidos quedan listados en `exceeded_constraints`.
+- **Capa:** `portfolio_layer` (`PortfolioGenerationCoordinator`). Implementado en M2-prep.
+- **Acción esperada:** El asesor revisa los límites excedidos (ver `exceeded_constraints` en el reporte Markdown) y decide si aprueba la variante con override documentado. La variante `GROWTH` no puede presentarse como recomendación base si excede el `RiskBudget`. **Pendiente:** la firma/persistencia del override del asesor queda para la capa de workflow/UI futura.
 
 ---
 

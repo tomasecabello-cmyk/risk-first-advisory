@@ -109,7 +109,7 @@ Las siguientes funcionalidades no están implementadas en M1 y representan área
 |---|---|---|
 | `MockAIClient` con respuestas scripted | La IA real debe validarse contra un modelo de prompts con revisión humana antes de producción. | M2/M3 |
 | `MockMarketDataProvider` con datos de fixture | Los datos de mercado en producción deben tener SLA de frescura, auditoría de fuente y control de calidad automatizado. | M2 |
-| `GROWTH` no tiene advisor override explícito | Si GROWTH excede el RiskBudget aprobado, debe marcarse y requerir override explícito antes de presentarse al cliente. | M2 (DD-010) |
+| `GROWTH` no tiene advisor override persistido/firmado | GROWTH se marca con `PortfolioVariantMetadata` cuando excede el RiskBudget (implementado). Falta: endpoint/UI donde el asesor firme el override explícitamente y quede en el audit trail. | M2+ (DD-010) |
 | `ESGPreference` con `prefer_tag`/`avoid_tag` | Las preferencias cualitativas no se evalúan en M1. Los instrumentos afectados reciben `ESG_DATA_INCOMPLETE`. | M2 |
 | Sin persistencia de sesión | El `AuditTrail` se genera en memoria. En producción debe persistirse antes del cierre de sesión. | M2 |
 | Sin firma del asesor | `AdvisoryProfile.advisor_comment` es texto libre sin firma digital ni identificación verificada. | M3 |
@@ -136,3 +136,32 @@ El sistema usa un `KYCData` estructurado como fuente primaria del perfil. Este d
 - El `AuditTrail` registra la trazabilidad completa: KYC recibido → perfil propuesto por IA → follow-up (si aplica) → perfil revisado → aprobación del asesor.
 
 **Beneficio ante auditoría:** este diseño permite responder con evidencia documental a las preguntas regulatorias estándar: "¿Qué datos recopiló?", "¿Cómo llegó a este perfil?", "¿Por qué este cliente tiene este perfil y no otro?", y "¿Quién tomó la decisión final?"
+
+---
+
+## 12. Portfolio variant metadata y advisor override (M2-prep)
+
+El sistema genera hasta tres variantes de cartera por sesión: `DEFENSIVE`, `BALANCED` y `GROWTH`. Cada variante tiene una relación distinta con el `RiskBudget` aprobado del cliente:
+
+- **`DEFENSIVE`** opera con un budget más conservador que el aprobado. No puede exceder el `RiskBudget`.
+- **`BALANCED`** respeta estrictamente el `RiskBudget` aprobado. Es la recomendación base.
+- **`GROWTH`** puede exceder parcialmente el `RiskBudget` aprobado (específicamente `max_volatility`). Cuando lo hace, el exceso no se silencia.
+
+**Mecanismo de transparencia implementado:**
+
+Cuando `GROWTH` excede el `RiskBudget`, `PortfolioGenerationCoordinator` registra en `PortfolioVariantMetadata`:
+- `risk_budget_exceeded = True`
+- `requires_advisor_override = True`
+- `exceeded_constraints` — lista de restricciones excedidas (ej. `["max_volatility"]`)
+- `reason_codes = ["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"]`
+
+Esta metadata se almacena en `PortfolioCandidateSet.metadata` y se muestra en el reporte Markdown bajo **Variant Metadata** para cada variante. El reporte muestra los valores de forma explícita para que el asesor pueda evaluar el exceso antes de cualquier presentación al cliente.
+
+**Lo que esta política garantiza:**
+- `GROWTH` nunca se presenta al cliente sin que el asesor haya visto su clasificación de exceso.
+- `BALANCED` es siempre la recomendación base dentro del perfil aprobado.
+- El exceso de riesgo en `GROWTH` es auditable: queda en el `PortfolioCandidateSet`, en el reporte Markdown y (en el futuro) en el audit trail con firma del asesor.
+
+**Pendiente de compliance:**
+
+La firma explícita del asesor aceptando la variante `GROWTH` fuera del budget no está todavía implementada como acción persistida. El reporte expone la metadata visualmente, pero no existe un endpoint o UI donde el asesor confirme con trazabilidad que acepta presentar la variante `GROWTH` al cliente. Eso queda para la capa de workflow/UI futura. Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/TODO_DESIGN_NOTES.md`.

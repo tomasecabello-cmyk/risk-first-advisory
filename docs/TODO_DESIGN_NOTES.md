@@ -115,14 +115,17 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ## Estado actual
 
-Pendiente para M2.
+**Implementado parcialmente (M2-prep).**
 
-No implementado en M1.
+- `PortfolioVariantMetadata` agregado en `portfolio_layer/generation.py`.
+- `PortfolioCandidateSet` incluye campo `metadata: dict[PortfolioVariant, PortfolioVariantMetadata]`.
+- `PortfolioGenerationCoordinator` genera metadata por variante en cada `generate()`.
+- `GROWTH` usa un budget derivado con `max_volatility` relajado (`min(original * 1.5, original + 0.05)`).
+- `GROWTH` **no** relaja `max_single_asset` por ahora (evita romper pre-checks de factibilidad).
+- Cuando `GROWTH` excede el budget original, queda marcado con `risk_budget_exceeded=True`, `requires_advisor_override=True` y `RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`.
+- El reporte Markdown muestra la metadata por variante bajo `**Variant Metadata:**`.
 
-## Motivo para postergar
+## Pendiente
 
-Evitar modificar ahora `PortfolioGenerationCoordinator`, `AdvisoryWorkflowCoordinator`, `run_demo.py` y los tests asociados mientras el flujo M1 ya está estable y con suite verde.
-
-## Cuándo retomarlo
-
-Antes de presentar las variantes de portfolio como recomendación final al cliente o antes de construir la capa de reporting/producto.
+- El override del asesor todavía no es una acción persistida/firmada. El reporte lo expone visualmente, pero no existe un endpoint o UI donde el asesor confirme explícitamente que acepta la variante GROWTH fuera del budget.
+- Eso queda para la capa de workflow/UI futura (firma de override, trazabilidad en audit trail).

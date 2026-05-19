@@ -148,25 +148,31 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 
 ---
 
-## DD-010 — `GROWTH` puede exceder el `RiskBudget` solo con advisor override explícito (pendiente M2)
+## DD-010 — `GROWTH` puede exceder el `RiskBudget` solo con advisor override explícito
 
-**Estado:** Pendiente — M2  
-**Fecha:** 2026-Q1  
-**Área:** `portfolio_layer`
+**Estado:** Implementado parcialmente (M2-prep)  
+**Fecha:** 2026-Q1 / actualizado 2026-05-19  
+**Área:** `portfolio_layer`, `reporting_layer`
 
-**Contexto:** En M1, las tres variantes (DEFENSIVE, BALANCED, GROWTH) operan dentro del `RiskBudget` aprobado. El objetivo de diseño de M2 es permitir que `GROWTH` sea una alternativa de mayor riesgo que el perfil aprobado, siempre que se marque explícitamente como tal.
+**Contexto:** En M1, las tres variantes (DEFENSIVE, BALANCED, GROWTH) operaban dentro del `RiskBudget` aprobado. A partir de M2-prep, `GROWTH` puede exceder parcialmente ese budget como alternativa de mayor riesgo, siempre que el exceso quede marcado y visible.
 
-**Decisión (futura):** `GROWTH` podrá exceder parcialmente el `RiskBudget` aprobado, pero debe registrar:
-- `requires_advisor_override = True`
+**Decisión:** `GROWTH` puede exceder `max_volatility` del `RiskBudget` aprobado usando un budget derivado (`growth_max_vol = min(original * 1.50, original + 0.05)`). No relaja `max_single_asset` (evita romper pre-checks de factibilidad con universos pequeños). Cuando `GROWTH` excede el budget original, `PortfolioGenerationCoordinator` registra en `PortfolioVariantMetadata`:
 - `risk_budget_exceeded = True`
-- `reason_code = PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`
-- Lista de restricciones excedidas (`max_volatility`, `max_single_asset`, etc.)
+- `requires_advisor_override = True`
+- `exceeded_constraints = ["max_volatility"]`
+- `reason_codes = ["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"]`
 
-`GROWTH` no puede presentarse como recomendación base si excede el `RiskBudget`. `BALANCED` sigue siendo la recomendación dentro del perfil aprobado.
+`BALANCED` sigue siendo la recomendación base dentro del perfil aprobado. `DEFENSIVE` opera con un budget más conservador que el aprobado. El reporte Markdown muestra la metadata por variante bajo **Variant Metadata**.
 
 **Alternativa descartada:** Silenciar el exceso de riesgo en `GROWTH`. Descartada: ocultar que una cartera excede el perfil aprobado es una violación de compliance.
 
-**Consecuencias (anticipadas):** Requiere cambios en `PortfolioGenerationCoordinator`, en `OptimizedPortfolio` (campos `requires_advisor_override`, `risk_budget_exceeded`), en `AdvisoryWorkflowCoordinator`, y en los tests de integración. Pendiente para M2. Ver también `docs/TODO_DESIGN_NOTES.md`.
+**Consecuencias:**
+- `PortfolioVariantMetadata` implementado en `portfolio_layer/generation.py`.
+- `PortfolioCandidateSet` incluye campo `metadata: dict[PortfolioVariant, PortfolioVariantMetadata]`.
+- El reporte Markdown expone la metadata por variante (visible para el asesor).
+- **Pendiente:** el override del asesor no es todavía una acción persistida/firmada. No existe endpoint ni UI donde el asesor confirme explícitamente que acepta `GROWTH` fuera del budget. Eso queda para la capa de workflow/UI futura (firma de override, trazabilidad en audit trail).
+
+Ver también `docs/TODO_DESIGN_NOTES.md`.
 
 ---
 

@@ -7,7 +7,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 ## Estado actual
 
 - Milestone M1/M2-prep — backend core completo
-- **957 tests, todos verdes**
+- **1007 tests, todos verdes**
 - Sin IA real (MockAIClient)
 - Sin Bloomberg (MockMarketDataProvider)
 - Sin frontend
@@ -23,9 +23,9 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 | Humana | `human_layer` | `ScriptedAdvisorInterface` — decisiones por fixture |
 | Reglas | `rules_layer` | Governance, suitability, ESG, data quality |
 | Datos | `data_layer` | `MockMarketDataProvider` — precios por fixture YAML |
-| Portfolio | `portfolio_layer` | Optimizador, feasibility checker, generación de variantes |
+| Portfolio | `portfolio_layer` | Optimizador, feasibility checker, generación de variantes con metadata de override |
 | Workflow | `workflow_layer` | `AdvisoryWorkflowCoordinator` — orquesta todo el flujo |
-| Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` |
+| Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes visible |
 | Persistencia | `persistence_layer` | SQLite + repositorios in-memory |
 | API | `api_layer` | FastAPI: 9 endpoints — ejecución, recuperación y listado de registros |
 
@@ -250,6 +250,32 @@ Los fixtures están en `tests/fixtures/`:
 | `esg/` | Metadata ESG de instrumentos en YAML |
 | `market_data/` | Precios y datos de mercado en YAML |
 
+## Portfolio: variantes y metadata de override
+
+Cada ejecución del workflow puede generar hasta tres variantes de cartera candidata:
+
+| Variante | Objetivo | Relación con RiskBudget aprobado |
+|---|---|---|
+| `DEFENSIVE` | Mínima varianza | Más conservadora que el perfil aprobado |
+| `BALANCED` | Máxima utilidad | Respeta estrictamente el RiskBudget aprobado — recomendación base |
+| `GROWTH` | Máximo retorno | Puede exceder `max_volatility` del RiskBudget aprobado |
+
+Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena en su campo `metadata` un `PortfolioVariantMetadata` con:
+
+- `risk_budget_exceeded: true`
+- `requires_advisor_override: true`
+- `exceeded_constraints: [max_volatility]`
+- `reason_codes: [PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET]`
+
+El reporte Markdown muestra esa metadata por variante bajo **Variant Metadata**, incluyendo:
+- `risk_budget_exceeded`
+- `requires_advisor_override`
+- `exceeded_constraints`
+- `reason_codes`
+- `notes`
+
+Si no existe metadata explícita para una variante, el reporte muestra defaults seguros (`false` / `None`) sin romper.
+
 ## Principios del sistema
 
 1. La IA no recomienda inversiones ni decide pesos de cartera.
@@ -259,6 +285,7 @@ Los fixtures están en `tests/fixtures/`:
 5. `preliminary_profile` (propuesto por IA) y `approved_profile` (validado por asesor) son conceptos distintos.
 6. Solo `ApprovedPortfolio` puede presentarse al cliente.
 7. Todo motivo cita un `ReasonCode`. Todo evento queda en audit trail.
+8. Si `GROWTH` excede el RiskBudget aprobado, ese exceso no queda oculto — queda marcado, auditado y visible en el reporte.
 
 ## Compliance
 
