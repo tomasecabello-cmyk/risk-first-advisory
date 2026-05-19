@@ -7,7 +7,11 @@ Política: exponer solo primitivos. Los objetos de dominio internos
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class HealthResponse(BaseModel):
@@ -21,7 +25,95 @@ class PersistenceRecordIds(BaseModel):
     report_record_id: str
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# /demo/run
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 class DemoRunResponse(BaseModel):
+    status: str
+    client_id: str
+    approved_profile_name: str
+    has_portfolios: bool
+    reason_codes: list[str]
+    warnings: list[str]
+    final_optimizer_tickers: list[str]
+    portfolio_feasibility_status: str | None
+    candidate_count: int
+    records: PersistenceRecordIds
+    report_path: str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /workflow/run — request
+# ─────────────────────────────────────────────────────────────────────────────
+
+_VALID_EXPERIENCES = frozenset(
+    {"ninguna", "basica", "moderada", "avanzada", "experto",
+     "none", "basic", "moderate", "advanced", "expert"}
+)
+
+
+class KYCDataRequest(BaseModel):
+    risk_tolerance_score: int = Field(ge=1, le=10)
+    risk_capacity_score: int = Field(ge=1, le=10)
+    liquidity_need_score: int = Field(ge=1, le=10)
+    investment_horizon_years: int = Field(gt=0)
+    investment_experience: str
+    income_stability: str
+    net_worth: float = Field(ge=0.0)
+    liquid_net_worth: float = Field(ge=0.0)
+    max_acceptable_drawdown_pct: float = Field(ge=0.0, le=100.0)
+    declared_return_expectation_pct: float | None = None
+    open_investment_goal: str | None = None
+    open_risk_reaction: str | None = None
+    open_past_experience: str | None = None
+    open_concerns: str | None = None
+
+    @field_validator("investment_experience")
+    @classmethod
+    def validate_experience(cls, v: str) -> str:
+        if v.lower() not in _VALID_EXPERIENCES:
+            raise ValueError(
+                f"investment_experience inválido: {v!r}. "
+                f"Opciones: {sorted(_VALID_EXPERIENCES)}"
+            )
+        return v.lower()
+
+
+class FinancialGoalRequest(BaseModel):
+    initial_amount: float = Field(ge=0.0)
+    target_amount: float = Field(ge=0.0)
+    horizon_years: int = Field(gt=0)
+    annual_contribution: float = Field(default=0.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def check_amounts(self) -> "FinancialGoalRequest":
+        if (
+            self.target_amount < self.initial_amount
+            and self.annual_contribution == 0.0
+            and self.target_amount != self.initial_amount
+        ):
+            raise ValueError(
+                "target_amount debe ser >= initial_amount cuando annual_contribution "
+                "es 0, salvo preservación de capital (target == initial)."
+            )
+        return self
+
+
+class WorkflowRunRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    advisor_id: str = Field(min_length=1)
+    kyc_data: KYCDataRequest
+    financial_goal: FinancialGoalRequest
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /workflow/run — response
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class WorkflowRunResponse(BaseModel):
     status: str
     client_id: str
     approved_profile_name: str
