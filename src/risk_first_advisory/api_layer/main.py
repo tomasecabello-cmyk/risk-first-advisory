@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
@@ -99,6 +100,26 @@ app = FastAPI(
     title="risk-first-advisory API",
     description="AI proposes, advisor decides.",
     version="0.1.0",
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS — permite que el frontend local consuma la API sin bloqueo de navegador.
+# Solo orígenes locales conocidos. No usar allow_origins=["*"] en producción.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CORS_ORIGINS = [
+    "http://127.0.0.1:5500",  # python -m http.server 5500 -d frontend
+    "http://localhost:5500",
+    "http://127.0.0.1:5173",  # Vite dev server (futuro)
+    "http://localhost:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

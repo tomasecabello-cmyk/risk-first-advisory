@@ -237,3 +237,133 @@ class TestDemoRunSerialization:
         for field in ("reason_codes", "warnings", "final_optimizer_tickers"):
             for item in demo_response[field]:
                 assert isinstance(item, str), f"{field} contiene no-string: {item!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: CORS — frontend local puede consumir la API
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCORS:
+    """
+    Verifica que el backend incluye los headers CORS correctos para los
+    orígenes locales permitidos (frontend dev en http.server o Vite).
+
+    TestClient de Starlette propaga el header Origin si se incluye en headers,
+    y el middleware CORSMiddleware lo procesa y devuelve access-control-allow-origin.
+    """
+
+    _ALLOWED_ORIGINS = [
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+
+    def test_health_cors_header_present_for_allowed_origin(self, client: TestClient):
+        """GET /health con Origin permitido devuelve access-control-allow-origin."""
+        response = client.get(
+            "/health",
+            headers={"Origin": "http://127.0.0.1:5500"},
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" in response.headers
+
+    def test_health_cors_reflects_allowed_origin(self, client: TestClient):
+        """El header ACAO refleja el origen enviado (no '*')."""
+        origin = "http://127.0.0.1:5500"
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    def test_localhost_5500_is_allowed(self, client: TestClient):
+        origin = "http://localhost:5500"
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    def test_127_0_0_1_5173_is_allowed(self, client: TestClient):
+        origin = "http://127.0.0.1:5173"
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    def test_localhost_5173_is_allowed(self, client: TestClient):
+        origin = "http://localhost:5173"
+        response = client.get("/health", headers={"Origin": origin})
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    def test_wildcard_not_used(self, client: TestClient):
+        """El backend no usa allow_origins=['*'] — ACAO nunca devuelve '*'."""
+        response = client.get(
+            "/health",
+            headers={"Origin": "http://127.0.0.1:5500"},
+        )
+        acao = response.headers.get("access-control-allow-origin", "")
+        assert acao != "*"
+
+    def test_unknown_origin_does_not_get_acao(self, client: TestClient):
+        """Un origen no listado no recibe el header access-control-allow-origin."""
+        response = client.get(
+            "/health",
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert response.status_code == 200  # la request pasa igual (no es un bloqueo server-side)
+        acao = response.headers.get("access-control-allow-origin", "")
+        assert acao != "http://evil.example.com"
+
+    def test_preflight_options_returns_200_for_allowed_origin(self, client: TestClient):
+        """OPTIONS preflight para origen permitido devuelve 200."""
+        response = client.options(
+            "/workflow/run",
+            headers={
+                "Origin": "http://127.0.0.1:5500",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_preflight_returns_allow_origin_header(self, client: TestClient):
+        """OPTIONS preflight devuelve access-control-allow-origin."""
+        origin = "http://127.0.0.1:5500"
+        response = client.options(
+            "/workflow/run",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert response.headers.get("access-control-allow-origin") == origin
+
+    def test_cors_header_present_on_post_workflow_run_origin(self, client: TestClient):
+        """POST /workflow/run desde origen permitido devuelve ACAO en la respuesta."""
+        # Usamos un payload mínimo válido — si falla por validación, igual podemos
+        # verificar los headers CORS (el middleware actúa antes de la lógica).
+        origin = "http://127.0.0.1:5500"
+        payload = {
+            "client_id": "CLI-CORS",
+            "advisor_id": "ADV-CORS",
+            "kyc_data": {
+                "risk_tolerance_score": 5,
+                "risk_capacity_score": 5,
+                "liquidity_need_score": 3,
+                "investment_horizon_years": 10,
+                "investment_experience": "moderate",
+                "income_stability": "stable",
+                "net_worth": 100000,
+                "liquid_net_worth": 50000,
+                "max_acceptable_drawdown_pct": 20.0,
+            },
+            "financial_goal": {
+                "initial_amount": 50000,
+                "target_amount": 100000,
+                "horizon_years": 10,
+                "annual_contribution": 2000,
+            },
+        }
+        response = client.post(
+            "/workflow/run",
+            json=payload,
+            headers={"Origin": origin},
+        )
+        # El header CORS debe estar presente independientemente del status code del workflow.
+        assert response.headers.get("access-control-allow-origin") == origin
