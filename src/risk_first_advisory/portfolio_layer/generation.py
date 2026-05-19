@@ -3,37 +3,25 @@ PortfolioGenerationCoordinator — genera 3 carteras candidatas para un cliente.
 
 Variantes:
     DEFENSIVE : MIN_VARIANCE con restricciones más conservadoras
-    BALANCED  : MAX_UTILITY con risk_budget original
-    GROWTH    : MAX_RETURN con risk_budget original
+    BALANCED  : MAX_UTILITY con risk_budget original (nunca excede el budget aprobado)
+    GROWTH    : MAX_RETURN con growth_budget derivado (puede exceder parcialmente el
+                budget aprobado; queda marcado con requires_advisor_override=True)
 
-Regla central: las 3 carteras surgen del risk_budget aprobado. No se
-inventan restricciones incompatibles ni se ignora el perfil aprobado.
+Política de variantes (PortfolioVariantMetadata):
+    - BALANCED y DEFENSIVE nunca marcan risk_budget_exceeded ni requires_advisor_override.
+    - GROWTH recibe un growth_budget que relaja max_volatility y, si es necesario,
+      max_single_asset. Las dimensiones relajadas se registran en exceeded_constraints.
+      Si al menos una dimensión es relajada, la variante queda marcada con
+      requires_advisor_override=True y reason_code
+      PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET.
+    - La metadata no oculta excesos: es auditable en to_dict().
 
-INVARIANTE NUEVO: el optimizer NO es la primera capa que detecta
-infactibilidad. Antes de cada llamada al optimizer, el coordinator corre
-PortfolioFeasibilityChecker sobre la combinación
-(return_estimates, covariance_matrix, budget de la variante). Si el
-pre-check devuelve INFEASIBLE, la variante se omite SIN invocar al
-optimizer y se registran:
-    - reason_code PORTFOLIO_VARIANT_INFEASIBLE en el candidate set
-    - reason_codes específicos del feasibility (p. ej.
-      PORTFOLIO_MAX_SINGLE_ASSET_TOO_LOW), acumulados sin reemplazar
-    - notas legibles que mencionan "pre-check de factibilidad"
-
-Esto produce mensajes accionables para el asesor en lugar de los
-mensajes crípticos del solver.
-
-Si el pre-check devuelve WARNING, la variante SÍ se intenta optimizar:
-WARNING significa "factible pero degradado" (universo chico,
-concentración alta, vol no determinada). Los warnings del pre-check se
-propagan a las notas del candidate set para auditoría.
-
-Si una variante pasa el pre-check pero el optimizer falla de todas formas
-(por numerología del solver o restricciones blandas no capturadas por el
-pre-check), se mantiene el comportamiento previo: omitir variante con
-RC_VARIANT_INFEASIBLE y nota con el mensaje del optimizer.
-
-Si ninguna variante queda disponible, se levanta ValueError.
+INVARIANTE sobre pre-check:
+    El optimizer NO es la primera capa que detecta infactibilidad. Antes de cada
+    llamada al optimizer, el coordinator corre PortfolioFeasibilityChecker sobre la
+    combinación (return_estimates, covariance_matrix, budget de la variante). Si el
+    pre-check devuelve INFEASIBLE, la variante se omite SIN invocar al optimizer y se
+    registran reason_codes y notas accionables.
 """
 
 from __future__ import annotations
@@ -59,10 +47,12 @@ from risk_first_advisory.portfolio_layer.optimizer import (
 
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constantes / reason codes
 # ---------------------------------------------------------------------------
 
 RC_VARIANT_INFEASIBLE = "PORTFOLIO_VARIANT_INFEASIBLE"
+RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET = "PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"
+
 _DEFENSIVE_MAX_SINGLE_ASSET_CAP = 0.20
 
 
@@ -85,6 +75,71 @@ _VARIANT_ORDER: list[PortfolioVariant] = [
 
 
 # ---------------------------------------------------------------------------
+# PortfolioVariantMetadata
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PortfolioVariantMetadata:
+    """
+    Indica si una cartera candidata excede el RiskBudget aprobado y si
+    requiere override explícito del asesor.
+
+    Invariantes:
+        - risk_budget_exceeded=True implica requires_advisor_override=True
+        - GROWTH con requires_advisor_override=True debe incluir
+          RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET en reason_codes
+    """
+
+    variant: PortfolioVariant
+    risk_budget_exceeded: bool
+    requires_advisor_override: bool
+    exceeded_constraints: list[str]
+    reason_codes: list[str]
+    notes: list[str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.variant, PortfolioVariant):
+            raise ValueError(
+                f"variant debe ser PortfolioVariant. Recibido: {type(self.variant).__name__}."
+            )
+        if not isinstance(self.risk_budget_exceeded, bool):
+            raise ValueError("risk_budget_exceeded debe ser bool.")
+        if not isinstance(self.requires_advisor_override, bool):
+            raise ValueError("requires_advisor_override debe ser bool.")
+        if not isinstance(self.exceeded_constraints, list):
+            raise ValueError("exceeded_constraints debe ser list.")
+        if not isinstance(self.reason_codes, list):
+            raise ValueError("reason_codes debe ser list.")
+        if not isinstance(self.notes, list):
+            raise ValueError("notes debe ser list.")
+
+        if self.risk_budget_exceeded and not self.requires_advisor_override:
+            raise ValueError(
+                "risk_budget_exceeded=True requiere requires_advisor_override=True."
+            )
+
+        if (
+            self.requires_advisor_override
+            and self.variant == PortfolioVariant.GROWTH
+            and RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET not in self.reason_codes
+        ):
+            raise ValueError(
+                f"GROWTH con requires_advisor_override=True debe incluir "
+                f"{RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET!r} en reason_codes."
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "variant": self.variant.value,
+            "risk_budget_exceeded": self.risk_budget_exceeded,
+            "requires_advisor_override": self.requires_advisor_override,
+            "exceeded_constraints": list(self.exceeded_constraints),
+            "reason_codes": list(self.reason_codes),
+            "notes": list(self.notes),
+        }
+
+
+# ---------------------------------------------------------------------------
 # PortfolioCandidateSet
 # ---------------------------------------------------------------------------
 
@@ -98,6 +153,9 @@ class PortfolioCandidateSet:
         - candidates no vacío, claves PortfolioVariant, valores OptimizedPortfolio
         - selected_variant None o presente en candidates
         - reason_codes y notes son listas
+        - metadata: si no se provee, se crea metadata default (sin override) para
+          cada candidato. Si se provee, sus claves deben ser PortfolioVariant presentes
+          en candidates y sus valores PortfolioVariantMetadata.
     """
 
     client_id: str
@@ -106,6 +164,7 @@ class PortfolioCandidateSet:
     selected_variant: PortfolioVariant | None = None
     reason_codes: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    metadata: dict[PortfolioVariant, PortfolioVariantMetadata] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.client_id or not self.client_id.strip():
@@ -141,6 +200,35 @@ class PortfolioCandidateSet:
 
         if not isinstance(self.notes, list):
             raise ValueError("notes debe ser una lista.")
+
+        # Auto-fill metadata con defaults si no se proveyó.
+        if not self.metadata:
+            for variant in self.candidates:
+                self.metadata[variant] = PortfolioVariantMetadata(
+                    variant=variant,
+                    risk_budget_exceeded=False,
+                    requires_advisor_override=False,
+                    exceeded_constraints=[],
+                    reason_codes=[],
+                    notes=[],
+                )
+
+        # Validar metadata provista (o la auto-completada).
+        for k, v in self.metadata.items():
+            if not isinstance(k, PortfolioVariant):
+                raise ValueError(
+                    f"metadata keys deben ser PortfolioVariant. "
+                    f"Encontrado: {type(k).__name__}."
+                )
+            if not isinstance(v, PortfolioVariantMetadata):
+                raise ValueError(
+                    f"metadata values deben ser PortfolioVariantMetadata. "
+                    f"Encontrado: {type(v).__name__}."
+                )
+            if k not in self.candidates:
+                raise ValueError(
+                    f"metadata refiere a variante {k!r} no presente en candidates."
+                )
 
     # ── Accesores ──────────────────────────────────────────────────────────
 
@@ -181,6 +269,10 @@ class PortfolioCandidateSet:
             ),
             "reason_codes": list(self.reason_codes),
             "notes": list(self.notes),
+            "metadata": {
+                variant.value: meta.to_dict()
+                for variant, meta in self.metadata.items()
+            },
         }
 
 
@@ -192,20 +284,24 @@ class PortfolioGenerationCoordinator:
     """
     Genera hasta 3 carteras candidatas para un cliente.
 
-    Flujo por variante:
-        1. Construye el risk_budget de la variante (DEFENSIVE deriva uno
-           más estricto; BALANCED y GROWTH usan el budget aprobado tal cual).
-        2. Pre-check de factibilidad con PortfolioFeasibilityChecker.
-        3. Si el pre-check dice INFEASIBLE → variante omitida, no se llama
-           al optimizer, se registra reason_code y nota.
-        4. Si dice WARNING → se intenta optimizar y los warnings del
-           pre-check se propagan a notes del candidate set.
-        5. Si dice FEASIBLE → se intenta optimizar normalmente.
-        6. Si el optimizer falla aun habiendo pasado el pre-check → se
-           omite la variante con reason_code y nota con el mensaje del
-           solver (comportamiento previo preservado).
+    Política de variantes:
+        DEFENSIVE — MIN_VARIANCE, budget conservador derivado. Nunca excede el
+            RiskBudget aprobado. requires_advisor_override siempre False.
+        BALANCED  — MAX_UTILITY, budget aprobado original. Nunca excede el
+            RiskBudget aprobado. requires_advisor_override siempre False.
+        GROWTH    — MAX_RETURN, growth_budget derivado con max_volatility y opcionalmente
+            max_single_asset relajados. Si alguna dimensión es relajada respecto al
+            budget original, la variante queda marcada con risk_budget_exceeded=True,
+            requires_advisor_override=True y reason_code
+            PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET.
 
-    No filtra instrumentos ni valida suitability: recibe datos ya preparados.
+    Flujo por variante:
+        1. Construye el budget de la variante.
+        2. Pre-check de factibilidad con PortfolioFeasibilityChecker.
+        3. Si INFEASIBLE → variante omitida, se registra reason_code y nota.
+        4. Si WARNING → se intenta optimizar; warnings propagados a notes.
+        5. Si FEASIBLE → se optimiza normalmente.
+        6. Si el optimizer falla pese al pre-check OK → omitir con reason_code.
     """
 
     def __init__(
@@ -213,13 +309,6 @@ class PortfolioGenerationCoordinator:
         feasibility_checker: PortfolioFeasibilityChecker | None = None,
         optimizer: PortfolioOptimizer | None = None,
     ) -> None:
-        """
-        Args:
-            feasibility_checker: instancia de PortfolioFeasibilityChecker.
-                Por defecto se construye una nueva. Aceptar la dependencia
-                facilita testear el coordinator con un checker mockeado.
-            optimizer: instancia de PortfolioOptimizer. Mismo criterio.
-        """
         self._feasibility_checker = feasibility_checker or PortfolioFeasibilityChecker()
         self._optimizer = optimizer or PortfolioOptimizer()
 
@@ -235,38 +324,40 @@ class PortfolioGenerationCoordinator:
         Genera las tres carteras candidatas.
 
         Raises:
-            ValueError: si ninguna variante es factible (ni pasa el
-                        pre-check ni el optimizer logra resolver).
+            ValueError: si ninguna variante es factible.
         """
         candidates: dict[PortfolioVariant, OptimizedPortfolio] = {}
+        metadata_by_variant: dict[PortfolioVariant, PortfolioVariantMetadata] = {}
         reason_codes: list[str] = []
         notes: list[str] = []
 
+        asset_count = len(return_estimates)
+        growth_budget, growth_exceeded = self._growth_budget(risk_budget, asset_count)
+
         # ── Especificaciones de cada variante ──────────────────────────────
-        variant_specs = [
+        variant_specs: list[tuple[PortfolioVariant, OptimizationObjective, RiskBudget, list[str]]] = [
             (
                 PortfolioVariant.DEFENSIVE,
                 OptimizationObjective.MIN_VARIANCE,
-                self._defensive_budget(risk_budget, asset_count=len(return_estimates)),
+                self._defensive_budget(risk_budget, asset_count=asset_count),
+                [],
             ),
             (
                 PortfolioVariant.BALANCED,
                 OptimizationObjective.MAX_UTILITY,
                 risk_budget,
+                [],
             ),
             (
                 PortfolioVariant.GROWTH,
                 OptimizationObjective.MAX_RETURN,
-                risk_budget,
+                growth_budget,
+                growth_exceeded,
             ),
         ]
 
-        for variant, objective, budget in variant_specs:
+        for variant, objective, budget, exceeded in variant_specs:
             # ── Pre-check de factibilidad ─────────────────────────────────
-            # Casos borde: si len(return_estimates) == 0 el budget DEFENSIVE
-            # no se pudo construir (división por cero en _defensive_budget),
-            # pero ese fallo ocurriría arriba antes de entrar al loop. Para
-            # listas no vacías el pre-check siempre devuelve un resultado.
             feasibility = self._feasibility_checker.evaluate(
                 return_estimates=return_estimates,
                 covariance_matrix=covariance_matrix,
@@ -282,7 +373,6 @@ class PortfolioGenerationCoordinator:
                 )
                 continue
 
-            # WARNING: factible pero degradado → optimizar y propagar warnings.
             if feasibility.status == PortfolioFeasibilityStatus.WARNING:
                 self._record_pre_check_warnings(
                     variant=variant,
@@ -300,10 +390,31 @@ class PortfolioGenerationCoordinator:
                 )
                 portfolio = self._optimizer.optimize(inp)
                 candidates[variant] = portfolio
+
+                # ── Metadata de política ──────────────────────────────────
+                if exceeded:
+                    metadata_by_variant[variant] = PortfolioVariantMetadata(
+                        variant=variant,
+                        risk_budget_exceeded=True,
+                        requires_advisor_override=True,
+                        exceeded_constraints=list(exceeded),
+                        reason_codes=[RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET],
+                        notes=[
+                            "GROWTH exceeds approved RiskBudget and requires "
+                            "explicit advisor override."
+                        ],
+                    )
+                else:
+                    metadata_by_variant[variant] = PortfolioVariantMetadata(
+                        variant=variant,
+                        risk_budget_exceeded=False,
+                        requires_advisor_override=False,
+                        exceeded_constraints=[],
+                        reason_codes=[],
+                        notes=[],
+                    )
+
             except ValueError as exc:
-                # El pre-check pasó pero el solver falla igual. Mantenemos
-                # el comportamiento previo: omitimos con reason_code y nota
-                # con el mensaje del solver.
                 reason_codes.append(RC_VARIANT_INFEASIBLE)
                 notes.append(
                     f"Variante {variant.value} omitida por fallo del "
@@ -324,6 +435,7 @@ class PortfolioGenerationCoordinator:
             selected_variant=None,
             reason_codes=reason_codes,
             notes=notes,
+            metadata=metadata_by_variant,
         )
 
     # ── Helpers de registro ──────────────────────────────────────────────────
@@ -335,24 +447,16 @@ class PortfolioGenerationCoordinator:
         reason_codes: list[str],
         notes: list[str],
     ) -> None:
-        """Registra reason_codes y notes para una variante rechazada por el pre-check."""
         reason_codes.append(RC_VARIANT_INFEASIBLE)
-        # También exponemos cada failed_check del feasibility en reason_codes,
-        # para que el consumidor pueda razonar sobre el motivo específico
-        # (PORTFOLIO_MAX_SINGLE_ASSET_TOO_LOW, etc.). Se acumulan sin
-        # reemplazar, conservando el orden de detección.
         for fc in feasibility.failed_checks:
             reason_codes.append(fc)
-
         failed_list = ", ".join(feasibility.failed_checks) or "(sin códigos)"
         notes.append(
             f"Variante {variant.value} omitida por pre-check de factibilidad: "
             f"{failed_list}."
         )
         for action in feasibility.suggested_actions:
-            notes.append(
-                f"Variante {variant.value} → sugerencia: {action}"
-            )
+            notes.append(f"Variante {variant.value} → sugerencia: {action}")
         for n in feasibility.notes:
             notes.append(f"Variante {variant.value} → {n}")
 
@@ -362,7 +466,6 @@ class PortfolioGenerationCoordinator:
         feasibility: PortfolioFeasibilityResult,
         notes: list[str],
     ) -> None:
-        """Propaga warnings del pre-check a notes (la variante igual se intenta)."""
         warn_list = ", ".join(feasibility.warnings) or "(sin warnings)"
         notes.append(
             f"Variante {variant.value} con warnings de pre-check de "
@@ -380,9 +483,6 @@ class PortfolioGenerationCoordinator:
             rb.max_single_asset,
             max(_DEFENSIVE_MAX_SINGLE_ASSET_CAP, minimum_feasible_single_asset),
         )
-
-        # target_volatility para el budget derivado debe ser <= max_volatility
-        # Como reducimos max_volatility, ajustamos también target_volatility
         defensive_target_vol = min(rb.target_volatility, defensive_max_vol)
 
         return RiskBudget(
@@ -400,3 +500,44 @@ class PortfolioGenerationCoordinator:
             preferred_currency=rb.preferred_currency,
             notes=list(rb.notes) + ["Derived defensive budget."],
         )
+
+    # ── Construcción del budget GROWTH ───────────────────────────────────────
+
+    @staticmethod
+    def _growth_budget(rb: RiskBudget, asset_count: int) -> tuple[RiskBudget, list[str]]:
+        """
+        Deriva un RiskBudget relajado para GROWTH y lista las dimensiones excedidas.
+
+        Solo relaja max_volatility: min(original * 1.50, original + 0.05).
+        max_single_asset NO se relaja para preservar la interpretabilidad del
+        perfil aprobado y mantener la compatibilidad con los pre-checks.
+
+        Returns:
+            (growth_budget, exceeded_constraints)
+            exceeded_constraints lista los parámetros que superan al budget
+            original: siempre "max_volatility".
+        """
+        exceeded: list[str] = []
+
+        growth_max_vol = min(rb.max_volatility * 1.50, rb.max_volatility + 0.05)
+        growth_target_vol = min(rb.target_volatility * 1.50, growth_max_vol)
+
+        if growth_max_vol > rb.max_volatility:
+            exceeded.append("max_volatility")
+
+        budget = RiskBudget(
+            profile_name=rb.profile_name,
+            target_volatility=growth_target_vol,
+            max_volatility=growth_max_vol,
+            max_drawdown=rb.max_drawdown,
+            min_liquidity=rb.min_liquidity,
+            max_equity=rb.max_equity,
+            max_high_yield=rb.max_high_yield,
+            max_single_asset=rb.max_single_asset,
+            max_sector_exposure=rb.max_sector_exposure,
+            max_duration=rb.max_duration,
+            complex_products_allowed=rb.complex_products_allowed,
+            preferred_currency=rb.preferred_currency,
+            notes=list(rb.notes) + ["Derived growth budget."],
+        )
+        return budget, exceeded

@@ -28,6 +28,8 @@ from risk_first_advisory.portfolio_layer.generation import (
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
     PortfolioVariant,
+    PortfolioVariantMetadata,
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
     RC_VARIANT_INFEASIBLE,
 )
 
@@ -57,6 +59,8 @@ __all__ = [
     "PortfolioGenerationCoordinator",
     "PortfolioOptimizer",
     "PortfolioVariant",
+    "PortfolioVariantMetadata",
+    "RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET",
     "RC_VARIANT_INFEASIBLE",
     "WARN_CONCENTRATION_REQUIRED",
     "WARN_LOW_DIVERSIFICATION",

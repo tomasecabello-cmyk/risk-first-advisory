@@ -24,6 +24,8 @@ from risk_first_advisory.portfolio_layer.generation import (
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
     PortfolioVariant,
+    PortfolioVariantMetadata,
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
     RC_VARIANT_INFEASIBLE,
 )
 from risk_first_advisory.portfolio_layer.optimizer import (
@@ -760,3 +762,302 @@ class TestCoordinatorIntegratesFeasibilityChecker:
         # El optimizer NUNCA debe haber sido llamado: el pre-check
         # cortocircuitó todas las variantes.
         assert spy.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Tests de PortfolioVariantMetadata
+# ---------------------------------------------------------------------------
+
+class TestPortfolioVariantMetadata:
+    def _valid_kwargs(self, **overrides) -> dict:
+        base = dict(
+            variant=PortfolioVariant.BALANCED,
+            risk_budget_exceeded=False,
+            requires_advisor_override=False,
+            exceeded_constraints=[],
+            reason_codes=[],
+            notes=[],
+        )
+        base.update(overrides)
+        return base
+
+    def test_valid_construction_balanced(self):
+        m = PortfolioVariantMetadata(**self._valid_kwargs())
+        assert m.variant == PortfolioVariant.BALANCED
+        assert m.risk_budget_exceeded is False
+        assert m.requires_advisor_override is False
+
+    def test_valid_construction_defensive(self):
+        m = PortfolioVariantMetadata(**self._valid_kwargs(variant=PortfolioVariant.DEFENSIVE))
+        assert m.variant == PortfolioVariant.DEFENSIVE
+
+    def test_valid_construction_growth_with_override(self):
+        m = PortfolioVariantMetadata(
+            variant=PortfolioVariant.GROWTH,
+            risk_budget_exceeded=True,
+            requires_advisor_override=True,
+            exceeded_constraints=["max_volatility"],
+            reason_codes=[RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET],
+            notes=["GROWTH excede el budget aprobado."],
+        )
+        assert m.risk_budget_exceeded is True
+        assert m.requires_advisor_override is True
+        assert RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET in m.reason_codes
+
+    def test_invalid_variant_type_raises(self):
+        with pytest.raises(ValueError, match="PortfolioVariant"):
+            PortfolioVariantMetadata(**self._valid_kwargs(variant="BALANCED"))
+
+    def test_exceeded_constraints_not_list_raises(self):
+        with pytest.raises(ValueError, match="exceeded_constraints"):
+            PortfolioVariantMetadata(**self._valid_kwargs(exceeded_constraints="max_vol"))
+
+    def test_reason_codes_not_list_raises(self):
+        with pytest.raises(ValueError, match="reason_codes"):
+            PortfolioVariantMetadata(**self._valid_kwargs(reason_codes="RC"))
+
+    def test_notes_not_list_raises(self):
+        with pytest.raises(ValueError, match="notes"):
+            PortfolioVariantMetadata(**self._valid_kwargs(notes="nota"))
+
+    def test_risk_budget_exceeded_true_requires_override_raises(self):
+        with pytest.raises(ValueError, match="requires_advisor_override"):
+            PortfolioVariantMetadata(**self._valid_kwargs(
+                risk_budget_exceeded=True,
+                requires_advisor_override=False,
+            ))
+
+    def test_growth_with_override_without_rc_raises(self):
+        with pytest.raises(ValueError, match=RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET):
+            PortfolioVariantMetadata(
+                variant=PortfolioVariant.GROWTH,
+                risk_budget_exceeded=True,
+                requires_advisor_override=True,
+                exceeded_constraints=["max_volatility"],
+                reason_codes=[],  # falta RC
+                notes=[],
+            )
+
+    def test_to_dict_variant_is_string(self):
+        m = PortfolioVariantMetadata(**self._valid_kwargs())
+        d = m.to_dict()
+        assert isinstance(d["variant"], str)
+        assert d["variant"] == "BALANCED"
+
+    def test_to_dict_all_fields_present(self):
+        m = PortfolioVariantMetadata(**self._valid_kwargs())
+        d = m.to_dict()
+        assert "variant" in d
+        assert "risk_budget_exceeded" in d
+        assert "requires_advisor_override" in d
+        assert "exceeded_constraints" in d
+        assert "reason_codes" in d
+        assert "notes" in d
+
+    def test_to_dict_is_json_serializable(self):
+        m = PortfolioVariantMetadata(
+            variant=PortfolioVariant.GROWTH,
+            risk_budget_exceeded=True,
+            requires_advisor_override=True,
+            exceeded_constraints=["max_volatility"],
+            reason_codes=[RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET],
+            notes=["nota"],
+        )
+        json.dumps(m.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# Tests de PortfolioCandidateSet — metadata
+# ---------------------------------------------------------------------------
+
+class TestPortfolioCandidateSetMetadata:
+    def _single_balanced(self) -> PortfolioCandidateSet:
+        return PortfolioCandidateSet(
+            client_id="C001",
+            approved_profile_name="Moderate",
+            candidates={PortfolioVariant.BALANCED: _make_dummy_portfolio()},
+        )
+
+    def test_metadata_auto_filled_when_empty(self):
+        cs = self._single_balanced()
+        assert PortfolioVariant.BALANCED in cs.metadata
+
+    def test_metadata_auto_filled_defaults_to_no_override(self):
+        cs = self._single_balanced()
+        m = cs.metadata[PortfolioVariant.BALANCED]
+        assert m.risk_budget_exceeded is False
+        assert m.requires_advisor_override is False
+
+    def test_metadata_auto_filled_for_all_candidates(self):
+        cs = PortfolioCandidateSet(
+            client_id="C001",
+            approved_profile_name="Moderate",
+            candidates={
+                PortfolioVariant.DEFENSIVE: _make_dummy_portfolio(),
+                PortfolioVariant.BALANCED: _make_dummy_portfolio(),
+                PortfolioVariant.GROWTH: _make_dummy_portfolio(),
+            },
+        )
+        assert set(cs.metadata.keys()) == {
+            PortfolioVariant.DEFENSIVE,
+            PortfolioVariant.BALANCED,
+            PortfolioVariant.GROWTH,
+        }
+
+    def test_metadata_explicit_accepted(self):
+        meta = {
+            PortfolioVariant.BALANCED: PortfolioVariantMetadata(
+                variant=PortfolioVariant.BALANCED,
+                risk_budget_exceeded=False,
+                requires_advisor_override=False,
+                exceeded_constraints=[],
+                reason_codes=[],
+                notes=["custom"],
+            )
+        }
+        cs = PortfolioCandidateSet(
+            client_id="C001",
+            approved_profile_name="Moderate",
+            candidates={PortfolioVariant.BALANCED: _make_dummy_portfolio()},
+            metadata=meta,
+        )
+        assert cs.metadata[PortfolioVariant.BALANCED].notes == ["custom"]
+
+    def test_metadata_invalid_key_raises(self):
+        with pytest.raises(ValueError, match="PortfolioVariant"):
+            PortfolioCandidateSet(
+                client_id="C001",
+                approved_profile_name="Moderate",
+                candidates={PortfolioVariant.BALANCED: _make_dummy_portfolio()},
+                metadata={"BALANCED": PortfolioVariantMetadata(  # type: ignore[arg-type]
+                    variant=PortfolioVariant.BALANCED,
+                    risk_budget_exceeded=False,
+                    requires_advisor_override=False,
+                    exceeded_constraints=[],
+                    reason_codes=[],
+                    notes=[],
+                )},
+            )
+
+    def test_metadata_variant_not_in_candidates_raises(self):
+        with pytest.raises(ValueError, match="candidates"):
+            PortfolioCandidateSet(
+                client_id="C001",
+                approved_profile_name="Moderate",
+                candidates={PortfolioVariant.BALANCED: _make_dummy_portfolio()},
+                metadata={
+                    PortfolioVariant.GROWTH: PortfolioVariantMetadata(
+                        variant=PortfolioVariant.GROWTH,
+                        risk_budget_exceeded=True,
+                        requires_advisor_override=True,
+                        exceeded_constraints=["max_volatility"],
+                        reason_codes=[RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET],
+                        notes=[],
+                    )
+                },
+            )
+
+    def test_to_dict_includes_metadata(self):
+        cs = self._single_balanced()
+        d = cs.to_dict()
+        assert "metadata" in d
+
+    def test_to_dict_metadata_keys_are_strings(self):
+        cs = PortfolioCandidateSet(
+            client_id="C001",
+            approved_profile_name="Moderate",
+            candidates={
+                PortfolioVariant.DEFENSIVE: _make_dummy_portfolio(),
+                PortfolioVariant.BALANCED: _make_dummy_portfolio(),
+            },
+        )
+        d = cs.to_dict()
+        for key in d["metadata"]:
+            assert isinstance(key, str)
+
+    def test_to_dict_is_json_serializable_with_metadata(self):
+        cs = PortfolioCandidateSet(
+            client_id="C001",
+            approved_profile_name="Moderate",
+            candidates={
+                PortfolioVariant.DEFENSIVE: _make_dummy_portfolio(),
+                PortfolioVariant.BALANCED: _make_dummy_portfolio(),
+            },
+        )
+        json.dumps(cs.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# Tests de política de variantes del coordinator
+# ---------------------------------------------------------------------------
+
+class TestCoordinatorVariantPolicy:
+    def setup_method(self):
+        self.coordinator = PortfolioGenerationCoordinator()
+        self.estimates, self.cm, self.rb = _build_inputs()
+
+    def test_growth_marked_risk_budget_exceeded(self):
+        result = self.coordinator.generate("CLI-POL-001", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.GROWTH in result.candidates:
+            m = result.metadata[PortfolioVariant.GROWTH]
+            assert m.risk_budget_exceeded is True
+
+    def test_growth_requires_advisor_override(self):
+        result = self.coordinator.generate("CLI-POL-002", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.GROWTH in result.candidates:
+            m = result.metadata[PortfolioVariant.GROWTH]
+            assert m.requires_advisor_override is True
+
+    def test_growth_has_reason_code(self):
+        result = self.coordinator.generate("CLI-POL-003", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.GROWTH in result.candidates:
+            m = result.metadata[PortfolioVariant.GROWTH]
+            assert RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET in m.reason_codes
+
+    def test_growth_exceeded_constraints_includes_max_volatility(self):
+        result = self.coordinator.generate("CLI-POL-004", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.GROWTH in result.candidates:
+            m = result.metadata[PortfolioVariant.GROWTH]
+            assert "max_volatility" in m.exceeded_constraints
+
+    def test_balanced_not_marked_override(self):
+        result = self.coordinator.generate("CLI-POL-005", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.BALANCED in result.candidates:
+            m = result.metadata[PortfolioVariant.BALANCED]
+            assert m.risk_budget_exceeded is False
+            assert m.requires_advisor_override is False
+
+    def test_defensive_not_marked_override(self):
+        result = self.coordinator.generate("CLI-POL-006", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.DEFENSIVE in result.candidates:
+            m = result.metadata[PortfolioVariant.DEFENSIVE]
+            assert m.risk_budget_exceeded is False
+            assert m.requires_advisor_override is False
+
+    def test_balanced_no_reason_codes_in_metadata(self):
+        result = self.coordinator.generate("CLI-POL-007", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.BALANCED in result.candidates:
+            m = result.metadata[PortfolioVariant.BALANCED]
+            assert RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET not in m.reason_codes
+
+    def test_metadata_covers_all_generated_candidates(self):
+        result = self.coordinator.generate("CLI-POL-008", "Moderate", self.estimates, self.cm, self.rb)
+        assert set(result.metadata.keys()) == set(result.candidates.keys())
+
+    def test_to_dict_with_growth_metadata_is_json_serializable(self):
+        result = self.coordinator.generate("CLI-POL-009", "Moderate", self.estimates, self.cm, self.rb)
+        json.dumps(result.to_dict())
+
+    def test_growth_metadata_variant_field_is_growth(self):
+        result = self.coordinator.generate("CLI-POL-010", "Moderate", self.estimates, self.cm, self.rb)
+        if PortfolioVariant.GROWTH in result.candidates:
+            m = result.metadata[PortfolioVariant.GROWTH]
+            assert m.variant == PortfolioVariant.GROWTH
+
+    def test_all_generated_portfolios_respect_original_max_volatility(self):
+        """GROWTH usa budget relajado pero con 4 activos su vol real no supera el original."""
+        result = self.coordinator.generate("CLI-POL-011", "Moderate", self.estimates, self.cm, self.rb)
+        for variant, portfolio in result.candidates.items():
+            assert portfolio.volatility_annual <= self.rb.max_volatility + 1e-4, (
+                f"Variante {variant} vol={portfolio.volatility_annual} > max={self.rb.max_volatility}"
+            )
