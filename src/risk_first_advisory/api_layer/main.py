@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
@@ -31,6 +31,8 @@ from risk_first_advisory.api_layer.schemas import (
     HealthResponse,
     KYCDataRequest,
     PersistenceRecordIds,
+    RecordListResponse,
+    StoredRecordResponse,
     WorkflowRunRequest,
     WorkflowRunResponse,
 )
@@ -47,6 +49,11 @@ from risk_first_advisory.kyc.models import (
     InvestmentObjective,
     InvestorExperience,
     KYCData,
+)
+from risk_first_advisory.persistence_layer.repositories import (
+    RecordNotFoundError,
+    RepositoryError,
+    StoredRecord,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
     SQLiteAuditRepository,
@@ -374,6 +381,21 @@ def demo_run() -> DemoRunResponse:
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper de recuperación compartido
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _stored_record_to_response(record: StoredRecord) -> StoredRecordResponse:
+    return StoredRecordResponse(
+        record_id=record.record_id,
+        record_type=record.record_type,
+        created_at_utc=record.created_at_utc,
+        payload=record.payload,
+        metadata=record.metadata,
+    )
+
+
 @app.post("/workflow/run", response_model=WorkflowRunResponse)
 def workflow_run(req: WorkflowRunRequest) -> WorkflowRunResponse:
     # Leer rutas en tiempo de llamada para que monkeypatch funcione en tests.
@@ -428,3 +450,50 @@ def workflow_run(req: WorkflowRunRequest) -> WorkflowRunResponse:
         records=records,
         report_path=report_path_str,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Retrieval endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/workflow/{record_id}", response_model=StoredRecordResponse)
+def get_workflow(record_id: str) -> StoredRecordResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            record = SQLiteWorkflowRunRepository(store).get_workflow_result(record_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Record not found")
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    return _stored_record_to_response(record)
+
+
+@app.get("/reports/{record_id}", response_model=StoredRecordResponse)
+def get_report(record_id: str) -> StoredRecordResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            record = SQLiteReportRepository(store).get_report(record_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Record not found")
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    return _stored_record_to_response(record)
+
+
+@app.get("/audit/{record_id}", response_model=StoredRecordResponse)
+def get_audit(record_id: str) -> StoredRecordResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    try:
+        with SQLitePersistenceStore(db_path) as store:
+            store.init_schema()
+            record = SQLiteAuditRepository(store).get_audit_trail(record_id)
+    except RecordNotFoundError:
+        raise HTTPException(status_code=404, detail="Record not found")
+    except RepositoryError:
+        raise HTTPException(status_code=500, detail="Persistence error")
+    return _stored_record_to_response(record)

@@ -109,6 +109,24 @@ class WorkflowRunRequest(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Retrieval endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class StoredRecordResponse(BaseModel):
+    record_id: str
+    record_type: str
+    created_at_utc: str
+    payload: dict
+    metadata: dict
+
+
+class RecordListResponse(BaseModel):
+    records: list[StoredRecordResponse]
+    count: int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # /workflow/run — response
 # ─────────────────────────────────────────────────────────────────────────────
 
