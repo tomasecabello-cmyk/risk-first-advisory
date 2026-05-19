@@ -164,6 +164,62 @@ def _make_candidate_set(with_defensive: bool = False):
         count=len(candidates),
         reason_codes=[],
         notes=[],
+        # Sin metadata: ejercita el path de defaults seguros
+    )
+
+
+def _make_candidate_set_with_metadata(with_growth_override: bool = False):
+    """Candidate set con metadata explícita por variante.
+
+    Si with_growth_override=True, GROWTH lleva risk_budget_exceeded=True y
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET en reason_codes.
+    """
+    from risk_first_advisory.portfolio_layer.generation import (
+        PortfolioVariant,
+        PortfolioVariantMetadata,
+        RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
+    )
+
+    def _neutral(variant):
+        return PortfolioVariantMetadata(
+            variant=variant,
+            risk_budget_exceeded=False,
+            requires_advisor_override=False,
+            exceeded_constraints=[],
+            reason_codes=[],
+            notes=[],
+        )
+
+    growth_meta = (
+        PortfolioVariantMetadata(
+            variant=PortfolioVariant.GROWTH,
+            risk_budget_exceeded=True,
+            requires_advisor_override=True,
+            exceeded_constraints=["max_volatility"],
+            reason_codes=[RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET],
+            notes=["GROWTH exceeds approved RiskBudget and requires explicit advisor override."],
+        )
+        if with_growth_override
+        else _neutral(PortfolioVariant.GROWTH)
+    )
+
+    candidates = {
+        PortfolioVariant.BALANCED: _make_optimized_portfolio("MAX_UTILITY"),
+        PortfolioVariant.GROWTH: _make_optimized_portfolio("MAX_RETURN"),
+    }
+    metadata = {
+        PortfolioVariant.BALANCED: _neutral(PortfolioVariant.BALANCED),
+        PortfolioVariant.GROWTH: growth_meta,
+    }
+    return types.SimpleNamespace(
+        client_id="CLI-001",
+        approved_profile_name="moderado",
+        candidates=candidates,
+        selected_variant=PortfolioVariant.BALANCED,
+        count=len(candidates),
+        reason_codes=[],
+        notes=[],
+        metadata=metadata,
     )
 
 
@@ -543,3 +599,133 @@ class TestMarkdownReportGenerator:
         )
         report = self._gen().generate_from_workflow_result(result)
         assert "*(selected)*" in report.content
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: metadata de variantes en el reporte
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestVariantMetadataInReport:
+    def _gen(self) -> MarkdownReportGenerator:
+        return MarkdownReportGenerator()
+
+    def _result_with_metadata(self, with_growth_override: bool = False):
+        return _make_result(
+            status=AdvisoryWorkflowStatus.COMPLETED,
+            candidate_set=_make_candidate_set_with_metadata(
+                with_growth_override=with_growth_override
+            ),
+        )
+
+    def _result_no_metadata(self):
+        return _make_result(
+            status=AdvisoryWorkflowStatus.COMPLETED,
+            candidate_set=_make_candidate_set(),
+        )
+
+    # ── Presencia de la subsección ─────────────────────────────────────────
+
+    def test_report_includes_variant_metadata_header(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "Variant Metadata" in report.content
+
+    def test_report_shows_risk_budget_exceeded_field(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "risk_budget_exceeded" in report.content
+
+    def test_report_shows_requires_advisor_override_field(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "requires_advisor_override" in report.content
+
+    def test_report_shows_exceeded_constraints_field(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "exceeded_constraints" in report.content
+
+    def test_report_shows_metadata_reason_codes_field(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "reason_codes" in report.content
+
+    def test_report_shows_metadata_notes_field(self):
+        result = self._result_with_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "notes" in report.content
+
+    # ── GROWTH con override ────────────────────────────────────────────────
+
+    def test_growth_override_shows_rc_in_content(self):
+        from risk_first_advisory.portfolio_layer.generation import (
+            RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
+        )
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        assert RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET in report.content
+
+    def test_growth_override_shows_requires_advisor_override_true(self):
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        assert "requires_advisor_override: true" in report.content
+
+    def test_growth_override_shows_risk_budget_exceeded_true(self):
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        assert "risk_budget_exceeded: true" in report.content
+
+    def test_growth_override_shows_max_volatility_in_exceeded_constraints(self):
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        assert "max_volatility" in report.content
+
+    def test_growth_override_note_appears_in_content(self):
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        assert "GROWTH exceeds approved RiskBudget" in report.content
+
+    # ── Variantes sin override ─────────────────────────────────────────────
+
+    def test_balanced_not_marked_override(self):
+        result = self._result_with_metadata(with_growth_override=True)
+        report = self._gen().generate_from_workflow_result(result)
+        content = report.content
+        # BALANCED aparece antes de GROWTH; buscamos su sección específica
+        balanced_start = content.find("### BALANCED")
+        growth_start = content.find("### GROWTH")
+        balanced_section = content[balanced_start:growth_start]
+        assert "requires_advisor_override: false" in balanced_section
+
+    def test_no_override_shows_risk_budget_exceeded_false(self):
+        result = self._result_with_metadata(with_growth_override=False)
+        report = self._gen().generate_from_workflow_result(result)
+        assert "risk_budget_exceeded: false" in report.content
+
+    # ── Sin metadata (defaults seguros) ───────────────────────────────────
+
+    def test_no_metadata_shows_variant_metadata_header(self):
+        result = self._result_no_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "Variant Metadata" in report.content
+
+    def test_no_metadata_shows_false_for_risk_budget_exceeded(self):
+        result = self._result_no_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "risk_budget_exceeded: false" in report.content
+
+    def test_no_metadata_shows_false_for_requires_advisor_override(self):
+        result = self._result_no_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "requires_advisor_override: false" in report.content
+
+    def test_no_metadata_shows_none_for_exceeded_constraints(self):
+        result = self._result_no_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert "exceeded_constraints: None" in report.content
+
+    def test_no_metadata_does_not_raise(self):
+        result = self._result_no_metadata()
+        report = self._gen().generate_from_workflow_result(result)
+        assert isinstance(report, MarkdownReport)

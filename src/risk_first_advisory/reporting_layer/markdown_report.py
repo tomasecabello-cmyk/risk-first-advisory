@@ -318,6 +318,54 @@ def _section_portfolio_feasibility(result: Any) -> str:
     return "\n".join(lines)
 
 
+def _format_variant_metadata(meta: Any) -> list[str]:
+    """Formatea la metadata de una variante de portfolio en líneas Markdown.
+
+    Si meta es None (variante sin metadata explícita), muestra valores default
+    seguros sin romper el reporte.
+    """
+    lines = ["**Variant Metadata:**"]
+    if meta is None:
+        lines.append("  - risk_budget_exceeded: false")
+        lines.append("  - requires_advisor_override: false")
+        lines.append("  - exceeded_constraints: None")
+        lines.append("  - reason_codes: None")
+        lines.append("  - notes: None")
+        return lines
+
+    exceeded = getattr(meta, "risk_budget_exceeded", False)
+    override = getattr(meta, "requires_advisor_override", False)
+    constraints = getattr(meta, "exceeded_constraints", []) or []
+    reason_codes = getattr(meta, "reason_codes", []) or []
+    notes = getattr(meta, "notes", []) or []
+
+    lines.append(f"  - risk_budget_exceeded: {'true' if exceeded else 'false'}")
+    lines.append(f"  - requires_advisor_override: {'true' if override else 'false'}")
+
+    if constraints:
+        lines.append("  - exceeded_constraints:")
+        for c in constraints:
+            lines.append(f"    - {c}")
+    else:
+        lines.append("  - exceeded_constraints: None")
+
+    if reason_codes:
+        lines.append("  - reason_codes:")
+        for rc in reason_codes:
+            lines.append(f"    - {rc}")
+    else:
+        lines.append("  - reason_codes: None")
+
+    if notes:
+        lines.append("  - notes:")
+        for note in notes:
+            lines.append(f"    - {note}")
+    else:
+        lines.append("  - notes: None")
+
+    return lines
+
+
 def _section_candidate_portfolios(result: Any) -> str:
     from risk_first_advisory.portfolio_layer.generation import PortfolioVariant
 
@@ -332,6 +380,7 @@ def _section_candidate_portfolios(result: Any) -> str:
         lines.append(f"- **Selected variant:** {selected.value}")
     lines.append("")
 
+    metadata_map: dict = getattr(cs, "metadata", {}) or {}
     canonical_order = [PortfolioVariant.DEFENSIVE, PortfolioVariant.BALANCED, PortfolioVariant.GROWTH]
     for variant in canonical_order:
         portfolio = cs.candidates.get(variant)
@@ -354,6 +403,10 @@ def _section_candidate_portfolios(result: Any) -> str:
             )
             for ticker, w in sorted_weights:
                 lines.append(f"  - {ticker}: {_pct(w)}")
+
+        lines.append("")
+        meta = metadata_map.get(variant)
+        lines.extend(_format_variant_metadata(meta))
         lines.append("")
 
     if cs.reason_codes:
