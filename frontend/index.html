@@ -649,7 +649,7 @@
   </div>
 
   <!-- ── 3. LIVE PORTFOLIO DEMO ───────────────────────────── -->
-  <div class="card">
+  <div class="card" id="card-live-portfolio">
     <div class="card-header">
       <h2>Live Portfolio Demo — POST /live/portfolio-demo</h2>
       <span class="pill pill-blue" style="font-size:10px;">yfinance · free data</span>
@@ -1487,6 +1487,44 @@
     setAIButtonLoading(false);
   }
 
+  function copyProfileToLiveDemo(profile) {
+    const select  = el("lp-profile");
+    const msgEl   = el("ai-copy-profile-msg");
+
+    // Check the profile exists as an <option> in the Live Portfolio selector.
+    const available = Array.from(select.options).map(o => o.value);
+    if (!available.includes(profile)) {
+      if (msgEl) {
+        Object.assign(msgEl.style, {
+          display: "block",
+          background: "#fef2f2",
+          border: "1px solid #fca5a5",
+          color: "#991b1b",
+        });
+        msgEl.textContent = `Profile not available in Live Portfolio Demo: "${profile}"`;
+      }
+      return;
+    }
+
+    // Copy the profile into the selector.
+    select.value = profile;
+
+    if (msgEl) {
+      Object.assign(msgEl.style, {
+        display: "block",
+        background: "#f0fdf4",
+        border: "1px solid #86efac",
+        color: "#166534",
+      });
+      msgEl.innerHTML = `Profile copied to Live Portfolio Demo: <strong>${escapeHTML(profile)}</strong>`;
+      setTimeout(() => { if (msgEl) msgEl.style.display = "none"; }, 5000);
+    }
+
+    // Scroll smoothly to the Live Portfolio Demo section.
+    const card = el("card-live-portfolio");
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function severityPill(sev) {
     const s = String(sev ?? "").toLowerCase();
     if (s === "high")   return `<span class="pill pill-red"   style="font-size:10px;">HIGH</span>`;
@@ -1534,6 +1572,14 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;padding-top:4px;">
+            <button class="btn-secondary btn-sm"
+                    onclick="copyProfileToLiveDemo('${data.preliminary_profile}')">
+              ↓ Use this profile in Live Portfolio Demo
+            </button>
+            <div id="ai-copy-profile-msg"
+                 style="display:none;margin-top:8px;padding:7px 12px;border-radius:4px;font-size:12px;"></div>
           </div>
         </div>
       </div>

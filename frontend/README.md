@@ -151,6 +151,14 @@ Los valores por defecto del formulario corresponden al test manual con KYC contr
 - `risk_tolerance_score=4` (bajo) pero `risk_capacity_score=8` (alto) → contradicción intencionada.
 - `liquidity_need_score=7` (alta liquidez) con horizonte de 15 años → tensión detectada por la IA.
 
+**Copiar perfil al Live Portfolio Demo:**
+El resultado incluye el botón "↓ Use this profile in Live Portfolio Demo". Al hacer click:
+- Copia `preliminary_profile` al selector de la sección Live Portfolio Demo.
+- Hace scroll suave hacia esa sección.
+- No ejecuta el portfolio automáticamente — el asesor decide cuándo presionar "Run Live Portfolio".
+- Si el perfil sugerido no existe como opción, muestra un error claro sin romper la página.
+- **No implica aprobación.** Es solo un helper de navegación para el asesor.
+
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.
 
