@@ -74,6 +74,7 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | Run Workflow | `POST` | `/workflow/run` | Ejecuta el workflow con el formulario |
 | Live Portfolio Demo | `POST` | `/live/portfolio-demo` | Portfolios reales con datos de yfinance |
 | AI Profile Demo | `POST` | `/ai/profile-demo` | Análisis KYC con OpenAI (requiere API key) |
+| AI Profile Follow-up | `POST` | `/ai/profile-follow-up` | Segunda ronda de análisis con respuestas del cliente |
 | Persisted Workflows | `GET` | `/workflow` | Lista todos los workflows |
 | Persisted Workflows | `GET` | `/workflow?client_id=...` | Filtra workflows por cliente |
 
@@ -158,6 +159,35 @@ El resultado incluye el botón "↓ Use this profile in Live Portfolio Demo". Al
 - No ejecuta el portfolio automáticamente — el asesor decide cuándo presionar "Run Live Portfolio".
 - Si el perfil sugerido no existe como opción, muestra un error claro sin romper la página.
 - **No implica aprobación.** Es solo un helper de navegación para el asesor.
+
+**Flujo de dos rondas — Follow-up:**
+
+Si la IA detecta contradicciones o incertidumbre, devuelve `follow_up_questions` (lista no vacía). En ese caso el frontend muestra automáticamente un formulario de respuestas:
+
+1. **Ronda 1 — Análisis KYC inicial** (`POST /ai/profile-demo`):
+   - Completa el formulario KYC y presiona "Analyze with AI".
+   - El resultado muestra: `preliminary_profile`, `confidence`, `contradictions`, `follow_up_questions`, `advisor_notes`.
+   - Si hay follow-up questions, aparece el formulario de respuestas debajo.
+
+2. **Ronda 2 — Follow-up** (`POST /ai/profile-follow-up`):
+   - Escribe una respuesta en cada textarea (todas son obligatorias).
+   - Presiona "Submit Follow-up Answers".
+   - El spinner "Calling OpenAI follow-up analysis…" aparece mientras espera.
+   - El resultado se muestra en un bloque verde (borde `#86efac`) debajo del primer resultado:
+     - `revised_profile` — perfil revisado (pill verde).
+     - `confidence` — barra de confianza actualizada.
+     - `profile_change_reason` — caja verde con el razonamiento de la revisión.
+     - `remaining_contradictions` — cards de severidad con las contradicciones no resueltas (vacío = todas resueltas).
+     - `advisor_notes` — notas finales para el asesor (lista numerada).
+     - Botón "↓ Use revised profile in Live Portfolio Demo" — copia `revised_profile` al selector.
+
+3. **Ejecutar un nuevo análisis KYC** limpia el resultado de follow-up y reinicia el estado global.
+
+**Manejo de errores del follow-up:**
+- HTTP 400 → OPENAI_API_KEY no configurado (mismo mensaje que ronda 1).
+- HTTP 502 → Fallo en el análisis (logs del backend / API key).
+- HTTP 422 → Errores de validación Pydantic (detalle expandido).
+- Error de red → Mensaje con instrucciones de uvicorn.
 
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.

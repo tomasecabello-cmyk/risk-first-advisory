@@ -832,6 +832,7 @@
       </div>
 
       <div id="ai-result" class="hidden"></div>
+      <div id="ai-followup-result" class="hidden"></div>
 
     </div>
   </div>
@@ -859,6 +860,10 @@
 
 <script>
   const API = "http://127.0.0.1:8000";
+
+  // ── AI profile follow-up global state ────────────────────────
+  let lastAIProfileRequestPayload = null;
+  let lastAIProfileResponse       = null;
 
   // ── utilities ────────────────────────────────────────────────
 
@@ -1408,12 +1413,18 @@
   }
 
   async function runAIProfile() {
-    const out = el("ai-result");
-    out.innerHTML = `<div class="msg msg-info" style="margin-top:16px;">
+    const out       = el("ai-result");
+    const fuOut     = el("ai-followup-result");
+    out.innerHTML   = `<div class="msg msg-info" style="margin-top:16px;">
       <span class="spinner" style="border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>
       Calling OpenAI profile analysis…
     </div>`;
     out.classList.remove("hidden");
+    // Clear any previous follow-up result
+    fuOut.innerHTML = "";
+    fuOut.classList.add("hidden");
+    lastAIProfileRequestPayload = null;
+    lastAIProfileResponse       = null;
     setAIButtonLoading(true);
 
     let payload;
@@ -1464,6 +1475,9 @@
         return;
       }
 
+      // Store state for follow-up round
+      lastAIProfileRequestPayload = payload;
+      lastAIProfileResponse       = data;
       out.innerHTML = renderAIProfileResult(data);
 
     } catch (err) {
@@ -1481,15 +1495,20 @@
   }
 
   function clearAIProfileResult() {
-    const out = el("ai-result");
-    out.innerHTML = "";
+    const out   = el("ai-result");
+    const fuOut = el("ai-followup-result");
+    out.innerHTML   = "";
     out.classList.add("hidden");
+    fuOut.innerHTML = "";
+    fuOut.classList.add("hidden");
+    lastAIProfileRequestPayload = null;
+    lastAIProfileResponse       = null;
     setAIButtonLoading(false);
   }
 
-  function copyProfileToLiveDemo(profile) {
+  function copyProfileToLiveDemo(profile, msgElId = "ai-copy-profile-msg") {
     const select  = el("lp-profile");
-    const msgEl   = el("ai-copy-profile-msg");
+    const msgEl   = el(msgElId);
 
     // Check the profile exists as an <option> in the Live Portfolio selector.
     const available = Array.from(select.options).map(o => o.value);
@@ -1616,6 +1635,30 @@
       </div>
     ` : "";
 
+    // ── follow-up answer form (only if there are follow-up questions) ────
+    const followupFormHtml = followUps.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;background:#f8faff;">
+        <div class="ai-section-title" style="margin-bottom:12px;">Answer Follow-up Questions</div>
+        ${followUps.map((q, i) => `
+          <div style="margin-bottom:14px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">
+              ${i + 1}. ${escapeHTML(q)}
+            </label>
+            <textarea
+              id="fu-answer-${i}"
+              rows="2"
+              placeholder="Your answer…"
+              style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;font-family:inherit;resize:vertical;background:#fff;"
+            ></textarea>
+          </div>
+        `).join("")}
+        <div id="fu-validation-msg" style="display:none;margin-bottom:8px;padding:7px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;color:#991b1b;font-size:12px;"></div>
+        <button class="btn-primary btn-sm" onclick="submitFollowUpAnswers()">
+          Submit Follow-up Answers
+        </button>
+      </div>
+    ` : "";
+
     // ── advisor notes ────────────────────────────────────
     const advisorNotesHtml = advisorNotes.length > 0 ? `
       <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
@@ -1634,7 +1677,201 @@
       </details>
     `;
 
-    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${contradictionsHtml}${followUpHtml}${advisorNotesHtml}${jsonHtml}</div>`;
+    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${contradictionsHtml}${followUpHtml}${followupFormHtml}${advisorNotesHtml}${jsonHtml}</div>`;
+  }
+
+  // ── 4b. AI profile follow-up ────────────────────────────────
+
+  async function submitFollowUpAnswers() {
+    if (!lastAIProfileRequestPayload || !lastAIProfileResponse) {
+      return; // should not happen if the form is visible
+    }
+
+    // Collect follow-up questions from the stored first-round response
+    const followUps = lastAIProfileResponse.follow_up_questions ?? [];
+
+    // Validate: all answers must be non-empty
+    const validationMsgEl = el("fu-validation-msg");
+    const answers = [];
+    let hasEmpty = false;
+    for (let i = 0; i < followUps.length; i++) {
+      const textarea = el(`fu-answer-${i}`);
+      const answer   = textarea ? textarea.value.trim() : "";
+      if (!answer) { hasEmpty = true; }
+      answers.push({ question: followUps[i], answer });
+    }
+    if (hasEmpty) {
+      if (validationMsgEl) {
+        validationMsgEl.style.display = "block";
+        validationMsgEl.textContent   = "All answers are required before submitting.";
+      }
+      return;
+    }
+    if (validationMsgEl) validationMsgEl.style.display = "none";
+
+    // Build the follow-up request payload
+    const followupPayload = {
+      client_id:            lastAIProfileRequestPayload.client_id,
+      original_kyc_payload: lastAIProfileRequestPayload.kyc_payload,
+      previous_analysis:    lastAIProfileResponse,
+      follow_up_answers:    answers,
+    };
+
+    // Show spinner in the follow-up result area
+    const fuOut = el("ai-followup-result");
+    fuOut.innerHTML = `<div class="msg msg-info" style="margin-top:16px;">
+      <span class="spinner" style="border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>
+      Calling OpenAI follow-up analysis…
+    </div>`;
+    fuOut.classList.remove("hidden");
+
+    try {
+      const r = await fetch(`${API}/ai/profile-follow-up`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(followupPayload),
+      });
+
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        let errHtml = `<div class="msg msg-error" style="margin-top:16px;">`;
+
+        if (r.status === 400) {
+          errHtml += `<strong>⚠ OPENAI_API_KEY is not configured in the backend terminal.</strong><br>
+            <span style="font-size:12px;">Set the environment variable before starting uvicorn.</span>`;
+        } else if (r.status === 502) {
+          errHtml += `<strong>AI follow-up analysis failed.</strong> Check backend logs or API key.<br>
+            <span style="font-size:12px;color:#718096;">${data && data.detail ? escapeHTML(String(data.detail)) : ""}</span>`;
+        } else if (r.status === 422 && data && data.detail) {
+          errHtml += `<strong>HTTP 422 — Validation errors:</strong><ul style="margin-top:6px;padding-left:18px;">`;
+          const detail = Array.isArray(data.detail) ? data.detail : [data.detail];
+          for (const d of detail) {
+            const loc = d.loc ? d.loc.join(" → ") : "";
+            errHtml += `<li>${loc ? `<code>${loc}</code>: ` : ""}${escapeHTML(d.msg)}</li>`;
+          }
+          errHtml += `</ul>`;
+        } else {
+          errHtml += `<strong>HTTP ${r.status}</strong>`;
+          if (data) errHtml += `<pre style="margin-top:8px;font-size:12px;">${escapeHTML(formatJSON(data))}</pre>`;
+        }
+
+        errHtml += `</div>`;
+        fuOut.innerHTML = errHtml;
+        return;
+      }
+
+      fuOut.innerHTML = renderFollowUpResult(data);
+
+    } catch (err) {
+      if (err.name === "TypeError" && err.message.includes("fetch")) {
+        fuOut.innerHTML = `<div class="msg msg-error" style="margin-top:16px;">
+          <strong>API not reachable.</strong> Start uvicorn first:<br>
+          <code style="font-size:12px;">uvicorn risk_first_advisory.api_layer.main:app --reload</code>
+        </div>`;
+      } else {
+        fuOut.innerHTML = `<div style="margin-top:16px;">${apiError(err)}</div>`;
+      }
+    }
+  }
+
+  function renderFollowUpResult(data) {
+    const remaining    = data.remaining_contradictions ?? [];
+    const advisorNotes = data.advisor_notes            ?? [];
+    const confidence   = typeof data.confidence === "number" ? data.confidence : 0;
+    const confidencePct = Math.round(confidence * 100);
+
+    // ── summary ──────────────────────────────────────────
+    const summaryHtml = `
+      <div class="result-summary">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+          <strong style="font-size:15px;">AI Revised Profile</strong>
+          <span class="pill pill-green" style="font-size:12px;padding:3px 10px;">${escapeHTML(data.revised_profile ?? "—")}</span>
+          <span class="pill pill-grey"  style="font-size:11px;padding:2px 8px;">second round</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <label>client_id</label>
+            <div class="value">${escapeHTML(data.client_id ?? "—")}</div>
+          </div>
+          <div class="summary-item">
+            <label>revised_profile</label>
+            <div class="value"><strong>${escapeHTML(data.revised_profile ?? "—")}</strong></div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>confidence</label>
+            <div class="value">
+              <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                <span style="font-size:17px;font-weight:700;color:#1a2744;min-width:46px;">${confidencePct}%</span>
+                <div class="confidence-bar-track">
+                  <div class="confidence-bar-fill" style="width:${confidencePct}%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;padding-top:4px;">
+            <button class="btn-secondary btn-sm"
+                    onclick="copyProfileToLiveDemo('${escapeHTML(data.revised_profile ?? "")}', 'ai-copy-revised-profile-msg')">
+              ↓ Use revised profile in Live Portfolio Demo
+            </button>
+            <div id="ai-copy-revised-profile-msg"
+                 style="display:none;margin-top:8px;padding:7px 12px;border-radius:4px;font-size:12px;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ── profile change reason ────────────────────────────
+    const changeReasonHtml = data.profile_change_reason ? `
+      <div style="padding:14px 20px;border-bottom:1px solid #86efac;">
+        <div class="ai-section-title">Profile Change Reason</div>
+        <div style="margin-top:8px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;color:#166534;font-size:13px;line-height:1.5;">
+          ${escapeHTML(data.profile_change_reason)}
+        </div>
+      </div>
+    ` : "";
+
+    // ── remaining contradictions ─────────────────────────
+    const remainingHtml = remaining.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #86efac;">
+        <div class="ai-section-title">Remaining Contradictions (${remaining.length})</div>
+        ${remaining.map(c => `
+          <div class="${severityClass(c.severity)}">
+            <div class="contradiction-header">
+              ${severityPill(c.severity)}
+              <span class="contradiction-field">${escapeHTML(c.field ?? "")}</span>
+            </div>
+            <div class="contradiction-explanation">${escapeHTML(c.explanation ?? "")}</div>
+          </div>
+        `).join("")}
+      </div>
+    ` : `
+      <div style="padding:12px 20px;border-bottom:1px solid #86efac;">
+        <div class="ai-section-title">Remaining Contradictions</div>
+        <span style="color:#a0aec0;font-size:12px;">None remaining — all contradictions resolved.</span>
+      </div>
+    `;
+
+    // ── advisor notes ────────────────────────────────────
+    const advisorNotesHtml = advisorNotes.length > 0 ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #86efac;">
+        <div class="ai-section-title">Advisor Notes (${advisorNotes.length})</div>
+        <ol class="numbered-list">
+          ${advisorNotes.map(n => `<li>${escapeHTML(n)}</li>`).join("")}
+        </ol>
+      </div>
+    ` : "";
+
+    // ── json collapsible ─────────────────────────────────
+    const jsonHtml = `
+      <details>
+        <summary>Full JSON response</summary>
+        <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+      </details>
+    `;
+
+    return `<div class="result-box" style="margin-top:20px;border-color:#86efac;">${summaryHtml}${changeReasonHtml}${remainingHtml}${advisorNotesHtml}${jsonHtml}</div>`;
   }
 
   // ── 5. portfolio candidate renderer ─────────────────────────
