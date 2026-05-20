@@ -46,17 +46,49 @@ def _valid_ai_response(**overrides) -> dict:
     return base
 
 
-class _FakeAIClient:
-    """Cliente fake que devuelve respuestas pre-construidas sin llamar a OpenAI."""
+def _valid_followup_response(**overrides) -> dict:
+    base: dict[str, Any] = {
+        "revised_profile": "moderado",
+        "confidence": 0.86,
+        "remaining_contradictions": [],
+        "profile_change_reason": (
+            "Client confirmed 15-year horizon with no near-term liquidity need. "
+            "Profile confirmed as moderado."
+        ),
+        "advisor_notes": ["Follow-up resolved liquidity contradiction."],
+    }
+    base.update(overrides)
+    return base
 
-    def __init__(self, response: dict | None = None, raise_value_error: bool = False):
+
+class _FakeAIClient:
+    """
+    Cliente fake que devuelve respuestas pre-construidas sin llamar a OpenAI.
+    Soporta tanto analyze_kyc (para /ai/profile-demo) como
+    analyze_follow_up (para /ai/profile-follow-up).
+    """
+
+    def __init__(
+        self,
+        response: dict | None = None,
+        raise_value_error: bool = False,
+        followup_response: dict | None = None,
+        raise_on_followup: bool = False,
+    ):
         self._response = response or _valid_ai_response()
         self._raise = raise_value_error
+        self._followup_response = followup_response or _valid_followup_response()
+        self._raise_on_followup = raise_on_followup
 
     def analyze_kyc(self, kyc_payload: dict) -> dict:
         if self._raise:
             raise ValueError("AI returned invalid JSON")
         return self._response
+
+    def analyze_follow_up(self, payload: dict) -> dict:
+        if self._raise_on_followup:
+            raise ValueError("AI follow-up returned invalid response")
+        return self._followup_response
 
 
 # Payload de request mínimo y válido
@@ -481,6 +513,327 @@ class TestAIProfileDemoSerialization:
 # ─────────────────────────────────────────────────────────────────────────────
 # TestExistingEndpointsUnaffected
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers / request fixtures for /ai/profile-follow-up
+# ─────────────────────────────────────────────────────────────────────────────
+
+_VALID_PREVIOUS_ANALYSIS: dict = {
+    "client_id": "CLI-AI-TEST",
+    "preliminary_profile": "moderado-defensivo",
+    "confidence": 0.72,
+    "contradictions": [
+        {
+            "field": "liquidity_need_score",
+            "severity": "medium",
+            "explanation": "High liquidity need with long horizon.",
+        }
+    ],
+    "follow_up_questions": ["¿Cuál es su horizonte real de inversión?"],
+    "advisor_notes": ["Verificar necesidad de liquidez."],
+}
+
+_VALID_FOLLOWUP_REQUEST: dict = {
+    "client_id": "CLI-AI-TEST",
+    "original_kyc_payload": _VALID_REQUEST["kyc_payload"],
+    "previous_analysis": _VALID_PREVIOUS_ANALYSIS,
+    "follow_up_answers": [
+        {
+            "question": "¿Cuál es su horizonte real de inversión?",
+            "answer": "Al menos 15 años, no necesito el dinero antes.",
+        }
+    ],
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIProfileFollowUpBasic
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIProfileFollowUpBasic:
+    def test_returns_200_with_fake_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200
+
+    def test_client_id_echoed_in_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200
+        assert r.json()["client_id"] == "CLI-AI-TEST"
+
+    def test_missing_follow_up_answers_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {k: v for k, v in _VALID_FOLLOWUP_REQUEST.items()
+                   if k != "follow_up_answers"}
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_follow_up_answers_list_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {**_VALID_FOLLOWUP_REQUEST, "follow_up_answers": []}
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_answer_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {
+            **_VALID_FOLLOWUP_REQUEST,
+            "follow_up_answers": [{"question": "¿Horizonte?", "answer": ""}],
+        }
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_question_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {
+            **_VALID_FOLLOWUP_REQUEST,
+            "follow_up_answers": [{"question": "", "answer": "15 años"}],
+        }
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_client_id_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {**_VALID_FOLLOWUP_REQUEST, "client_id": ""}
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIProfileFollowUpResponseFields
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIProfileFollowUpResponseFields:
+    @pytest.fixture
+    def followup_response(self, monkeypatch: pytest.MonkeyPatch) -> dict:
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_has_client_id(self, followup_response: dict):
+        assert "client_id" in followup_response
+        assert followup_response["client_id"] == "CLI-AI-TEST"
+
+    def test_has_revised_profile(self, followup_response: dict):
+        assert "revised_profile" in followup_response
+        assert isinstance(followup_response["revised_profile"], str)
+        assert followup_response["revised_profile"]
+
+    def test_revised_profile_value(self, followup_response: dict):
+        assert followup_response["revised_profile"] == "moderado"
+
+    def test_has_confidence(self, followup_response: dict):
+        assert "confidence" in followup_response
+        assert isinstance(followup_response["confidence"], float)
+
+    def test_confidence_in_range(self, followup_response: dict):
+        assert 0.0 <= followup_response["confidence"] <= 1.0
+
+    def test_has_remaining_contradictions(self, followup_response: dict):
+        assert "remaining_contradictions" in followup_response
+        assert isinstance(followup_response["remaining_contradictions"], list)
+
+    def test_has_profile_change_reason(self, followup_response: dict):
+        assert "profile_change_reason" in followup_response
+        assert isinstance(followup_response["profile_change_reason"], str)
+        assert followup_response["profile_change_reason"].strip()
+
+    def test_has_advisor_notes(self, followup_response: dict):
+        assert "advisor_notes" in followup_response
+        assert isinstance(followup_response["advisor_notes"], list)
+
+    def test_advisor_notes_are_strings(self, followup_response: dict):
+        for n in followup_response["advisor_notes"]:
+            assert isinstance(n, str)
+
+    def test_empty_remaining_contradictions_returned_correctly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient(followup_response=_valid_followup_response(
+            remaining_contradictions=[]
+        ))
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200
+        assert r.json()["remaining_contradictions"] == []
+
+    def test_multiple_answers_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        payload = {
+            **_VALID_FOLLOWUP_REQUEST,
+            "follow_up_answers": [
+                {"question": "¿Horizonte?", "answer": "15 años"},
+                {"question": "¿Liquidez?", "answer": "No necesito liquidez"},
+            ],
+        }
+        r = c.post("/ai/profile-follow-up", json=payload)
+        assert r.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIProfileFollowUpErrors
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIProfileFollowUpErrors:
+    def test_missing_api_key_returns_400(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        monkeypatch.setattr(
+            main_module,
+            "_get_openai_profile_client",
+            lambda: (_ for _ in ()).throw(ValueError("OPENAI_API_KEY not configured")),
+        )
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 400
+
+    def test_missing_api_key_detail_mentions_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        def _raise():
+            raise ValueError("OPENAI_API_KEY not configured")
+
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", _raise)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 400
+        assert "OPENAI_API_KEY" in r.json().get("detail", "")
+
+    def test_ai_follow_up_value_error_returns_502(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient(raise_on_followup=True)
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 502
+
+    def test_502_detail_does_not_expose_internals(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient(raise_on_followup=True)
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        detail = r.json().get("detail", "")
+        assert "Traceback" not in detail
+        assert "sk-" not in detail
+
+    def test_response_does_not_expose_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        import risk_first_advisory.api_layer.main as main_module
+
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-followup-secret-key")
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert "sk-followup-secret-key" not in r.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIProfileFollowUpSerialization
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIProfileFollowUpSerialization:
+    @pytest.fixture
+    def followup_response(self, monkeypatch: pytest.MonkeyPatch) -> dict:
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_response_is_json_serializable(self, followup_response: dict):
+        json.dumps(followup_response)  # no debe lanzar
+
+    def test_no_raw_python_objects_in_json(self, followup_response: dict):
+        serialized = json.dumps(followup_response)
+        assert "<" not in serialized
+        assert "object at 0x" not in serialized
+
+    def test_confidence_is_float(self, followup_response: dict):
+        assert isinstance(followup_response["confidence"], float)
+
+    def test_revised_profile_is_string(self, followup_response: dict):
+        assert isinstance(followup_response["revised_profile"], str)
+
+    def test_profile_change_reason_is_string(self, followup_response: dict):
+        assert isinstance(followup_response["profile_change_reason"], str)
 
 
 class TestExistingEndpointsUnaffected:

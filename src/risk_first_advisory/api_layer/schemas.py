@@ -236,3 +236,29 @@ class AIProfileResponse(BaseModel):
     contradictions: list[AIContradictionResponse]
     follow_up_questions: list[str]
     advisor_notes: list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /ai/profile-follow-up
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIFollowUpAnswerRequest(BaseModel):
+    question: str = Field(min_length=1)
+    answer: str = Field(min_length=1)
+
+
+class AIProfileFollowUpRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    original_kyc_payload: AIProfileKYCRequest
+    previous_analysis: AIProfileResponse
+    follow_up_answers: list[AIFollowUpAnswerRequest] = Field(min_length=1)
+
+
+class AIProfileFollowUpResponse(BaseModel):
+    client_id: str
+    revised_profile: str
+    confidence: float
+    remaining_contradictions: list[AIContradictionResponse]
+    profile_change_reason: str
+    advisor_notes: list[str]

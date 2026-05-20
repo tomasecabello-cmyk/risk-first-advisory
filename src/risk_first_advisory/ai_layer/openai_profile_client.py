@@ -50,6 +50,14 @@ _REQUIRED_OUTPUT_KEYS: tuple[str, ...] = (
     "advisor_notes",
 )
 
+_REQUIRED_FOLLOWUP_KEYS: tuple[str, ...] = (
+    "revised_profile",
+    "confidence",
+    "remaining_contradictions",
+    "profile_change_reason",
+    "advisor_notes",
+)
+
 _DEFAULT_MODEL: str = "gpt-4o-mini"
 _DEFAULT_MAX_TOKENS: int = 1024
 _DEFAULT_TEMPERATURE: float = 0.2     # baja para respuestas reproducibles
@@ -109,6 +117,59 @@ Contradictions to watch for:
 - High max_acceptable_drawdown_pct vs stated concern about losses in open fields
 - Declared return expectation incompatible with stated risk tolerance
 - Short investment horizon with high equity preference
+""".strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Follow-up system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FOLLOWUP_SYSTEM_PROMPT: str = """
+You are a risk-profiling analyst assistant for a financial advisory firm.
+
+You are conducting a second-round review. You have been provided:
+1. The original KYC data for the client.
+2. The preliminary profile and contradictions identified in the first round.
+3. The advisor's follow-up questions and the client's answers.
+
+Your role is strictly limited to:
+1. Re-evaluating the risk profile in light of the new information.
+2. Identifying any remaining contradictions or new inconsistencies.
+3. Explaining clearly whether the profile should remain the same or change, and why.
+4. Providing updated notes for the human advisor.
+
+HARD RULES — you must never violate these:
+- You do NOT approve the final profile. Only the human advisor can approve it.
+- You do NOT recommend financial products, tickers, ETFs, or securities.
+- You do NOT generate portfolios or asset allocations.
+- You do NOT use declared_return_expectation_pct to construct the profile.
+  Return expectations are noted but never used to elevate the risk profile.
+- You do NOT output any information about your own model, API key, or system internals.
+- You always respond with ONLY a valid JSON object — no markdown, no prose.
+
+Output format (strict JSON, no other text):
+{
+  "revised_profile": "<one of: conservador|moderado-defensivo|moderado|moderado-agresivo|agresivo>",
+  "confidence": <float 0.0–1.0>,
+  "remaining_contradictions": [
+    {
+      "field": "<field name or topic>",
+      "severity": "<low|medium|high>",
+      "explanation": "<brief explanation>"
+    }
+  ],
+  "profile_change_reason": "<non-empty explanation of why the profile was maintained or changed>",
+  "advisor_notes": [
+    "<note string>"
+  ]
+}
+
+Profile definitions (for your reference only — do not output):
+- conservador: very low risk tolerance, capital preservation focus, short horizon or high liquidity need
+- moderado-defensivo: low-medium risk, some growth but predominantly defensive
+- moderado: balanced risk/return, medium horizon, moderate experience
+- moderado-agresivo: medium-high risk, growth-oriented, longer horizon
+- agresivo: high risk tolerance, long horizon, experienced investor, low liquidity need
 """.strip()
 
 
@@ -187,9 +248,14 @@ class OpenAIProfileClient:
 
     # ── Llamada a la IA ───────────────────────────────────────────────────────
 
-    def _call_api(self, user_message: str) -> str:
+    def _call_api(self, user_message: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
         """
         Llama a la API de OpenAI y devuelve el contenido de la respuesta como string.
+
+        Args:
+            user_message  : mensaje del usuario serializado.
+            system_prompt : prompt de sistema a usar (default: _SYSTEM_PROMPT para KYC).
+                            Pasar _FOLLOWUP_SYSTEM_PROMPT para el análisis de follow-up.
 
         Raises:
             ValueError: si la respuesta está vacía o la API falla.
@@ -198,7 +264,7 @@ class OpenAIProfileClient:
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
                 max_tokens=self._max_tokens,
@@ -219,6 +285,29 @@ class OpenAIProfileClient:
             raise ValueError("La API de OpenAI devolvió contenido vacío.")
 
         return content.strip()
+
+    # ── Construcción del user message (follow-up) ─────────────────────────────
+
+    @staticmethod
+    def _build_followup_user_message(payload: dict[str, Any]) -> str:
+        """
+        Construye el mensaje de usuario para la segunda ronda de análisis.
+
+        El payload debe contener: client_id, original_kyc, previous_analysis,
+        follow_up_answers.
+        """
+        try:
+            payload_json = json.dumps(payload, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"follow-up payload no es serializable a JSON: {exc}"
+            ) from exc
+
+        return (
+            "Please analyze the following follow-up information and respond with ONLY a valid "
+            "JSON object following the specified output format. No markdown, no prose.\n\n"
+            f"FOLLOW-UP DATA:\n{payload_json}"
+        )
 
     # ── Validación de la respuesta ────────────────────────────────────────────
 
@@ -321,4 +410,112 @@ class OpenAIProfileClient:
             )
 
         self._validate_response(data)
+        return data
+
+    # ── Validación de respuesta follow-up ────────────────────────────────────
+
+    @staticmethod
+    def _validate_followup_response(data: dict[str, Any]) -> None:
+        """
+        Valida que el dict devuelto por la IA (follow-up) tenga la estructura esperada.
+
+        Raises:
+            ValueError: con mensaje descriptivo si la validación falla.
+        """
+        # Claves requeridas
+        for key in _REQUIRED_FOLLOWUP_KEYS:
+            if key not in data:
+                raise ValueError(
+                    f"Respuesta de IA inválida (follow-up): falta la clave requerida '{key}'. "
+                    f"Claves presentes: {list(data.keys())}"
+                )
+
+        # revised_profile
+        profile = data["revised_profile"]
+        if not isinstance(profile, str) or profile not in _VALID_PROFILES:
+            raise ValueError(
+                f"Respuesta de IA inválida (follow-up): revised_profile={profile!r} "
+                f"no es uno de los perfiles válidos: {sorted(_VALID_PROFILES)}"
+            )
+
+        # confidence
+        confidence = data["confidence"]
+        if not isinstance(confidence, (int, float)):
+            raise ValueError(
+                f"Respuesta de IA inválida (follow-up): confidence debe ser numérico, "
+                f"recibido {type(confidence).__name__}."
+            )
+        if not 0.0 <= float(confidence) <= 1.0:
+            raise ValueError(
+                f"Respuesta de IA inválida (follow-up): confidence={confidence} "
+                "debe estar en el rango [0.0, 1.0]."
+            )
+
+        # remaining_contradictions
+        if not isinstance(data["remaining_contradictions"], list):
+            raise ValueError(
+                "Respuesta de IA inválida (follow-up): 'remaining_contradictions' debe ser "
+                f"una lista, recibido {type(data['remaining_contradictions']).__name__}."
+            )
+
+        # profile_change_reason — string no vacío
+        reason = data["profile_change_reason"]
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(
+                "Respuesta de IA inválida (follow-up): 'profile_change_reason' debe ser "
+                "un string no vacío."
+            )
+
+        # advisor_notes
+        if not isinstance(data["advisor_notes"], list):
+            raise ValueError(
+                "Respuesta de IA inválida (follow-up): 'advisor_notes' debe ser una lista, "
+                f"recibido {type(data['advisor_notes']).__name__}."
+            )
+
+    # ── API pública — follow-up ───────────────────────────────────────────────
+
+    def analyze_follow_up(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Segunda ronda de análisis. Considera el KYC original, el análisis previo
+        y las respuestas del cliente a las preguntas de follow-up.
+
+        Args:
+            payload: dict con las claves:
+                client_id         : str
+                original_kyc      : dict (campos KYC del primer análisis)
+                previous_analysis : dict (resultado de analyze_kyc)
+                follow_up_answers : list[dict] con {question: str, answer: str}
+
+        Returns:
+            dict con las claves:
+                revised_profile          : str (uno de los 5 perfiles)
+                confidence               : float [0.0, 1.0]
+                remaining_contradictions : list[dict] (field, severity, explanation)
+                profile_change_reason    : str (no vacío)
+                advisor_notes            : list[str]
+
+        Raises:
+            ValueError: si el payload no es serializable, la API falla,
+                        la respuesta no es JSON válido, o falla la validación.
+        """
+        user_message = self._build_followup_user_message(payload)
+        raw_content = self._call_api(user_message, system_prompt=_FOLLOWUP_SYSTEM_PROMPT)
+
+        # Parsear JSON
+        try:
+            data = json.loads(raw_content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"La IA devolvió JSON inválido (follow-up): {exc}. "
+                f"Contenido recibido (primeros 200 chars): {raw_content[:200]!r}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"La IA devolvió un JSON que no es un objeto (dict) (follow-up). "
+                f"Tipo recibido: {type(data).__name__}."
+            )
+
+        self._validate_followup_response(data)
         return data

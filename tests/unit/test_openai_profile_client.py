@@ -455,3 +455,284 @@ class TestApiKeyNotLeaked:
         client = _build_client(_valid_response())
         as_str = str(client) + repr(client)
         assert "sk-should-not-appear" not in as_str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers para follow-up
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _valid_followup_response(**overrides) -> dict:
+    """Devuelve un dict de respuesta follow-up válida, opcionalmente sobreescrito."""
+    base = {
+        "revised_profile": "moderado",
+        "confidence": 0.84,
+        "remaining_contradictions": [],
+        "profile_change_reason": (
+            "Client confirmed 15-year horizon with no near-term liquidity need. "
+            "Profile maintained as moderado."
+        ),
+        "advisor_notes": ["Follow-up confirmed long-term focus. No profile change needed."],
+    }
+    base.update(overrides)
+    return base
+
+
+def _build_followup_client(response_dict: dict):
+    """Construye OpenAIProfileClient con fake client que devuelve response_dict (follow-up)."""
+    from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+    fake = _make_fake_client(json.dumps(response_dict))
+    return OpenAIProfileClient(_client=fake)
+
+
+_SAMPLE_FOLLOWUP_PAYLOAD: dict = {
+    "client_id": "CLI-FU-001",
+    "original_kyc": dict(_SAMPLE_KYC),
+    "previous_analysis": {
+        "preliminary_profile": "moderado-defensivo",
+        "confidence": 0.72,
+        "contradictions": [
+            {
+                "field": "liquidity_need_score",
+                "severity": "medium",
+                "explanation": "High liquidity need conflicts with 15-year horizon.",
+            }
+        ],
+        "follow_up_questions": ["¿Cuál es su horizonte real de inversión?"],
+        "advisor_notes": ["Verificar necesidad de liquidez antes de confirmar perfil."],
+    },
+    "follow_up_answers": [
+        {
+            "question": "¿Cuál es su horizonte real de inversión?",
+            "answer": "Al menos 15 años, no necesito el dinero antes de la jubilación.",
+        }
+    ],
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAnalyzeFollowUpValid
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAnalyzeFollowUpValid:
+    def test_returns_dict(self):
+        client = _build_followup_client(_valid_followup_response())
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert isinstance(result, dict)
+
+    def test_revised_profile_present(self):
+        client = _build_followup_client(_valid_followup_response())
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert "revised_profile" in result
+
+    def test_revised_profile_value(self):
+        client = _build_followup_client(_valid_followup_response(revised_profile="moderado"))
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert result["revised_profile"] == "moderado"
+
+    def test_confidence_present_and_in_range(self):
+        client = _build_followup_client(_valid_followup_response(confidence=0.84))
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert isinstance(result["confidence"], (int, float))
+        assert 0.0 <= result["confidence"] <= 1.0
+
+    def test_remaining_contradictions_is_list(self):
+        client = _build_followup_client(_valid_followup_response())
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert isinstance(result["remaining_contradictions"], list)
+
+    def test_profile_change_reason_is_nonempty_str(self):
+        client = _build_followup_client(_valid_followup_response())
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert isinstance(result["profile_change_reason"], str)
+        assert result["profile_change_reason"].strip()
+
+    def test_advisor_notes_is_list(self):
+        client = _build_followup_client(_valid_followup_response())
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert isinstance(result["advisor_notes"], list)
+
+    def test_all_valid_profiles_accepted(self):
+        for profile in (
+            "conservador",
+            "moderado-defensivo",
+            "moderado",
+            "moderado-agresivo",
+            "agresivo",
+        ):
+            client = _build_followup_client(_valid_followup_response(revised_profile=profile))
+            result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+            assert result["revised_profile"] == profile
+
+    def test_empty_remaining_contradictions_accepted(self):
+        client = _build_followup_client(_valid_followup_response(remaining_contradictions=[]))
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert result["remaining_contradictions"] == []
+
+    def test_confidence_boundary_zero(self):
+        client = _build_followup_client(_valid_followup_response(confidence=0.0))
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert result["confidence"] == 0.0
+
+    def test_confidence_boundary_one(self):
+        client = _build_followup_client(_valid_followup_response(confidence=1.0))
+        result = client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert result["confidence"] == 1.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAnalyzeFollowUpValidation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAnalyzeFollowUpValidation:
+    def test_invalid_revised_profile_raises_value_error(self):
+        client = _build_followup_client(
+            _valid_followup_response(revised_profile="ultra_agresivo")
+        )
+        with pytest.raises(ValueError, match="revised_profile"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_empty_revised_profile_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(revised_profile=""))
+        with pytest.raises(ValueError, match="revised_profile"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_confidence_above_one_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(confidence=1.5))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_confidence_below_zero_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(confidence=-0.1))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_missing_revised_profile_raises_value_error(self):
+        d = _valid_followup_response()
+        del d["revised_profile"]
+        client = _build_followup_client(d)
+        with pytest.raises(ValueError, match="revised_profile"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_missing_confidence_raises_value_error(self):
+        d = _valid_followup_response()
+        del d["confidence"]
+        client = _build_followup_client(d)
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_missing_remaining_contradictions_raises_value_error(self):
+        d = _valid_followup_response()
+        del d["remaining_contradictions"]
+        client = _build_followup_client(d)
+        with pytest.raises(ValueError, match="remaining_contradictions"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_remaining_contradictions_not_list_raises_value_error(self):
+        client = _build_followup_client(
+            _valid_followup_response(remaining_contradictions={"field": "x"})
+        )
+        with pytest.raises(ValueError, match="remaining_contradictions"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_missing_profile_change_reason_raises_value_error(self):
+        d = _valid_followup_response()
+        del d["profile_change_reason"]
+        client = _build_followup_client(d)
+        with pytest.raises(ValueError, match="profile_change_reason"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_empty_profile_change_reason_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(profile_change_reason=""))
+        with pytest.raises(ValueError, match="profile_change_reason"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_whitespace_profile_change_reason_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(profile_change_reason="   "))
+        with pytest.raises(ValueError, match="profile_change_reason"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_advisor_notes_not_list_raises_value_error(self):
+        client = _build_followup_client(_valid_followup_response(advisor_notes="una nota"))
+        with pytest.raises(ValueError, match="advisor_notes"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_invalid_json_raises_value_error(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        fake = _make_fake_client("this is not json at all {{{{")
+        client = OpenAIProfileClient(_client=fake)
+        with pytest.raises(ValueError, match="JSON"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestFollowUpPromptContent
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFollowUpPromptContent:
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from risk_first_advisory.ai_layer import openai_profile_client as module
+
+        self.prompt = module._FOLLOWUP_SYSTEM_PROMPT
+
+    def test_prompt_says_ai_does_not_approve_profile(self):
+        p = self.prompt.lower()
+        assert "not approve" in p or "no aprueba" in p or "only the human advisor" in p
+
+    def test_prompt_says_ai_does_not_recommend_products(self):
+        p = self.prompt.lower()
+        assert "not recommend" in p or "no recomiend" in p
+
+    def test_prompt_says_ai_does_not_generate_portfolios(self):
+        p = self.prompt.lower()
+        assert "not generate" in p or "no genera" in p or "portfolio" in p
+
+    def test_prompt_requires_json_only_output(self):
+        p = self.prompt.lower()
+        assert "json" in p
+        assert "no markdown" in p or "only" in p or "valid json" in p
+
+    def test_prompt_mentions_revised_profile_key(self):
+        assert "revised_profile" in self.prompt
+
+    def test_prompt_mentions_remaining_contradictions_key(self):
+        assert "remaining_contradictions" in self.prompt
+
+    def test_prompt_mentions_profile_change_reason_key(self):
+        assert "profile_change_reason" in self.prompt
+
+    def test_prompt_mentions_five_profiles(self):
+        for profile in ("conservador", "moderado", "agresivo"):
+            assert profile in self.prompt.lower()
+
+    def test_user_message_includes_original_kyc(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        msg = OpenAIProfileClient._build_followup_user_message(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert "original_kyc" in msg or "risk_tolerance_score" in msg
+
+    def test_user_message_includes_follow_up_answers(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        msg = OpenAIProfileClient._build_followup_user_message(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert "follow_up_answers" in msg
+
+    def test_user_message_includes_previous_analysis(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        msg = OpenAIProfileClient._build_followup_user_message(_SAMPLE_FOLLOWUP_PAYLOAD)
+        assert "previous_analysis" in msg or "preliminary_profile" in msg
+
+    def test_followup_prompt_no_api_key_hardcoded(self):
+        import re
+        from risk_first_advisory.ai_layer import openai_profile_client as module
+
+        assert not re.search(r"sk-[A-Za-z0-9_-]{20,}", module._FOLLOWUP_SYSTEM_PROMPT), (
+            "El follow-up system prompt parece contener una API key real."
+        )

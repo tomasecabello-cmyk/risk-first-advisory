@@ -28,6 +28,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
     AIContradictionResponse,
+    AIFollowUpAnswerRequest,
+    AIProfileFollowUpRequest,
+    AIProfileFollowUpResponse,
     AIProfileRequest,
     AIProfileResponse,
     DemoRunResponse,
@@ -731,6 +734,75 @@ def ai_profile_demo(req: AIProfileRequest) -> AIProfileResponse:
         confidence=float(result["confidence"]),
         contradictions=contradictions,
         follow_up_questions=[str(q) for q in result.get("follow_up_questions", [])],
+        advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
+    )
+
+
+@app.post("/ai/profile-follow-up", response_model=AIProfileFollowUpResponse)
+def ai_profile_follow_up(req: AIProfileFollowUpRequest) -> AIProfileFollowUpResponse:
+    """
+    Segunda ronda de análisis de perfil con IA. Recibe el KYC original, el análisis
+    previo y las respuestas del cliente a las preguntas de follow-up, y devuelve:
+        - revised_profile          : perfil revisado por la IA
+        - confidence               : confianza actualizada (0-1)
+        - remaining_contradictions : contradicciones que persisten
+        - profile_change_reason    : explicación del cambio (o mantenimiento) de perfil
+        - advisor_notes            : notas actualizadas para el asesor
+
+    La IA NO aprueba el perfil. La aprobación siempre corresponde al asesor.
+    No persiste nada. No genera portfolios. No llama al workflow.
+    """
+    # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
+        )
+
+    # ── 2. Construir payload para la IA ──────────────────────────────────
+    followup_payload = {
+        "client_id": req.client_id,
+        "original_kyc": req.original_kyc_payload.model_dump(exclude_none=True),
+        "previous_analysis": req.previous_analysis.model_dump(),
+        "follow_up_answers": [
+            {"question": a.question, "answer": a.answer}
+            for a in req.follow_up_answers
+        ],
+    }
+
+    # ── 3. Llamar a la IA ─────────────────────────────────────────────────
+    try:
+        result = ai_client.analyze_follow_up(followup_payload)
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile follow-up analysis failed. The AI returned an invalid response.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile follow-up analysis failed due to an unexpected error.",
+        )
+
+    # ── 4. Construir respuesta ─────────────────────────────────────────────
+    remaining_contradictions = [
+        AIContradictionResponse(
+            field=c.get("field", ""),
+            severity=c.get("severity", ""),
+            explanation=c.get("explanation", ""),
+        )
+        for c in result.get("remaining_contradictions", [])
+        if isinstance(c, dict)
+    ]
+
+    return AIProfileFollowUpResponse(
+        client_id=req.client_id,
+        revised_profile=result["revised_profile"],
+        confidence=float(result["confidence"]),
+        remaining_contradictions=remaining_contradictions,
+        profile_change_reason=str(result["profile_change_reason"]),
         advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
     )
 
