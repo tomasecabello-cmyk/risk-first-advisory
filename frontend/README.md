@@ -75,6 +75,7 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | Live Portfolio Demo | `POST` | `/live/portfolio-demo` | Portfolios reales con datos de yfinance |
 | AI Profile Demo | `POST` | `/ai/profile-demo` | Análisis KYC con OpenAI (requiere API key) |
 | AI Profile Follow-up | `POST` | `/ai/profile-follow-up` | Segunda ronda de análisis con respuestas del cliente |
+| AI Universe Filter Demo | `POST` | `/ai/filter-universe-demo` | Lenguaje natural → OpenAI → filtro de universo (requiere API key) |
 | Persisted Workflows | `GET` | `/workflow` | Lista todos los workflows |
 | Persisted Workflows | `GET` | `/workflow?client_id=...` | Filtra workflows por cliente |
 
@@ -189,6 +190,47 @@ Si la IA detecta contradicciones o incertidumbre, devuelve `follow_up_questions`
 - HTTP 422 → Errores de validación Pydantic (detalle expandido).
 - Error de red → Mensaje con instrucciones de uvicorn.
 
+### AI Universe Filter Demo
+
+Llama a `POST /ai/filter-universe-demo` — pipeline combinado de dos pasos:
+
+1. **Paso 1 — Extracción de preferencias (OpenAI):** el texto libre del cliente se envía a `OpenAIProfileClient.extract_investment_preferences()`. La IA devuelve un JSON estructurado con tipos de instrumento permitidos/excluidos, moneda, país, entidad, sectores a evitar, hard dollar, etc.
+
+2. **Paso 2 — Filtro determinístico (universe_layer):** las preferencias extraídas se aplican sobre `tests/fixtures/universe/sample_instrument_universe.csv` usando `PreferenceFilterEngine`. El resultado indica qué instrumentos pasan todos los filtros activos y cuáles son excluidos, con razones por ticker.
+
+**Requiere OPENAI_API_KEY** en la terminal donde corre uvicorn. Sin la key, el endpoint devuelve HTTP 400 y el frontend muestra el mensaje de error con el comando de inicio correcto.
+
+**Características:**
+- Muestra preferencias estructuradas detectadas por la IA: `allowed_instrument_types`, `excluded_instrument_types`, `currency`, `country`, `entity`, `hard_dollar_only`, `avoid_sectors`, `prefer_sectors`, `avoid_issuers`, `prefer_issuers`, `min_liquidity_score`, `max_maturity_year`, `hard_constraints`, `soft_preferences`, `unparsed_preferences`, `advisor_notes`, `confidence`.
+- Tabla de **instrumentos elegibles** con acento visual verde: ticker, name, issuer, type, asset class, currency, country, sector, hard dollar, maturity, YTM, duration, liquidity score, rating.
+- Tabla de **instrumentos excluidos** con acento visual rojo: ticker + chips con las razones de exclusión (`not_available_at_entity:X`, `instrument_type_not_allowed:X`, `sector_avoided:X`, etc.).
+- Lista de **filtros aplicados** como chips.
+- Lista de **warnings** (prefer_* hints, claves desconocidas, fechas de vencimiento faltantes).
+- JSON completo colapsable.
+
+**Limitaciones / notas:**
+- **No genera portfolios.** No calcula pesos ni retornos esperados.
+- **No trae datos de mercado.** No llama a yfinance ni Bloomberg.
+- **No persiste resultados** en SQLite ni genera reporte Markdown.
+- **Universo fijo:** `tests/fixtures/universe/sample_instrument_universe.csv` — 12 instrumentos de muestra (ETF, CORPORATE_BOND, SOVEREIGN_BOND, MONEY_MARKET, CEDEAR).
+- Los filtros son determinísticos: mismas preferencias → mismo resultado siempre.
+- El filtro `prefer_sectors` / `prefer_issuers` genera un warning pero no excluye instrumentos (solo `avoid_*` excluye).
+
+**Manejo de errores:**
+- HTTP 400 → OPENAI_API_KEY no configurada → mensaje con instrucciones de inicio.
+- HTTP 502 → Fallo de la IA (respuesta inválida o error de API) → mensaje con instrucción de revisar logs.
+- HTTP 500 → CSV del universo no encontrado en el servidor.
+- HTTP 422 → Preferencias extraídas por la IA contienen valores inválidos (tipo de instrumento desconocido, liquidity fuera de rango, etc.).
+- Error de red → `"API not reachable. Start uvicorn first."`
+
+**Valores por defecto del formulario:**
+- `client_id` = `CLI-PREF-001`
+- `natural_language_preferences` = `"Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia."`
+
+Con esta entrada, la IA extrae: `CORPORATE_BOND`, `USD`, `Argentina`, `Balanz`, `hard_dollar_only=true`, `avoid_sectors=[Energy]` — y el filtro devuelve solo **GALI28** como instrumento elegible.
+
+---
+
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.
 
@@ -200,6 +242,6 @@ Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestr
 - **Sin producción.** No usar contra un backend expuesto en red pública.
 - **Frontend estático de demo.** No persiste estado entre recargas.
 - **CORS.** Si el navegador bloquea requests desde `file://`, usar `python -m http.server 5500 -d frontend`.
-- **AI Profile Demo requiere OPENAI_API_KEY.** Sin la key, el endpoint responde HTTP 400. La sección Live Portfolio Demo descarga datos reales de Yahoo Finance (requiere internet).
+- **AI Profile Demo y AI Universe Filter Demo requieren OPENAI_API_KEY.** Sin la key, los endpoints responden HTTP 400. La sección Live Portfolio Demo descarga datos reales de Yahoo Finance (requiere internet).
 - **SQLite local.** Los IDs de workflow (`workflow_000001`, etc.) son secuenciales por sesión de backend. Se resetean si el servidor se reinicia sin persistencia previa.
-- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo`, `/ai/profile-demo` y `GET /workflow`. Los endpoints `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
+- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo`, `/ai/profile-demo`, `/ai/profile-follow-up`, `/ai/filter-universe-demo` y `GET /workflow`. Los endpoints `/universe/filter-demo`, `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.

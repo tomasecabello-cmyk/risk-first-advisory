@@ -837,7 +837,57 @@
     </div>
   </div>
 
-  <!-- ── 5. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <!-- ── 5. AI UNIVERSE FILTER DEMO ──────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>AI Universe Filter Demo — POST /ai/filter-universe-demo</h2>
+      <span class="pill pill-blue" style="font-size:10px;">OpenAI + universe · no persist</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
+        <ul>
+          <li>Paso 1 — la IA (OpenAI) extrae preferencias estructuradas desde texto libre.</li>
+          <li>Paso 2 — <code>PreferenceFilterEngine</code> aplica esas preferencias al CSV del universo de instrumentos.</li>
+          <li>Devuelve: instrumentos elegibles, excluidos con razones, filtros aplicados y warnings.</li>
+          <li><strong>No genera portfolios.</strong> No trae datos de mercado. No persiste resultados.</li>
+          <li><strong>No aprueba</strong> ningún perfil — solo el asesor puede hacerlo.</li>
+          <li>Universo: <code>tests/fixtures/universe/sample_instrument_universe.csv</code> (12 instrumentos).</li>
+        </ul>
+        <div style="margin-top:8px;padding:7px 10px;background:#dbeafe;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#1e40af;">
+          $env:OPENAI_API_KEY="your_key_here"<br>
+          uvicorn risk_first_advisory.api_layer.main:app --reload
+        </div>
+      </div>
+
+      <div class="form-grid cols-3" style="margin-bottom:14px;">
+        <div class="field">
+          <label>client_id</label>
+          <input type="text" id="aif-client_id" value="CLI-PREF-001" />
+        </div>
+      </div>
+
+      <div class="field full-span" style="margin-bottom:18px;">
+        <label>natural_language_preferences</label>
+        <textarea id="aif-preferences" rows="3"
+          style="font-size:13px;line-height:1.6;"
+        >Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia.</textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-aif" onclick="runAIUniverseFilter()">
+          Filter Universe with AI
+        </button>
+        <button class="btn-secondary" onclick="clearAIUniverseFilterResult()">Clear</button>
+      </div>
+
+      <div id="aif-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 6. PERSISTED WORKFLOWS ────────────────────────────── -->
   <div class="card">
     <div class="card-header">
       <h2>Persisted Workflows — GET /workflow</h2>
@@ -1874,7 +1924,351 @@
     return `<div class="result-box" style="margin-top:20px;border-color:#86efac;">${summaryHtml}${changeReasonHtml}${remainingHtml}${advisorNotesHtml}${jsonHtml}</div>`;
   }
 
-  // ── 5. portfolio candidate renderer ─────────────────────────
+  // ── 5. AI universe filter demo ──────────────────────────────────
+
+  function setAIFilterButtonLoading(loading) {
+    const btn = el("btn-aif");
+    if (!btn) return;
+    btn.disabled = loading;
+    btn.innerHTML = loading
+      ? `<span class="spinner"></span>Calling OpenAI and filtering instrument universe…`
+      : "Filter Universe with AI";
+  }
+
+  async function runAIUniverseFilter() {
+    const out = el("aif-result");
+    out.innerHTML = `<div class="msg msg-info" style="margin-top:16px;">
+      <span class="spinner" style="border-color:rgba(30,64,175,0.3);border-top-color:#1e40af;"></span>
+      Calling OpenAI and filtering instrument universe…
+    </div>`;
+    out.classList.remove("hidden");
+    setAIFilterButtonLoading(true);
+
+    const clientId = el("aif-client_id").value.trim();
+    const prefs    = el("aif-preferences").value.trim();
+
+    if (!clientId || !prefs) {
+      out.innerHTML = `<div class="msg msg-error" style="margin-top:16px;">
+        <strong>client_id</strong> and <strong>natural_language_preferences</strong> are required.
+      </div>`;
+      setAIFilterButtonLoading(false);
+      return;
+    }
+
+    const payload = {
+      client_id: clientId,
+      natural_language_preferences: prefs,
+      kyc_context: null,
+      previous_profile_analysis: null,
+    };
+
+    try {
+      const r = await fetch(`${API}/ai/filter-universe-demo`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        let errHtml = `<div class="msg msg-error" style="margin-top:16px;">`;
+
+        if (r.status === 400) {
+          errHtml += `<strong>⚠ OPENAI_API_KEY is not configured in the backend terminal.</strong><br>
+            <span style="font-size:12px;">Set the environment variable before starting uvicorn:</span>
+            <div style="margin-top:8px;padding:7px 10px;background:#fee2e2;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#991b1b;">
+              $env:OPENAI_API_KEY="your_key_here"<br>
+              uvicorn risk_first_advisory.api_layer.main:app --reload
+            </div>`;
+        } else if (r.status === 502) {
+          errHtml += `<strong>AI universe filtering failed.</strong> Check backend logs or API key.<br>
+            <span style="font-size:12px;color:#718096;">${data && data.detail ? escapeHTML(String(data.detail)) : ""}</span>`;
+        } else if (r.status === 500) {
+          errHtml += `<strong>HTTP 500</strong> — Instrument universe fixture not found on the server.`;
+        } else if (r.status === 422 && data && data.detail) {
+          errHtml += `<strong>HTTP 422 — Validation errors:</strong><ul style="margin-top:6px;padding-left:18px;">`;
+          const detail = Array.isArray(data.detail) ? data.detail : [{ msg: String(data.detail) }];
+          for (const d of detail) {
+            const loc = d.loc ? d.loc.join(" → ") : "";
+            errHtml += `<li>${loc ? `<code>${loc}</code>: ` : ""}${escapeHTML(d.msg ?? String(d))}</li>`;
+          }
+          errHtml += `</ul>`;
+        } else {
+          errHtml += `<strong>HTTP ${r.status}</strong>`;
+          if (data) errHtml += `<pre style="margin-top:8px;font-size:12px;">${escapeHTML(formatJSON(data))}</pre>`;
+        }
+
+        errHtml += `</div>`;
+        out.innerHTML = errHtml;
+        return;
+      }
+
+      out.innerHTML = renderAIUniverseFilterResult(data);
+
+    } catch (err) {
+      if (err.name === "TypeError" && err.message.includes("fetch")) {
+        out.innerHTML = `<div class="msg msg-error" style="margin-top:16px;">
+          <strong>API not reachable.</strong> Start uvicorn first:<br>
+          <code style="font-size:12px;">uvicorn risk_first_advisory.api_layer.main:app --reload</code>
+        </div>`;
+      } else {
+        out.innerHTML = `<div style="margin-top:16px;">${apiError(err)}</div>`;
+      }
+    } finally {
+      setAIFilterButtonLoading(false);
+    }
+  }
+
+  function clearAIUniverseFilterResult() {
+    const out = el("aif-result");
+    out.innerHTML = "";
+    out.classList.add("hidden");
+    setAIFilterButtonLoading(false);
+  }
+
+  function nullOrDash(v) {
+    if (v === null || v === undefined) return '<span style="color:#a0aec0;">—</span>';
+    return escapeHTML(String(v));
+  }
+
+  function boolNullPill(v) {
+    if (v === true)  return '<span class="pill pill-green">true</span>';
+    if (v === false) return '<span class="pill pill-grey">false</span>';
+    return '<span style="color:#a0aec0;">—</span>';
+  }
+
+  function renderAIUniverseFilterResult(data) {
+    const prefs      = data.preferences         ?? {};
+    const eligible   = data.eligible_instruments ?? [];
+    const exclusions = data.exclusions           ?? [];
+    const filters    = data.applied_filters      ?? [];
+    const warnings   = data.warnings             ?? [];
+    const confidence    = typeof prefs.confidence === "number" ? prefs.confidence : 0;
+    const confidencePct = Math.round(confidence * 100);
+
+    // ── 1. Summary ─────────────────────────────────────────────
+    const summaryHtml = `
+      <div class="result-summary">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+          <strong style="font-size:15px;">AI Universe Filter Result</strong>
+          <span class="pill pill-green" style="font-size:11px;">${data.eligible_count ?? 0} eligible</span>
+          <span class="pill pill-red"   style="font-size:11px;">${data.excluded_count ?? 0} excluded</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <label>client_id</label>
+            <div class="value">${escapeHTML(data.client_id ?? "—")}</div>
+          </div>
+          <div class="summary-item">
+            <label>confidence</label>
+            <div class="value">
+              <div style="display:flex;align-items:center;gap:10px;margin-top:2px;">
+                <span style="font-size:15px;font-weight:700;color:#1a2744;min-width:42px;">${confidencePct}%</span>
+                <div class="confidence-bar-track">
+                  <div class="confidence-bar-fill" style="width:${confidencePct}%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="summary-item">
+            <label>entity</label>
+            <div class="value">${nullOrDash(prefs.entity)}</div>
+          </div>
+          <div class="summary-item">
+            <label>currency</label>
+            <div class="value">${nullOrDash(prefs.currency)}</div>
+          </div>
+          <div class="summary-item">
+            <label>country</label>
+            <div class="value">${nullOrDash(prefs.country)}</div>
+          </div>
+          <div class="summary-item">
+            <label>hard_dollar_only</label>
+            <div class="value">${boolNullPill(prefs.hard_dollar_only)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ── 2. Preferences Detected ─────────────────────────────────
+    const prefsHtml = `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Preferences Detected by AI</div>
+        <div class="summary-grid" style="margin-top:10px;">
+          <div class="summary-item">
+            <label>allowed_instrument_types</label>
+            <div class="value">${chips(prefs.allowed_instrument_types)}</div>
+          </div>
+          <div class="summary-item">
+            <label>excluded_instrument_types</label>
+            <div class="value">${chips(prefs.excluded_instrument_types)}</div>
+          </div>
+          <div class="summary-item">
+            <label>avoid_sectors</label>
+            <div class="value">${chips(prefs.avoid_sectors, "chip chip-warn")}</div>
+          </div>
+          <div class="summary-item">
+            <label>prefer_sectors</label>
+            <div class="value">${chips(prefs.prefer_sectors)}</div>
+          </div>
+          <div class="summary-item">
+            <label>avoid_issuers</label>
+            <div class="value">${chips(prefs.avoid_issuers, "chip chip-warn")}</div>
+          </div>
+          <div class="summary-item">
+            <label>prefer_issuers</label>
+            <div class="value">${chips(prefs.prefer_issuers)}</div>
+          </div>
+          <div class="summary-item">
+            <label>min_liquidity_score</label>
+            <div class="value">${nullOrDash(prefs.min_liquidity_score)}</div>
+          </div>
+          <div class="summary-item">
+            <label>max_maturity_year</label>
+            <div class="value">${nullOrDash(prefs.max_maturity_year)}</div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>hard_constraints</label>
+            <div class="value">${chips(prefs.hard_constraints)}</div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>soft_preferences</label>
+            <div class="value">${chips(prefs.soft_preferences)}</div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>unparsed_preferences</label>
+            <div class="value">${chips(prefs.unparsed_preferences, "chip chip-warn")}</div>
+          </div>
+          <div class="summary-item" style="grid-column:1/-1;">
+            <label>advisor_notes</label>
+            <div class="value">
+              ${(prefs.advisor_notes && prefs.advisor_notes.length)
+                ? `<ol class="numbered-list">${prefs.advisor_notes.map(n => `<li>${escapeHTML(n)}</li>`).join("")}</ol>`
+                : `<span style="color:#a0aec0;font-size:12px;">none</span>`}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ── 3. Applied Filters ──────────────────────────────────────
+    const filtersHtml = `
+      <div style="padding:14px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Applied Filters (${filters.length})</div>
+        <div style="margin-top:8px;">
+          ${filters.length
+            ? `<div class="list-chips">${filters.map(f => `<span class="chip">${escapeHTML(f)}</span>`).join("")}</div>`
+            : `<span style="color:#a0aec0;font-size:12px;">None — no active filter criteria extracted.</span>`}
+        </div>
+      </div>
+    `;
+
+    // ── 4. Warnings ─────────────────────────────────────────────
+    const warningsHtml = `
+      <div style="padding:14px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title">Warnings (${warnings.length})</div>
+        <div style="margin-top:8px;">
+          ${warnings.length
+            ? `<div class="list-chips">${warnings.map(w => `<span class="chip chip-warn">${escapeHTML(w)}</span>`).join("")}</div>`
+            : `<span style="color:#a0aec0;font-size:12px;">None</span>`}
+        </div>
+      </div>
+    `;
+
+    // ── 5. Eligible Instruments table ───────────────────────────
+    const eligibleHtml = `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title" style="color:#065f46;">
+          ✓ Eligible Instruments (${eligible.length})
+        </div>
+        ${eligible.length === 0
+          ? `<div class="msg msg-error" style="margin-top:10px;">No instruments pass all active filters.</div>`
+          : `<div class="tbl-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th><th>Name</th><th>Issuer</th><th>Type</th>
+                    <th>Asset Class</th><th>CCY</th><th>Country</th><th>Sector</th>
+                    <th>Hard $</th><th>Maturity</th><th>YTM</th><th>Dur.</th>
+                    <th>Liq.</th><th>Rating</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${eligible.map(inst => `
+                    <tr style="background:#f0fdf4;">
+                      <td class="mono" style="color:#065f46;font-weight:700;">${escapeHTML(inst.ticker)}</td>
+                      <td>${escapeHTML(inst.name ?? "")}</td>
+                      <td>${escapeHTML(inst.issuer ?? "")}</td>
+                      <td><span class="chip">${escapeHTML(inst.instrument_type ?? "")}</span></td>
+                      <td>${escapeHTML(inst.asset_class ?? "")}</td>
+                      <td class="mono">${escapeHTML(inst.currency ?? "")}</td>
+                      <td>${escapeHTML(inst.country ?? "")}</td>
+                      <td>${escapeHTML(inst.sector ?? "")}</td>
+                      <td>${inst.hard_dollar
+                            ? '<span class="pill pill-green" style="font-size:10px;">yes</span>'
+                            : '<span class="pill pill-grey"  style="font-size:10px;">no</span>'}</td>
+                      <td class="mono" style="font-size:12px;">${inst.maturity_date ? escapeHTML(inst.maturity_date) : "—"}</td>
+                      <td>${inst.ytm      != null ? inst.ytm.toFixed(2) + "%" : "—"}</td>
+                      <td>${inst.duration != null ? inst.duration.toFixed(1)  : "—"}</td>
+                      <td>${inst.liquidity_score != null ? inst.liquidity_score.toFixed(2) : "—"}</td>
+                      <td>${inst.rating ? `<span class="chip">${escapeHTML(inst.rating)}</span>` : "—"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>`}
+      </div>
+    `;
+
+    // ── 6. Exclusions table ─────────────────────────────────────
+    const exclusionsHtml = `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div class="ai-section-title" style="color:#991b1b;">
+          ✕ Excluded Instruments (${exclusions.length})
+        </div>
+        ${exclusions.length === 0
+          ? `<span style="color:#a0aec0;font-size:12px;margin-top:8px;display:block;">None excluded.</span>`
+          : `<div class="tbl-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Exclusion Reasons</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${exclusions.map(exc => `
+                    <tr>
+                      <td class="mono" style="color:#991b1b;font-weight:700;white-space:nowrap;">${escapeHTML(exc.ticker)}</td>
+                      <td>
+                        <div class="list-chips">
+                          ${(exc.reasons ?? []).map(r =>
+                            `<span class="chip chip-err">${escapeHTML(r)}</span>`
+                          ).join("")}
+                        </div>
+                      </td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>`}
+      </div>
+    `;
+
+    // ── 7. Full JSON ────────────────────────────────────────────
+    const jsonHtml = `
+      <details>
+        <summary>Full JSON response</summary>
+        <pre class="json-block">${escapeHTML(formatJSON(data))}</pre>
+      </details>
+    `;
+
+    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${prefsHtml}${filtersHtml}${warningsHtml}${eligibleHtml}${exclusionsHtml}${jsonHtml}</div>`;
+  }
+
+  // ── 6. portfolio candidate renderer ─────────────────────────
 
   function renderPortfolioCandidate(c) {
     const meta = c.metadata ?? {};
