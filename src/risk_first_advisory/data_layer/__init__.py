@@ -21,6 +21,9 @@ from risk_first_advisory.data_layer.data_quality import (
     DataQualityResult,
     DataQualityStatus,
 )
+from risk_first_advisory.data_layer.instrument_market_data import (
+    InstrumentMarketDataAdapter,
+)
 from risk_first_advisory.data_layer.market_data import (
     CRITICAL_FIELDS,
     MarketDataSnapshot,
@@ -37,6 +40,7 @@ from risk_first_advisory.data_layer.return_estimator import (
 
 __all__ = [
     "CovarianceEngine",
+    "InstrumentMarketDataAdapter",
     "CovarianceMatrix",
     "CRITICAL_FIELDS",
     "DataQualityGate",
