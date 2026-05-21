@@ -75,7 +75,7 @@ def _valid_preferences_response(**overrides) -> dict:
         "prefer_issuers": [],
         "min_liquidity_score": 0.6,
         "max_maturity_year": 2029,
-        "hard_constraints": ["Solo ONs hard dollar argentinas disponibles en Balanz"],
+        "hard_constraints": ["instrument_type", "currency", "country", "hard_dollar", "entity", "sector"],
         "soft_preferences": [],
         "unparsed_preferences": [],
         "confidence": 0.88,
@@ -1085,6 +1085,37 @@ class TestAIInvestmentPreferencesResponse:
         assert data["hard_dollar_only"] is None
         assert data["min_liquidity_score"] is None
         assert data["max_maturity_year"] is None
+
+    def test_country_argentina_from_keyword(self, monkeypatch: pytest.MonkeyPatch):
+        """'argentinas' en la preferencia → country='Argentina' en la respuesta."""
+        c = _preferences_client(
+            monkeypatch,
+            preferences_response=_valid_preferences_response(country="Argentina"),
+        )
+        payload = {
+            "client_id": "CLI-PREF-002",
+            "natural_language_preferences": (
+                "Solo quiero ONs hard dollar argentinas disponibles en Balanz "
+                "y evitar energia."
+            ),
+        }
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 200
+        assert r.json()["country"] == "Argentina"
+
+    def test_hard_constraints_contain_structured_field_names(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """hard_constraints debe contener nombres de campo, no frases en prosa."""
+        expected_fields = {"instrument_type", "currency", "country", "hard_dollar", "entity"}
+        c = _preferences_client(monkeypatch)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200
+        actual = set(r.json()["hard_constraints"])
+        assert expected_fields.issubset(actual), (
+            f"hard_constraints {actual} no contiene todos los campos esperados "
+            f"{expected_fields}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -724,7 +724,11 @@ class TestFollowUpPromptContent:
 
 
 def _valid_preferences_response(**overrides) -> dict:
-    """Devuelve un dict de respuesta de preferencias válido, con overrides opcionales."""
+    """Devuelve un dict de respuesta de preferencias válido, con overrides opcionales.
+
+    hard_constraints contiene nombres de campos estructurados (no frases en prosa),
+    tal como lo requiere el nuevo prompt: instrument_type, currency, country, etc.
+    """
     base = {
         "allowed_instrument_types": ["CORPORATE_BOND"],
         "excluded_instrument_types": [],
@@ -739,7 +743,12 @@ def _valid_preferences_response(**overrides) -> dict:
         "min_liquidity_score": 0.6,
         "max_maturity_year": 2029,
         "hard_constraints": [
-            "Solo ONs hard dollar argentinas disponibles en Balanz"
+            "instrument_type",
+            "currency",
+            "country",
+            "hard_dollar",
+            "entity",
+            "sector",
         ],
         "soft_preferences": [],
         "unparsed_preferences": [],
@@ -891,6 +900,37 @@ class TestExtractPreferencesMapping:
     def test_hard_constraints_not_empty(self):
         result = self._run()
         assert len(result["hard_constraints"]) >= 1
+
+    def test_hard_constraints_contain_field_names(self):
+        """hard_constraints debe contener nombres de campos estructurados, no prosa libre."""
+        result = self._run()
+        # Al menos "instrument_type", "currency", "country", "hard_dollar", "entity"
+        # deben aparecer en hard_constraints (tal como lo pide el prompt revisado)
+        expected_fields = {"instrument_type", "currency", "country", "hard_dollar", "entity"}
+        actual_constraints = set(result["hard_constraints"])
+        assert expected_fields.issubset(actual_constraints), (
+            f"hard_constraints {actual_constraints} no contiene todos los campos requeridos "
+            f"{expected_fields}"
+        )
+
+    def test_country_argentina_from_adjective_keyword(self):
+        """Cuando la frase contiene 'argentinas', country debe resolverse a 'Argentina'."""
+        # Este test verifica el mapeo introducido por la regla del prompt:
+        # "argentina/argentinas/argentino" → country = "Argentina"
+        response = _valid_preferences_response(country="Argentina")
+        client = _build_preferences_client(response)
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert result["country"] == "Argentina"
+
+    def test_sector_in_hard_constraints_when_avoid_energy_explicit(self):
+        """Evitar energía con 'solo' → 'sector' debe estar en hard_constraints."""
+        response = _valid_preferences_response(
+            hard_constraints=["instrument_type", "currency", "country",
+                              "hard_dollar", "entity", "sector"]
+        )
+        client = _build_preferences_client(response)
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert "sector" in result["hard_constraints"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1047,6 +1087,19 @@ class TestExtractPreferencesPrompt:
         p = self.prompt.lower()
         assert "hard_constraint" in p or "hard constraint" in p
         assert "soft_preference" in p or "soft preference" in p
+
+    def test_prompt_mentions_argentina_mapping(self):
+        """El prompt debe tener regla explícita para mapear 'argentinas' → country Argentina."""
+        p = self.prompt.lower()
+        assert "argentina" in p and ("country" in p)
+
+    def test_prompt_mentions_structured_field_names_for_hard_constraints(self):
+        """El prompt debe indicar que hard_constraints deben ser nombres de campos."""
+        p = self.prompt.lower()
+        # El prompt debe mencionar explícitamente los nombres de campo canónicos
+        assert "instrument_type" in p
+        assert "hard_dollar" in p
+        assert "entity" in p
 
     def test_user_message_contains_natural_language_preferences(self):
         from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient

@@ -229,6 +229,9 @@ PARSING RULES:
   → hard_dollar_only: true, currency: "USD"
 - "solo USD" / "en dólares" / "USD only"
   → currency: "USD"
+- "argentina" / "argentinas" / "argentino" / "argentinos" / "de Argentina"
+  (used as adjective describing instrument origin, e.g. "ONs argentinas")
+  → country: "Argentina"
 - "disponible en Balanz/PPI/Cocos" / "solo en Balanz" / "a través de Balanz"
   → entity: "Balanz" (or the respective entity name)
 - "no energía" / "evitar energía" / "sin sector energético" / "no oil & gas"
@@ -236,9 +239,14 @@ PARSING RULES:
 - "vencimiento antes de YYYY" / "máximo vencimiento YYYY" / "no más allá de YYYY"
   → max_maturity_year: YYYY
 - "solo" / "únicamente" / "exclusivamente" / "solo quiero"
-  → treat that preference as a hard_constraint
+  → The entire restriction is a hard constraint. In addition, populate hard_constraints
+    with the STRUCTURED FIELD NAMES that were constrained — not a prose description.
+    Use these canonical field names: "instrument_type", "currency", "country",
+    "hard_dollar", "entity", "sector", "issuer", "maturity", "liquidity".
+    Example: "Solo quiero ONs hard dollar argentinas disponibles en Balanz y evitar energía."
+    → hard_constraints: ["instrument_type", "currency", "country", "hard_dollar", "entity", "sector"]
 - "prefiero" / "me gusta" / "si es posible" / "idealmente"
-  → treat that preference as a soft_preference
+  → treat that preference as a soft_preference (field name in soft_preferences)
 - "instrumentos líquidos" / "alta liquidez" / "fácil de vender"
   → min_liquidity_score: 0.7 (use judgment for "muy líquidos" → 0.85)
 - Ambiguous, unclear, or contradictory preferences → unparsed_preferences list
@@ -260,8 +268,8 @@ Output format (strict JSON, no other text):
   "prefer_issuers": ["<issuer name>"],
   "min_liquidity_score": <0.0-1.0 or null>,
   "max_maturity_year": <integer year or null>,
-  "hard_constraints": ["<hard constraint description>"],
-  "soft_preferences": ["<soft preference description>"],
+  "hard_constraints": ["<constrained field name, e.g. instrument_type, currency, country, hard_dollar, entity, sector>"],
+  "soft_preferences": ["<soft field name, e.g. sector, issuer, liquidity>"],
   "unparsed_preferences": ["<ambiguous or unclear preference>"],
   "confidence": <float 0.0-1.0>,
   "advisor_notes": ["<note for the advisor>"]
