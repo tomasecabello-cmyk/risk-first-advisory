@@ -38,6 +38,8 @@ from risk_first_advisory.api_layer.schemas import (
     DemoRunResponse,
     FinancialGoalRequest,
     HealthResponse,
+    InstrumentExclusionResponse,
+    InstrumentResponse,
     KYCDataRequest,
     LivePortfolioCandidateResponse,
     LivePortfolioMetadataResponse,
@@ -47,8 +49,14 @@ from risk_first_advisory.api_layer.schemas import (
     PersistenceRecordIds,
     RecordListResponse,
     StoredRecordResponse,
+    UniverseFilterRequest,
+    UniverseFilterResponse,
     WorkflowRunRequest,
     WorkflowRunResponse,
+)
+from risk_first_advisory.universe_layer import (
+    CSVInstrumentUniverseProvider,
+    PreferenceFilterEngine,
 )
 from risk_first_advisory.data_layer.market_data import MockMarketDataProvider
 from risk_first_advisory.human_layer.scripted_advisor_interface import (
@@ -98,6 +106,7 @@ _UNIVERSE_YAML = FIXTURES / "universes" / "m1_universe.yaml"
 _SUITABILITY_YAML = FIXTURES / "suitability" / "instrument_matrix.yaml"
 _ESG_YAML = FIXTURES / "esg" / "instrument_esg_metadata.yaml"
 _MARKET_DATA_YAML = FIXTURES / "market_data" / "m1_market_data.yaml"
+_INSTRUMENT_UNIVERSE_CSV = FIXTURES / "universe" / "sample_instrument_universe.csv"
 
 # Rutas por defecto — monkeypatcheables en tests.
 DEFAULT_DB_PATH: Path = ROOT / "data" / "demo_api.db"
@@ -890,6 +899,89 @@ def ai_investment_preferences(
         ],
         confidence=float(result["confidence"]),
         advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
+    )
+
+
+@app.post("/universe/filter-demo", response_model=UniverseFilterResponse)
+def universe_filter_demo(req: UniverseFilterRequest) -> UniverseFilterResponse:
+    """
+    Filtra el universo de instrumentos del fixture CSV usando PreferenceFilterEngine.
+
+    Recibe preferencias estructuradas (misma forma que /ai/investment-preferences),
+    carga el CSV de muestra, aplica filtros determinísticos y devuelve:
+        - eligible_instruments : instrumentos que pasan todos los filtros activos
+        - exclusions           : instrumentos excluidos con razones por ticker
+        - applied_filters      : lista de filtros evaluados
+        - warnings             : avisos (prefer_*, claves desconocidas, fechas faltantes)
+
+    No llama a la IA. No persiste nada. No genera portfolios.
+    """
+    # ── 1. Verificar que el fixture existe ────────────────────────────────
+    csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+
+    # ── 2. Cargar universo ────────────────────────────────────────────────
+    try:
+        universe = CSVInstrumentUniverseProvider(csv_path).load()
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+
+    # ── 3. Construir dict de preferencias — solo claves con valor activo ──
+    prefs: dict = req.model_dump(exclude_none=True)
+
+    # ── 4. Aplicar filtro ─────────────────────────────────────────────────
+    try:
+        filter_result = PreferenceFilterEngine().apply(universe, prefs)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+
+    # ── 5. Serializar respuesta ───────────────────────────────────────────
+    eligible_out = [
+        InstrumentResponse(
+            ticker=inst.ticker,
+            name=inst.name,
+            issuer=inst.issuer,
+            instrument_type=inst.instrument_type.value,
+            asset_class=inst.asset_class.value,
+            currency=inst.currency,
+            country=inst.country,
+            sector=inst.sector,
+            available_entities=list(inst.available_entities),
+            hard_dollar=inst.hard_dollar,
+            maturity_date=inst.maturity_date,
+            coupon_rate=inst.coupon_rate,
+            ytm=inst.ytm,
+            duration=inst.duration,
+            liquidity_score=inst.liquidity_score,
+            min_piece=inst.min_piece,
+            rating=inst.rating,
+            notes=list(inst.notes),
+        )
+        for inst in filter_result.eligible_universe.instruments
+    ]
+
+    exclusions_out = [
+        InstrumentExclusionResponse(ticker=exc.ticker, reasons=list(exc.reasons))
+        for exc in filter_result.exclusions
+    ]
+
+    return UniverseFilterResponse(
+        eligible_count=len(eligible_out),
+        excluded_count=len(exclusions_out),
+        eligible_instruments=eligible_out,
+        exclusions=exclusions_out,
+        applied_filters=list(filter_result.applied_filters),
+        warnings=list(filter_result.warnings),
     )
 
 

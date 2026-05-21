@@ -295,3 +295,58 @@ class AIInvestmentPreferencesResponse(BaseModel):
     unparsed_preferences: list[str]
     confidence: float
     advisor_notes: list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /universe/filter-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class UniverseFilterRequest(BaseModel):
+    allowed_instrument_types:  list[str]      = Field(default_factory=list)
+    excluded_instrument_types: list[str]      = Field(default_factory=list)
+    currency:                  str | None     = None
+    country:                   str | None     = None
+    entity:                    str | None     = None
+    hard_dollar_only:          bool | None    = None
+    avoid_sectors:             list[str]      = Field(default_factory=list)
+    prefer_sectors:            list[str]      = Field(default_factory=list)
+    avoid_issuers:             list[str]      = Field(default_factory=list)
+    prefer_issuers:            list[str]      = Field(default_factory=list)
+    min_liquidity_score:       float | None   = None
+    max_maturity_year:         int | None     = None
+
+
+class InstrumentResponse(BaseModel):
+    ticker:             str
+    name:               str
+    issuer:             str
+    instrument_type:    str
+    asset_class:        str
+    currency:           str
+    country:            str
+    sector:             str
+    available_entities: list[str]
+    hard_dollar:        bool
+    maturity_date:      str | None
+    coupon_rate:        float | None
+    ytm:                float | None
+    duration:           float | None
+    liquidity_score:    float
+    min_piece:          float | None
+    rating:             str | None
+    notes:              list[str]
+
+
+class InstrumentExclusionResponse(BaseModel):
+    ticker:  str
+    reasons: list[str]
+
+
+class UniverseFilterResponse(BaseModel):
+    eligible_count:       int
+    excluded_count:       int
+    eligible_instruments: list[InstrumentResponse]
+    exclusions:           list[InstrumentExclusionResponse]
+    applied_filters:      list[str]
+    warnings:             list[str]
