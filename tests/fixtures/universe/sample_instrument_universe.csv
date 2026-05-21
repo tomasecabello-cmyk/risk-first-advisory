@@ -1,0 +1,13 @@
+ticker,name,issuer,instrument_type,asset_class,currency,country,sector,available_entities,hard_dollar,liquidity_score,maturity_date,coupon_rate,ytm,duration,min_piece,rating,notes
+SPY,SPDR S&P 500 ETF Trust,State Street,ETF,EQUITY,USD,US,Equity,Balanz;PPI;Cocos,false,0.99,,,,,1.0,,Referencia global de equities
+VTI,Vanguard Total Stock Market ETF,Vanguard,ETF,EQUITY,USD,US,Equity,Balanz;PPI,false,0.97,,,,,1.0,,Diversificado US total market
+GLD,SPDR Gold Shares,State Street,ETF,COMMODITY,USD,US,Commodities,PPI;Cocos,false,0.90,,,,,1.0,,Gold-backed ETF
+YCPDO,YPF Corporacion ON 2026,YPF,CORPORATE_BOND,FIXED_INCOME,USD,AR,Energy,Balanz;PPI,true,0.70,2026-06-15,6.95,7.20,1.8,1000.0,B+,ON hard dollar YPF;vto junio 2026
+GALI28,Galicia ON 2028,Banco Galicia,CORPORATE_BOND,FIXED_INCOME,USD,AR,Financials,Balanz,true,0.65,2028-03-01,7.50,7.80,3.2,1000.0,BB-,ON hard dollar Galicia;solo disponible en Balanz
+PAMP27,Pampa Energia ON 2027,Pampa Energia,CORPORATE_BOND,FIXED_INCOME,USD,AR,Energy,Balanz;Cocos,true,0.72,2027-09-30,7.25,7.60,2.5,1000.0,B,ON hard dollar Pampa;vto septiembre 2027
+MELI30,MercadoLibre ON 2030,MercadoLibre,CORPORATE_BOND,HIGH_YIELD,USD,AR,Technology,PPI;Cocos,true,0.60,2030-01-15,3.125,4.10,5.8,2000.0,BBB,ON hard dollar MELI;high yield;no disponible Balanz
+GD30,Bono Soberano Global 2030,Republica Argentina,SOVEREIGN_BOND,FIXED_INCOME,USD,AR,Government,Balanz;PPI;Cocos,true,0.80,2030-07-09,0.50,14.50,4.5,1.0,CCC,Soberano USD ley extranjera
+AL35,Bono Soberano LEDE 2035,Republica Argentina,SOVEREIGN_BOND,FIXED_INCOME,USD,AR,Government,Balanz;Cocos,true,0.75,2035-01-09,1.00,13.80,6.2,1.0,CCC,Soberano USD ley local
+FIMA,Fima Premium Money Market,Galicia Asset Management,MONEY_MARKET,CASH,ARS,AR,Cash,Balanz,false,0.98,,,,,,,Fondo money market ARS;alta liquidez
+BONO0,Sigma Liquidez USD,Sigma Asset Management,MONEY_MARKET,CASH,USD,AR,Cash,PPI,true,0.95,,,,,,,Fondo de liquidez USD
+APBR,Petrobras Brasil CEDEAR,Petrobras,CEDEAR,EQUITY,ARS,AR,Energy,Balanz;PPI,false,0.60,,,,,,B+,CEDEAR Petrobras;precio en ARS
