@@ -717,6 +717,352 @@ class TestFollowUpPromptContent:
         msg = OpenAIProfileClient._build_followup_user_message(_SAMPLE_FOLLOWUP_PAYLOAD)
         assert "original_kyc" in msg or "risk_tolerance_score" in msg
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers para extract_investment_preferences
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _valid_preferences_response(**overrides) -> dict:
+    """Devuelve un dict de respuesta de preferencias válido, con overrides opcionales."""
+    base = {
+        "allowed_instrument_types": ["CORPORATE_BOND"],
+        "excluded_instrument_types": [],
+        "currency": "USD",
+        "country": "Argentina",
+        "entity": "Balanz",
+        "hard_dollar_only": True,
+        "avoid_sectors": ["Energy"],
+        "prefer_sectors": [],
+        "avoid_issuers": [],
+        "prefer_issuers": [],
+        "min_liquidity_score": 0.6,
+        "max_maturity_year": 2029,
+        "hard_constraints": [
+            "Solo ONs hard dollar argentinas disponibles en Balanz"
+        ],
+        "soft_preferences": [],
+        "unparsed_preferences": [],
+        "confidence": 0.88,
+        "advisor_notes": ["Client explicitly excluded energy sector."],
+    }
+    base.update(overrides)
+    return base
+
+
+def _build_preferences_client(response_dict: dict):
+    """Construye OpenAIProfileClient con fake client que devuelve response_dict."""
+    from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+    fake = _make_fake_client(json.dumps(response_dict))
+    return OpenAIProfileClient(_client=fake)
+
+
+_SAMPLE_PREFERENCES_PAYLOAD: dict = {
+    "client_id": "CLI-PREF-001",
+    "natural_language_preferences": (
+        "Solo quiero ONs hard dollar argentinas disponibles en Balanz. "
+        "No quiero energía. Vencimientos antes de 2029."
+    ),
+    "kyc_context": None,
+    "previous_profile_analysis": None,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestExtractPreferencesValid
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestExtractPreferencesValid:
+    def test_returns_dict(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert isinstance(result, dict)
+
+    def test_allowed_instrument_types_is_list(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert isinstance(result["allowed_instrument_types"], list)
+
+    def test_excluded_instrument_types_is_list(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert isinstance(result["excluded_instrument_types"], list)
+
+    def test_currency_is_str_or_none(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert result["currency"] is None or isinstance(result["currency"], str)
+
+    def test_hard_dollar_only_is_bool_or_none(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert result["hard_dollar_only"] is None or isinstance(
+            result["hard_dollar_only"], bool
+        )
+
+    def test_avoid_sectors_is_list(self):
+        client = _build_preferences_client(_valid_preferences_response())
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert isinstance(result["avoid_sectors"], list)
+
+    def test_min_liquidity_score_in_range_or_none(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(min_liquidity_score=0.6)
+        )
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        liq = result["min_liquidity_score"]
+        assert liq is None or (isinstance(liq, (int, float)) and 0.0 <= liq <= 1.0)
+
+    def test_max_maturity_year_int_or_none(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(max_maturity_year=2029)
+        )
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        yr = result["max_maturity_year"]
+        assert yr is None or (isinstance(yr, int) and yr >= 1900)
+
+    def test_confidence_in_range(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(confidence=0.88)
+        )
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert 0.0 <= result["confidence"] <= 1.0
+
+    def test_all_null_optionals_accepted(self):
+        response = _valid_preferences_response(
+            currency=None,
+            country=None,
+            entity=None,
+            hard_dollar_only=None,
+            min_liquidity_score=None,
+            max_maturity_year=None,
+        )
+        client = _build_preferences_client(response)
+        result = client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+        assert result["currency"] is None
+        assert result["hard_dollar_only"] is None
+        assert result["min_liquidity_score"] is None
+        assert result["max_maturity_year"] is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestExtractPreferencesMapping
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestExtractPreferencesMapping:
+    """Escenario realista: ONs hard dollar argentinas en Balanz, no energía."""
+
+    def _run(self) -> dict:
+        client = _build_preferences_client(_valid_preferences_response())
+        return client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_corporate_bond_in_allowed_types(self):
+        result = self._run()
+        assert "CORPORATE_BOND" in result["allowed_instrument_types"]
+
+    def test_currency_is_usd(self):
+        result = self._run()
+        assert result["currency"] == "USD"
+
+    def test_country_is_argentina(self):
+        result = self._run()
+        assert result["country"] == "Argentina"
+
+    def test_entity_is_balanz(self):
+        result = self._run()
+        assert result["entity"] == "Balanz"
+
+    def test_hard_dollar_only_is_true(self):
+        result = self._run()
+        assert result["hard_dollar_only"] is True
+
+    def test_avoid_sectors_includes_energy(self):
+        result = self._run()
+        sectors_lower = [s.lower() for s in result["avoid_sectors"]]
+        assert any("energ" in s for s in sectors_lower)
+
+    def test_max_maturity_year_is_2029(self):
+        result = self._run()
+        assert result["max_maturity_year"] == 2029
+
+    def test_hard_constraints_not_empty(self):
+        result = self._run()
+        assert len(result["hard_constraints"]) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestExtractPreferencesValidation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestExtractPreferencesValidation:
+    def test_invalid_instrument_type_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(
+                allowed_instrument_types=["ETF", "INVALID_TYPE"]
+            )
+        )
+        with pytest.raises(ValueError, match="instrument_type|tipo.*inválido|inválido"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_allowed_types_not_list_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(allowed_instrument_types="CORPORATE_BOND")
+        )
+        with pytest.raises(ValueError, match="allowed_instrument_types"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_excluded_types_not_list_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(excluded_instrument_types="ETF")
+        )
+        with pytest.raises(ValueError, match="excluded_instrument_types"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_min_liquidity_score_above_one_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(min_liquidity_score=1.5)
+        )
+        with pytest.raises(ValueError, match="min_liquidity_score"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_min_liquidity_score_below_zero_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(min_liquidity_score=-0.1)
+        )
+        with pytest.raises(ValueError, match="min_liquidity_score"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_max_maturity_year_below_1900_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(max_maturity_year=1800)
+        )
+        with pytest.raises(ValueError, match="max_maturity_year"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_max_maturity_year_not_int_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(max_maturity_year="2029")
+        )
+        with pytest.raises(ValueError, match="max_maturity_year"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_confidence_above_one_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(confidence=1.01)
+        )
+        with pytest.raises(ValueError, match="confidence"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_confidence_below_zero_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(confidence=-0.1)
+        )
+        with pytest.raises(ValueError, match="confidence"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_missing_required_key_raises(self):
+        response = _valid_preferences_response()
+        del response["confidence"]
+        client = _build_preferences_client(response)
+        with pytest.raises(ValueError, match="confidence"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_avoid_sectors_not_list_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(avoid_sectors="Energy")
+        )
+        with pytest.raises(ValueError, match="avoid_sectors"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_advisor_notes_not_list_raises(self):
+        client = _build_preferences_client(
+            _valid_preferences_response(advisor_notes="single note")
+        )
+        with pytest.raises(ValueError, match="advisor_notes"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_invalid_json_raises(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        fake = _make_fake_client("not a valid json {{{")
+        client = OpenAIProfileClient(_client=fake)
+        with pytest.raises(ValueError, match="JSON"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestExtractPreferencesPrompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestExtractPreferencesPrompt:
+    @pytest.fixture(autouse=True)
+    def _load_prompt(self):
+        from risk_first_advisory.ai_layer import openai_profile_client as module
+
+        self.prompt = module._PREFERENCES_SYSTEM_PROMPT
+
+    def test_prompt_says_ai_does_not_invent_tickers(self):
+        p = self.prompt.lower()
+        assert "ticker" in p and ("not" in p or "no" in p)
+
+    def test_prompt_says_ai_does_not_recommend_products(self):
+        p = self.prompt.lower()
+        assert "not recommend" in p or "no recomiend" in p
+
+    def test_prompt_says_ai_does_not_generate_portfolios(self):
+        p = self.prompt.lower()
+        assert "not generate" in p or "no genera" in p or "portfolio" in p
+
+    def test_prompt_requires_json_only_output(self):
+        p = self.prompt.lower()
+        assert "json" in p
+        assert "no markdown" in p or "only" in p
+
+    def test_prompt_mentions_corporate_bond_mapping(self):
+        p = self.prompt.lower()
+        assert "corporate_bond" in p or "corporate bond" in p
+
+    def test_prompt_mentions_hard_dollar_mapping(self):
+        p = self.prompt.lower()
+        assert "hard dollar" in p or "hard_dollar" in p
+
+    def test_prompt_mentions_entity_mapping(self):
+        p = self.prompt.lower()
+        assert "balanz" in p or "entity" in p
+
+    def test_prompt_mentions_avoid_sectors(self):
+        p = self.prompt.lower()
+        assert "avoid_sectors" in p or "sector" in p
+
+    def test_prompt_mentions_max_maturity_year(self):
+        p = self.prompt.lower()
+        assert "max_maturity_year" in p or "maturity" in p
+
+    def test_prompt_mentions_hard_constraints_vs_soft(self):
+        p = self.prompt.lower()
+        assert "hard_constraint" in p or "hard constraint" in p
+        assert "soft_preference" in p or "soft preference" in p
+
+    def test_user_message_contains_natural_language_preferences(self):
+        from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
+
+        msg = OpenAIProfileClient._build_preferences_user_message(
+            _SAMPLE_PREFERENCES_PAYLOAD
+        )
+        assert "PREFERENCES INPUT" in msg
+        assert "ONs hard dollar" in msg or "natural_language_preferences" in msg
+
+    def test_api_key_not_in_preferences_system_prompt(self):
+        import re
+
+        assert not re.search(r"sk-[A-Za-z0-9_-]{20,}", self.prompt)
+        assert "OPENAI_API_KEY" not in self.prompt
+
     def test_user_message_includes_follow_up_answers(self):
         from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
 

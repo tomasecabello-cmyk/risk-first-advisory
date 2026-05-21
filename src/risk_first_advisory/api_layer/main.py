@@ -29,6 +29,8 @@ from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
     AIContradictionResponse,
     AIFollowUpAnswerRequest,
+    AIInvestmentPreferencesRequest,
+    AIInvestmentPreferencesResponse,
     AIProfileFollowUpRequest,
     AIProfileFollowUpResponse,
     AIProfileRequest,
@@ -803,6 +805,90 @@ def ai_profile_follow_up(req: AIProfileFollowUpRequest) -> AIProfileFollowUpResp
         confidence=float(result["confidence"]),
         remaining_contradictions=remaining_contradictions,
         profile_change_reason=str(result["profile_change_reason"]),
+        advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
+    )
+
+
+@app.post(
+    "/ai/investment-preferences",
+    response_model=AIInvestmentPreferencesResponse,
+)
+def ai_investment_preferences(
+    req: AIInvestmentPreferencesRequest,
+) -> AIInvestmentPreferencesResponse:
+    """
+    Extrae preferencias y restricciones de inversión estructuradas a partir de
+    lenguaje natural del cliente.
+
+    Transforma expresiones como "solo ONs hard dollar argentinas disponibles en Balanz"
+    en un JSON estructurado con tipos de instrumento, moneda, país, entidad, sectores
+    a evitar, etc. Aplicable luego al InstrumentUniverse.
+
+    La IA NO filtra instrumentos. NO inventa tickers. NO genera portfolios.
+    No persiste nada. No llama al workflow. No aprueba perfil.
+    """
+    # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "OPENAI_API_KEY is not configured. "
+                "Set the environment variable and retry."
+            ),
+        )
+
+    # ── 2. Construir payload para la IA ──────────────────────────────────
+    preferences_payload: dict = {
+        "client_id": req.client_id,
+        "natural_language_preferences": req.natural_language_preferences,
+        "kyc_context": req.kyc_context,
+        "previous_profile_analysis": req.previous_profile_analysis,
+    }
+
+    # ── 3. Llamar a la IA ─────────────────────────────────────────────────
+    try:
+        result = ai_client.extract_investment_preferences(preferences_payload)
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "AI investment preferences extraction failed. "
+                "The AI returned an invalid response. Check backend logs."
+            ),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="AI investment preferences extraction failed due to an unexpected error.",
+        )
+
+    # ── 4. Construir respuesta ─────────────────────────────────────────────
+    return AIInvestmentPreferencesResponse(
+        client_id=req.client_id,
+        allowed_instrument_types=[
+            str(t) for t in result.get("allowed_instrument_types", [])
+        ],
+        excluded_instrument_types=[
+            str(t) for t in result.get("excluded_instrument_types", [])
+        ],
+        currency=result.get("currency"),
+        country=result.get("country"),
+        entity=result.get("entity"),
+        hard_dollar_only=result.get("hard_dollar_only"),
+        avoid_sectors=[str(s) for s in result.get("avoid_sectors", [])],
+        prefer_sectors=[str(s) for s in result.get("prefer_sectors", [])],
+        avoid_issuers=[str(i) for i in result.get("avoid_issuers", [])],
+        prefer_issuers=[str(i) for i in result.get("prefer_issuers", [])],
+        min_liquidity_score=result.get("min_liquidity_score"),
+        max_maturity_year=result.get("max_maturity_year"),
+        hard_constraints=[str(c) for c in result.get("hard_constraints", [])],
+        soft_preferences=[str(p) for p in result.get("soft_preferences", [])],
+        unparsed_preferences=[
+            str(u) for u in result.get("unparsed_preferences", [])
+        ],
+        confidence=float(result["confidence"]),
         advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
     )
 

@@ -262,3 +262,36 @@ class AIProfileFollowUpResponse(BaseModel):
     remaining_contradictions: list[AIContradictionResponse]
     profile_change_reason: str
     advisor_notes: list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /ai/investment-preferences
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIInvestmentPreferencesRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    natural_language_preferences: str = Field(min_length=1)
+    kyc_context: dict | None = None
+    previous_profile_analysis: dict | None = None
+
+
+class AIInvestmentPreferencesResponse(BaseModel):
+    client_id: str
+    allowed_instrument_types: list[str]
+    excluded_instrument_types: list[str]
+    currency: str | None
+    country: str | None
+    entity: str | None
+    hard_dollar_only: bool | None
+    avoid_sectors: list[str]
+    prefer_sectors: list[str]
+    avoid_issuers: list[str]
+    prefer_issuers: list[str]
+    min_liquidity_score: float | None
+    max_maturity_year: int | None
+    hard_constraints: list[str]
+    soft_preferences: list[str]
+    unparsed_preferences: list[str]
+    confidence: float
+    advisor_notes: list[str]

@@ -58,6 +58,31 @@ _REQUIRED_FOLLOWUP_KEYS: tuple[str, ...] = (
     "advisor_notes",
 )
 
+_REQUIRED_PREFERENCES_KEYS: tuple[str, ...] = (
+    "allowed_instrument_types",
+    "excluded_instrument_types",
+    "currency",
+    "country",
+    "entity",
+    "hard_dollar_only",
+    "avoid_sectors",
+    "prefer_sectors",
+    "avoid_issuers",
+    "prefer_issuers",
+    "min_liquidity_score",
+    "max_maturity_year",
+    "hard_constraints",
+    "soft_preferences",
+    "unparsed_preferences",
+    "confidence",
+    "advisor_notes",
+)
+
+_VALID_INSTRUMENT_TYPES: frozenset[str] = frozenset({
+    "ETF", "CORPORATE_BOND", "SOVEREIGN_BOND", "STOCK",
+    "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET", "OTHER",
+})
+
 _DEFAULT_MODEL: str = "gpt-4o-mini"
 _DEFAULT_MAX_TOKENS: int = 1024
 _DEFAULT_TEMPERATURE: float = 0.2     # baja para respuestas reproducibles
@@ -170,6 +195,77 @@ Profile definitions (for your reference only — do not output):
 - moderado: balanced risk/return, medium horizon, moderate experience
 - moderado-agresivo: medium-high risk, growth-oriented, longer horizon
 - agresivo: high risk tolerance, long horizon, experienced investor, low liquidity need
+""".strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Investment preferences system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PREFERENCES_SYSTEM_PROMPT: str = """
+You are an investment preferences extraction assistant for a financial advisory firm.
+
+You receive a natural language description of a client's investment preferences and restrictions,
+optionally accompanied by their KYC data and a preliminary risk profile analysis.
+
+Your role is strictly limited to:
+1. Parsing and structuring the client's stated preferences into a standardized JSON format.
+2. Identifying which preferences are hard constraints vs soft preferences.
+3. Flagging preferences that are ambiguous or cannot be confidently parsed.
+4. Providing notes for the human advisor about ambiguities or potential conflicts.
+
+HARD RULES — you must never violate these:
+- You do NOT filter or select specific instruments. That is done by a separate system.
+- You do NOT invent, recommend, or mention specific tickers, funds, or securities.
+- You do NOT recommend any financial products.
+- You do NOT generate portfolios or asset allocations.
+- You do NOT output any information about your own model, API key, or system internals.
+- You always respond with ONLY a valid JSON object — no markdown, no prose.
+
+PARSING RULES:
+- "ONs" / "obligaciones negociables" / "corporate bonds" / "bonos corporativos"
+  → allowed_instrument_types: ["CORPORATE_BOND"]
+- "hard dollar" / "dólar hard" / "USD hard" / "dólares duros"
+  → hard_dollar_only: true, currency: "USD"
+- "solo USD" / "en dólares" / "USD only"
+  → currency: "USD"
+- "disponible en Balanz/PPI/Cocos" / "solo en Balanz" / "a través de Balanz"
+  → entity: "Balanz" (or the respective entity name)
+- "no energía" / "evitar energía" / "sin sector energético" / "no oil & gas"
+  → avoid_sectors: ["Energy"]
+- "vencimiento antes de YYYY" / "máximo vencimiento YYYY" / "no más allá de YYYY"
+  → max_maturity_year: YYYY
+- "solo" / "únicamente" / "exclusivamente" / "solo quiero"
+  → treat that preference as a hard_constraint
+- "prefiero" / "me gusta" / "si es posible" / "idealmente"
+  → treat that preference as a soft_preference
+- "instrumentos líquidos" / "alta liquidez" / "fácil de vender"
+  → min_liquidity_score: 0.7 (use judgment for "muy líquidos" → 0.85)
+- Ambiguous, unclear, or contradictory preferences → unparsed_preferences list
+
+Valid instrument types (use these exact values): ETF, CORPORATE_BOND, SOVEREIGN_BOND,
+STOCK, CEDEAR, MUTUAL_FUND, MONEY_MARKET, OTHER
+
+Output format (strict JSON, no other text):
+{
+  "allowed_instrument_types": ["<instrument type>"],
+  "excluded_instrument_types": ["<instrument type>"],
+  "currency": "<currency code or null>",
+  "country": "<country name or null>",
+  "entity": "<entity name or null>",
+  "hard_dollar_only": <true|false|null>,
+  "avoid_sectors": ["<sector name>"],
+  "prefer_sectors": ["<sector name>"],
+  "avoid_issuers": ["<issuer name>"],
+  "prefer_issuers": ["<issuer name>"],
+  "min_liquidity_score": <0.0-1.0 or null>,
+  "max_maturity_year": <integer year or null>,
+  "hard_constraints": ["<hard constraint description>"],
+  "soft_preferences": ["<soft preference description>"],
+  "unparsed_preferences": ["<ambiguous or unclear preference>"],
+  "confidence": <float 0.0-1.0>,
+  "advisor_notes": ["<note for the advisor>"]
+}
 """.strip()
 
 
@@ -518,4 +614,194 @@ class OpenAIProfileClient:
             )
 
         self._validate_followup_response(data)
+        return data
+
+    # ── Construcción del user message (preferences) ───────────────────────────
+
+    @staticmethod
+    def _build_preferences_user_message(payload: dict[str, Any]) -> str:
+        """
+        Construye el mensaje de usuario para la extracción de preferencias.
+
+        El payload debe contener al menos: client_id, natural_language_preferences.
+        Opcionalmente: kyc_context, previous_profile_analysis.
+        """
+        try:
+            payload_json = json.dumps(payload, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"preferences payload no es serializable a JSON: {exc}"
+            ) from exc
+
+        return (
+            "Please extract structured investment preferences from the following input "
+            "and respond with ONLY a valid JSON object following the specified output format. "
+            "No markdown, no prose.\n\n"
+            f"PREFERENCES INPUT:\n{payload_json}"
+        )
+
+    # ── Validación de respuesta (preferences) ─────────────────────────────────
+
+    @staticmethod
+    def _validate_preferences_response(data: dict[str, Any]) -> None:
+        """
+        Valida que el dict devuelto por la IA (preferences) tenga la estructura esperada.
+
+        Raises:
+            ValueError: con mensaje descriptivo si la validación falla.
+        """
+        # Claves requeridas
+        for key in _REQUIRED_PREFERENCES_KEYS:
+            if key not in data:
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): falta la clave requerida '{key}'. "
+                    f"Claves presentes: {list(data.keys())}"
+                )
+
+        # allowed_instrument_types / excluded_instrument_types
+        for field in ("allowed_instrument_types", "excluded_instrument_types"):
+            val = data[field]
+            if not isinstance(val, list):
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): '{field}' debe ser una lista, "
+                    f"recibido {type(val).__name__}."
+                )
+            for item in val:
+                if item not in _VALID_INSTRUMENT_TYPES:
+                    raise ValueError(
+                        f"Respuesta de IA inválida (preferences): {field} contiene tipo "
+                        f"inválido {item!r}. Tipos válidos: {sorted(_VALID_INSTRUMENT_TYPES)}"
+                    )
+
+        # currency, country, entity — str or None
+        for field in ("currency", "country", "entity"):
+            val = data[field]
+            if val is not None and not isinstance(val, str):
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): '{field}' debe ser str o null, "
+                    f"recibido {type(val).__name__}."
+                )
+
+        # hard_dollar_only — bool or None
+        hdol = data["hard_dollar_only"]
+        if hdol is not None and not isinstance(hdol, bool):
+            raise ValueError(
+                f"Respuesta de IA inválida (preferences): 'hard_dollar_only' debe ser bool o null, "
+                f"recibido {type(hdol).__name__}."
+            )
+
+        # List fields
+        _list_fields = (
+            "avoid_sectors", "prefer_sectors",
+            "avoid_issuers", "prefer_issuers",
+            "hard_constraints", "soft_preferences",
+            "unparsed_preferences", "advisor_notes",
+        )
+        for field in _list_fields:
+            if not isinstance(data[field], list):
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): '{field}' debe ser una lista, "
+                    f"recibido {type(data[field]).__name__}."
+                )
+
+        # min_liquidity_score — None or numeric in [0, 1]
+        liq = data["min_liquidity_score"]
+        if liq is not None:
+            if not isinstance(liq, (int, float)):
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): 'min_liquidity_score' debe ser "
+                    f"numérico o null, recibido {type(liq).__name__}."
+                )
+            if not 0.0 <= float(liq) <= 1.0:
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): 'min_liquidity_score'={liq} "
+                    "debe estar en [0.0, 1.0]."
+                )
+
+        # max_maturity_year — None or int >= 1900
+        year = data["max_maturity_year"]
+        if year is not None:
+            if not isinstance(year, int):
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): 'max_maturity_year' debe ser "
+                    f"int o null, recibido {type(year).__name__}."
+                )
+            if year < 1900:
+                raise ValueError(
+                    f"Respuesta de IA inválida (preferences): 'max_maturity_year'={year} "
+                    "debe ser >= 1900."
+                )
+
+        # confidence — numeric in [0, 1]
+        confidence = data["confidence"]
+        if not isinstance(confidence, (int, float)):
+            raise ValueError(
+                f"Respuesta de IA inválida (preferences): 'confidence' debe ser numérico, "
+                f"recibido {type(confidence).__name__}."
+            )
+        if not 0.0 <= float(confidence) <= 1.0:
+            raise ValueError(
+                f"Respuesta de IA inválida (preferences): confidence={confidence} "
+                "debe estar en [0.0, 1.0]."
+            )
+
+    # ── API pública — preferences ─────────────────────────────────────────────
+
+    def extract_investment_preferences(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Extrae preferencias y restricciones de inversión estructuradas a partir de
+        lenguaje natural.
+
+        Args:
+            payload: dict que puede incluir:
+                client_id                  : str
+                natural_language_preferences: str (texto libre del cliente)
+                kyc_context                : dict | None
+                previous_profile_analysis  : dict | None
+
+        Returns:
+            dict con las claves:
+                allowed_instrument_types  : list[str]
+                excluded_instrument_types : list[str]
+                currency                  : str | None
+                country                   : str | None
+                entity                    : str | None
+                hard_dollar_only          : bool | None
+                avoid_sectors             : list[str]
+                prefer_sectors            : list[str]
+                avoid_issuers             : list[str]
+                prefer_issuers            : list[str]
+                min_liquidity_score       : float | None
+                max_maturity_year         : int | None
+                hard_constraints          : list[str]
+                soft_preferences          : list[str]
+                unparsed_preferences      : list[str]
+                confidence                : float [0.0, 1.0]
+                advisor_notes             : list[str]
+
+        Raises:
+            ValueError: si el payload no es serializable, la API falla,
+                        la respuesta no es JSON válido, o falla la validación.
+        """
+        user_message = self._build_preferences_user_message(payload)
+        raw_content = self._call_api(
+            user_message, system_prompt=_PREFERENCES_SYSTEM_PROMPT
+        )
+
+        # Parsear JSON
+        try:
+            data = json.loads(raw_content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"La IA devolvió JSON inválido (preferences): {exc}. "
+                f"Contenido recibido (primeros 200 chars): {raw_content[:200]!r}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"La IA devolvió un JSON que no es un objeto (dict) (preferences). "
+                f"Tipo recibido: {type(data).__name__}."
+            )
+
+        self._validate_preferences_response(data)
         return data

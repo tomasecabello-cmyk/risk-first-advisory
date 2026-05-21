@@ -61,11 +61,34 @@ def _valid_followup_response(**overrides) -> dict:
     return base
 
 
+def _valid_preferences_response(**overrides) -> dict:
+    base: dict[str, Any] = {
+        "allowed_instrument_types": ["CORPORATE_BOND"],
+        "excluded_instrument_types": [],
+        "currency": "USD",
+        "country": "Argentina",
+        "entity": "Balanz",
+        "hard_dollar_only": True,
+        "avoid_sectors": ["Energy"],
+        "prefer_sectors": [],
+        "avoid_issuers": [],
+        "prefer_issuers": [],
+        "min_liquidity_score": 0.6,
+        "max_maturity_year": 2029,
+        "hard_constraints": ["Solo ONs hard dollar argentinas disponibles en Balanz"],
+        "soft_preferences": [],
+        "unparsed_preferences": [],
+        "confidence": 0.88,
+        "advisor_notes": ["Client explicitly excluded energy sector."],
+    }
+    base.update(overrides)
+    return base
+
+
 class _FakeAIClient:
     """
     Cliente fake que devuelve respuestas pre-construidas sin llamar a OpenAI.
-    Soporta tanto analyze_kyc (para /ai/profile-demo) como
-    analyze_follow_up (para /ai/profile-follow-up).
+    Soporta analyze_kyc, analyze_follow_up y extract_investment_preferences.
     """
 
     def __init__(
@@ -74,11 +97,15 @@ class _FakeAIClient:
         raise_value_error: bool = False,
         followup_response: dict | None = None,
         raise_on_followup: bool = False,
+        preferences_response: dict | None = None,
+        raise_on_preferences: bool = False,
     ):
         self._response = response or _valid_ai_response()
         self._raise = raise_value_error
         self._followup_response = followup_response or _valid_followup_response()
         self._raise_on_followup = raise_on_followup
+        self._preferences_response = preferences_response or _valid_preferences_response()
+        self._raise_on_preferences = raise_on_preferences
 
     def analyze_kyc(self, kyc_payload: dict) -> dict:
         if self._raise:
@@ -89,6 +116,11 @@ class _FakeAIClient:
         if self._raise_on_followup:
             raise ValueError("AI follow-up returned invalid response")
         return self._followup_response
+
+    def extract_investment_preferences(self, payload: dict) -> dict:
+        if self._raise_on_preferences:
+            raise ValueError("AI preferences extraction returned invalid response")
+        return self._preferences_response
 
 
 # Payload de request mínimo y válido
@@ -866,3 +898,304 @@ class TestExistingEndpointsUnaffected:
         r = client.post("/live/portfolio-demo", json={"profile": "moderado"})
         assert r.status_code == 200
         assert r.json()["status"] == "insufficient_data"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers / request fixtures for /ai/investment-preferences
+# ─────────────────────────────────────────────────────────────────────────────
+
+_VALID_PREFERENCES_REQUEST: dict = {
+    "client_id": "CLI-PREF-001",
+    "natural_language_preferences": (
+        "Solo quiero ONs hard dollar argentinas disponibles en Balanz. "
+        "No quiero energía. Vencimientos antes de 2029."
+    ),
+}
+
+
+def _preferences_client(monkeypatch: pytest.MonkeyPatch, **fake_kwargs) -> TestClient:
+    """Helper: devuelve TestClient con _FakeAIClient inyectado."""
+    import risk_first_advisory.api_layer.main as main_module
+
+    fake = _FakeAIClient(**fake_kwargs)
+    monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+    return TestClient(main_module.app)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIInvestmentPreferencesBasic
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIInvestmentPreferencesBasic:
+    def test_returns_200_with_fake_client(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(monkeypatch)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200
+
+    def test_client_id_echoed_in_response(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(monkeypatch)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200
+        assert r.json()["client_id"] == "CLI-PREF-001"
+
+    def test_missing_natural_language_preferences_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        c = _preferences_client(monkeypatch)
+        payload = {"client_id": "CLI-001"}
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_natural_language_preferences_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        c = _preferences_client(monkeypatch)
+        payload = {**_VALID_PREFERENCES_REQUEST, "natural_language_preferences": ""}
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 422
+
+    def test_empty_client_id_returns_422(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(monkeypatch)
+        payload = {**_VALID_PREFERENCES_REQUEST, "client_id": ""}
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 422
+
+    def test_optional_kyc_context_accepted(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(monkeypatch)
+        payload = {
+            **_VALID_PREFERENCES_REQUEST,
+            "kyc_context": {"risk_tolerance_score": 5},
+        }
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 200
+
+    def test_optional_previous_profile_analysis_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        c = _preferences_client(monkeypatch)
+        payload = {
+            **_VALID_PREFERENCES_REQUEST,
+            "previous_profile_analysis": {"preliminary_profile": "moderado"},
+        }
+        r = c.post("/ai/investment-preferences", json=payload)
+        assert r.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIInvestmentPreferencesResponse
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIInvestmentPreferencesResponse:
+    @pytest.fixture
+    def prefs_response(self, monkeypatch: pytest.MonkeyPatch) -> dict:
+        c = _preferences_client(monkeypatch)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_has_client_id(self, prefs_response: dict):
+        assert "client_id" in prefs_response
+        assert prefs_response["client_id"] == "CLI-PREF-001"
+
+    def test_has_allowed_instrument_types(self, prefs_response: dict):
+        assert "allowed_instrument_types" in prefs_response
+        assert isinstance(prefs_response["allowed_instrument_types"], list)
+
+    def test_allowed_types_contain_corporate_bond(self, prefs_response: dict):
+        assert "CORPORATE_BOND" in prefs_response["allowed_instrument_types"]
+
+    def test_has_excluded_instrument_types(self, prefs_response: dict):
+        assert "excluded_instrument_types" in prefs_response
+        assert isinstance(prefs_response["excluded_instrument_types"], list)
+
+    def test_has_currency(self, prefs_response: dict):
+        assert "currency" in prefs_response
+        assert prefs_response["currency"] == "USD"
+
+    def test_has_country(self, prefs_response: dict):
+        assert "country" in prefs_response
+        assert prefs_response["country"] == "Argentina"
+
+    def test_has_entity(self, prefs_response: dict):
+        assert "entity" in prefs_response
+        assert prefs_response["entity"] == "Balanz"
+
+    def test_has_hard_dollar_only(self, prefs_response: dict):
+        assert "hard_dollar_only" in prefs_response
+        assert prefs_response["hard_dollar_only"] is True
+
+    def test_has_avoid_sectors(self, prefs_response: dict):
+        assert "avoid_sectors" in prefs_response
+        assert isinstance(prefs_response["avoid_sectors"], list)
+        assert len(prefs_response["avoid_sectors"]) >= 1
+
+    def test_has_prefer_sectors(self, prefs_response: dict):
+        assert "prefer_sectors" in prefs_response
+        assert isinstance(prefs_response["prefer_sectors"], list)
+
+    def test_has_confidence(self, prefs_response: dict):
+        assert "confidence" in prefs_response
+        assert isinstance(prefs_response["confidence"], float)
+        assert 0.0 <= prefs_response["confidence"] <= 1.0
+
+    def test_has_hard_constraints(self, prefs_response: dict):
+        assert "hard_constraints" in prefs_response
+        assert isinstance(prefs_response["hard_constraints"], list)
+
+    def test_has_soft_preferences(self, prefs_response: dict):
+        assert "soft_preferences" in prefs_response
+        assert isinstance(prefs_response["soft_preferences"], list)
+
+    def test_has_unparsed_preferences(self, prefs_response: dict):
+        assert "unparsed_preferences" in prefs_response
+        assert isinstance(prefs_response["unparsed_preferences"], list)
+
+    def test_has_advisor_notes(self, prefs_response: dict):
+        assert "advisor_notes" in prefs_response
+        assert isinstance(prefs_response["advisor_notes"], list)
+
+    def test_has_max_maturity_year(self, prefs_response: dict):
+        assert "max_maturity_year" in prefs_response
+        yr = prefs_response["max_maturity_year"]
+        assert yr is None or isinstance(yr, int)
+
+    def test_has_min_liquidity_score(self, prefs_response: dict):
+        assert "min_liquidity_score" in prefs_response
+        liq = prefs_response["min_liquidity_score"]
+        assert liq is None or isinstance(liq, (int, float))
+
+    def test_null_optionals_allowed(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(
+            monkeypatch,
+            preferences_response=_valid_preferences_response(
+                currency=None,
+                country=None,
+                entity=None,
+                hard_dollar_only=None,
+                min_liquidity_score=None,
+                max_maturity_year=None,
+            ),
+        )
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["currency"] is None
+        assert data["hard_dollar_only"] is None
+        assert data["min_liquidity_score"] is None
+        assert data["max_maturity_year"] is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIInvestmentPreferencesErrors
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIInvestmentPreferencesErrors:
+    def test_missing_api_key_returns_400(self, monkeypatch: pytest.MonkeyPatch):
+        import risk_first_advisory.api_layer.main as main_module
+
+        def _raise():
+            raise ValueError("OPENAI_API_KEY not configured")
+
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", _raise)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 400
+
+    def test_missing_api_key_detail_mentions_key(self, monkeypatch: pytest.MonkeyPatch):
+        import risk_first_advisory.api_layer.main as main_module
+
+        def _raise():
+            raise ValueError("OPENAI_API_KEY not configured")
+
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", _raise)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert "OPENAI_API_KEY" in r.json().get("detail", "")
+
+    def test_ai_value_error_returns_502(self, monkeypatch: pytest.MonkeyPatch):
+        c = _preferences_client(monkeypatch, raise_on_preferences=True)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 502
+
+    def test_502_detail_does_not_expose_internals(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        c = _preferences_client(monkeypatch, raise_on_preferences=True)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        detail = r.json().get("detail", "")
+        assert "Traceback" not in detail
+        assert "sk-" not in detail
+
+    def test_response_does_not_expose_api_key(self, monkeypatch: pytest.MonkeyPatch):
+        import risk_first_advisory.api_layer.main as main_module
+
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-prefs-secret-key")
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert "sk-prefs-secret-key" not in r.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestAIInvestmentPreferencesSerialization
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIInvestmentPreferencesSerialization:
+    @pytest.fixture
+    def prefs_response(self, monkeypatch: pytest.MonkeyPatch) -> dict:
+        c = _preferences_client(monkeypatch)
+        r = c.post("/ai/investment-preferences", json=_VALID_PREFERENCES_REQUEST)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_response_is_json_serializable(self, prefs_response: dict):
+        json.dumps(prefs_response)  # no debe lanzar
+
+    def test_no_raw_python_objects(self, prefs_response: dict):
+        serialized = json.dumps(prefs_response)
+        assert "<" not in serialized
+        assert "object at 0x" not in serialized
+
+    def test_confidence_is_float(self, prefs_response: dict):
+        assert isinstance(prefs_response["confidence"], float)
+
+    def test_all_list_fields_are_lists(self, prefs_response: dict):
+        list_fields = [
+            "allowed_instrument_types", "excluded_instrument_types",
+            "avoid_sectors", "prefer_sectors", "avoid_issuers", "prefer_issuers",
+            "hard_constraints", "soft_preferences", "unparsed_preferences",
+            "advisor_notes",
+        ]
+        for field in list_fields:
+            assert isinstance(prefs_response[field], list), f"{field} should be list"
+
+    def test_existing_profile_demo_endpoint_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """POST /ai/profile-demo sigue funcionando tras agregar el nuevo endpoint."""
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-demo", json=_VALID_REQUEST)
+        assert r.status_code == 200
+        assert "preliminary_profile" in r.json()
+
+    def test_existing_follow_up_endpoint_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """POST /ai/profile-follow-up sigue funcionando tras agregar el nuevo endpoint."""
+        import risk_first_advisory.api_layer.main as main_module
+
+        fake = _FakeAIClient()
+        monkeypatch.setattr(main_module, "_get_openai_profile_client", lambda: fake)
+        c = TestClient(main_module.app)
+        r = c.post("/ai/profile-follow-up", json=_VALID_FOLLOWUP_REQUEST)
+        assert r.status_code == 200
+        assert "revised_profile" in r.json()
