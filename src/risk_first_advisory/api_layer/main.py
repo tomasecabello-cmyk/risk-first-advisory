@@ -35,6 +35,7 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileFollowUpResponse,
     AIProfileRequest,
     AIProfileResponse,
+    AIUniverseFilterResponse,
     DemoRunResponse,
     FinancialGoalRequest,
     HealthResponse,
@@ -899,6 +900,159 @@ def ai_investment_preferences(
         ],
         confidence=float(result["confidence"]),
         advisor_notes=[str(n) for n in result.get("advisor_notes", [])],
+    )
+
+
+# Keys from the AI response that PreferenceFilterEngine understands as filter inputs.
+# The remaining AI metadata keys (hard_constraints, soft_preferences, confidence, …)
+# are excluded here to avoid spurious "unknown_preference_key" warnings.
+_AI_FILTER_PREFERENCE_KEYS: frozenset[str] = frozenset({
+    "allowed_instrument_types",
+    "excluded_instrument_types",
+    "currency",
+    "country",
+    "entity",
+    "hard_dollar_only",
+    "avoid_sectors",
+    "prefer_sectors",
+    "avoid_issuers",
+    "prefer_issuers",
+    "min_liquidity_score",
+    "max_maturity_year",
+})
+
+
+@app.post("/ai/filter-universe-demo", response_model=AIUniverseFilterResponse)
+def ai_filter_universe_demo(
+    req: AIInvestmentPreferencesRequest,
+) -> AIUniverseFilterResponse:
+    """
+    Pipeline combinado: lenguaje natural → preferencias estructuradas → filtro de universo.
+
+    1. Extrae preferencias de inversión desde lenguaje natural usando OpenAI.
+    2. Carga el universo de instrumentos desde el fixture CSV.
+    3. Aplica PreferenceFilterEngine con las preferencias extraídas.
+    4. Devuelve AIUniverseFilterResponse con preferencias, instrumentos elegibles y exclusiones.
+
+    La IA NO aprueba perfil. NO inventa tickers. NO genera portfolios.
+    No persiste nada. No llama al workflow.
+    """
+    # ── 1. Crear cliente IA ───────────────────────────────────────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
+        )
+
+    # ── 2. Extraer preferencias con IA ───────────────────────────────────
+    preferences_payload: dict = {
+        "client_id": req.client_id,
+        "natural_language_preferences": req.natural_language_preferences,
+        "kyc_context": req.kyc_context,
+        "previous_profile_analysis": req.previous_profile_analysis,
+    }
+    try:
+        ai_result = ai_client.extract_investment_preferences(preferences_payload)
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI investment preference extraction failed. The AI returned an invalid response.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="AI investment preference extraction failed due to an unexpected error.",
+        )
+
+    # ── 3. Cargar universo ────────────────────────────────────────────────
+    csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+    try:
+        universe = CSVInstrumentUniverseProvider(csv_path).load()
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+
+    # ── 4. Construir dict de filtros (solo claves reconocidas por el engine) ──
+    filter_prefs: dict = {
+        k: v for k, v in ai_result.items() if k in _AI_FILTER_PREFERENCE_KEYS
+    }
+
+    # ── 5. Aplicar filtro ─────────────────────────────────────────────────
+    try:
+        filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # ── 6. Serializar preferencias para la respuesta ──────────────────────
+    preferences_resp = AIInvestmentPreferencesResponse(
+        client_id=req.client_id,
+        allowed_instrument_types=[str(t) for t in ai_result.get("allowed_instrument_types", [])],
+        excluded_instrument_types=[str(t) for t in ai_result.get("excluded_instrument_types", [])],
+        currency=ai_result.get("currency"),
+        country=ai_result.get("country"),
+        entity=ai_result.get("entity"),
+        hard_dollar_only=ai_result.get("hard_dollar_only"),
+        avoid_sectors=[str(s) for s in ai_result.get("avoid_sectors", [])],
+        prefer_sectors=[str(s) for s in ai_result.get("prefer_sectors", [])],
+        avoid_issuers=[str(i) for i in ai_result.get("avoid_issuers", [])],
+        prefer_issuers=[str(i) for i in ai_result.get("prefer_issuers", [])],
+        min_liquidity_score=ai_result.get("min_liquidity_score"),
+        max_maturity_year=ai_result.get("max_maturity_year"),
+        hard_constraints=[str(c) for c in ai_result.get("hard_constraints", [])],
+        soft_preferences=[str(p) for p in ai_result.get("soft_preferences", [])],
+        unparsed_preferences=[str(u) for u in ai_result.get("unparsed_preferences", [])],
+        confidence=float(ai_result["confidence"]),
+        advisor_notes=[str(n) for n in ai_result.get("advisor_notes", [])],
+    )
+
+    # ── 7. Serializar instrumentos y exclusiones ──────────────────────────
+    eligible_out = [
+        InstrumentResponse(
+            ticker=inst.ticker,
+            name=inst.name,
+            issuer=inst.issuer,
+            instrument_type=inst.instrument_type.value,
+            asset_class=inst.asset_class.value,
+            currency=inst.currency,
+            country=inst.country,
+            sector=inst.sector,
+            available_entities=list(inst.available_entities),
+            hard_dollar=inst.hard_dollar,
+            maturity_date=inst.maturity_date,
+            coupon_rate=inst.coupon_rate,
+            ytm=inst.ytm,
+            duration=inst.duration,
+            liquidity_score=inst.liquidity_score,
+            min_piece=inst.min_piece,
+            rating=inst.rating,
+            notes=list(inst.notes),
+        )
+        for inst in filter_result.eligible_universe.instruments
+    ]
+
+    exclusions_out = [
+        InstrumentExclusionResponse(ticker=exc.ticker, reasons=list(exc.reasons))
+        for exc in filter_result.exclusions
+    ]
+
+    return AIUniverseFilterResponse(
+        client_id=req.client_id,
+        preferences=preferences_resp,
+        eligible_count=len(eligible_out),
+        excluded_count=len(exclusions_out),
+        eligible_instruments=eligible_out,
+        exclusions=exclusions_out,
+        applied_filters=list(filter_result.applied_filters),
+        warnings=list(filter_result.warnings),
     )
 
 

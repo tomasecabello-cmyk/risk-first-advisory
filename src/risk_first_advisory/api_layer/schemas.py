@@ -350,3 +350,19 @@ class UniverseFilterResponse(BaseModel):
     exclusions:           list[InstrumentExclusionResponse]
     applied_filters:      list[str]
     warnings:             list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /ai/filter-universe-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIUniverseFilterResponse(BaseModel):
+    client_id:            str
+    preferences:          AIInvestmentPreferencesResponse
+    eligible_count:       int
+    excluded_count:       int
+    eligible_instruments: list[InstrumentResponse]
+    exclusions:           list[InstrumentExclusionResponse]
+    applied_filters:      list[str]
+    warnings:             list[str]
