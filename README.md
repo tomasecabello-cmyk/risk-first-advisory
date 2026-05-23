@@ -233,6 +233,44 @@ python -m pytest tests/unit/ -v
 
 ---
 
+## Offline MVP smoke check
+
+Valida el flujo principal de punta a punta sin OpenAI, sin yfinance, sin backend corriendo y sin frontend. Solo requiere el virtualenv activado.
+
+```powershell
+python scripts/run_mvp_smoke_check.py
+```
+
+Output esperado:
+
+```
+PASS — MVP smoke check completed successfully
+```
+
+El script recorre 11 pasos determinísticos:
+
+1. Verifica que el CSV del universo existe (`tests/fixtures/universe/sample_instrument_universe.csv`)
+2. Carga el universo con `CSVInstrumentUniverseProvider` (20 instrumentos)
+3. Aplica `PreferenceFilterEngine` con preferencias fijas equivalentes a "ONs hard dollar argentinas en Balanz, sin energía"
+4. Verifica `eligible_count >= 7`
+5. Convierte los elegibles a snapshots con `InstrumentMarketDataAdapter`
+6. Verifica `usable_snapshots >= 7`
+7. Construye el `RiskBudget` para perfil `moderado` desde `PROFILE_BASE_PARAMS`
+8. Verifica `snapshot_count >= ceil(1 / max_single_asset)` (la capacidad de diversificación mínima del perfil)
+9. Corre `ReturnEstimator` + `CovarianceEngine`
+10. Corre `PortfolioGenerationCoordinator.generate()`
+11. Verifica `candidate_count >= 1`
+
+Para más detalle por paso (métricas de cada snapshot, constraints excedidos en GROWTH):
+
+```powershell
+python scripts/run_mvp_smoke_check.py --debug
+```
+
+Si algún paso falla, el script imprime `FAIL` con la razón y termina con exit code 1.
+
+---
+
 ## Demo local — inicio rápido
 
 ### Backend
