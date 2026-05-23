@@ -28,6 +28,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.schemas import (
     AIContradictionResponse,
+    AIFilteredPortfolioRequest,
+    AIFilteredPortfolioResponse,
     AIFollowUpAnswerRequest,
     AIInvestmentPreferencesRequest,
     AIInvestmentPreferencesResponse,
@@ -37,6 +39,7 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileResponse,
     AIUniverseFilterResponse,
     DemoRunResponse,
+    FilteredSnapshotResponse,
     FinancialGoalRequest,
     HealthResponse,
     InstrumentExclusionResponse,
@@ -1136,6 +1139,298 @@ def universe_filter_demo(req: UniverseFilterRequest) -> UniverseFilterResponse:
         exclusions=exclusions_out,
         applied_filters=list(filter_result.applied_filters),
         warnings=list(filter_result.warnings),
+    )
+
+
+@app.post("/ai/filtered-portfolio-demo", response_model=AIFilteredPortfolioResponse)
+def ai_filtered_portfolio_demo(
+    req: AIFilteredPortfolioRequest,
+) -> AIFilteredPortfolioResponse:
+    """
+    Pipeline completo: lenguaje natural → preferencias estructuradas → filtro de universo
+    → snapshots → RiskBudget → generación de carteras candidatas.
+
+    1. Extrae preferencias de inversión desde lenguaje natural usando OpenAI.
+    2. Carga el universo de instrumentos desde el fixture CSV.
+    3. Aplica PreferenceFilterEngine con las preferencias extraídas.
+    4. Convierte instrumentos elegibles a MarketDataSnapshot via InstrumentMarketDataAdapter.
+    5. Verifica diversificación mínima según el perfil de riesgo.
+    6. Genera carteras DEFENSIVE / BALANCED / GROWTH vía PortfolioGenerationCoordinator.
+
+    No persiste nada. No llama al workflow. No modifica el optimizador.
+
+    Status codes en la respuesta:
+        "completed"                                — carteras generadas.
+        "blocked_insufficient_universe"            — < 3 snapshots usables.
+        "blocked_insufficient_diversification_capacity" — snapshots < required_min_assets.
+        "infeasible"                               — el optimizador no pudo generar ninguna variante.
+    """
+    import math
+
+    from risk_first_advisory.data_layer.covariance import CovarianceEngine
+    from risk_first_advisory.data_layer.instrument_market_data import (
+        InstrumentMarketDataAdapter,
+    )
+    from risk_first_advisory.data_layer.return_estimator import ReturnEstimator
+    from risk_first_advisory.portfolio_layer.generation import (
+        PortfolioGenerationCoordinator,
+        PortfolioVariant,
+    )
+    from risk_first_advisory.rules_layer.risk_budget_builder import VALID_PROFILES
+
+    # ── 1. Validar perfil ─────────────────────────────────────────────────
+    if req.profile not in VALID_PROFILES:
+        valid = ", ".join(sorted(VALID_PROFILES))
+        raise HTTPException(
+            status_code=422,
+            detail=f"Perfil desconocido: {req.profile!r}. Opciones válidas: {valid}.",
+        )
+
+    # ── 2. Crear cliente IA ───────────────────────────────────────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
+        )
+
+    # ── 3. Extraer preferencias con IA ───────────────────────────────────
+    preferences_payload: dict = {
+        "client_id": req.client_id,
+        "natural_language_preferences": req.natural_language_preferences,
+        "kyc_context": req.kyc_context,
+        "previous_profile_analysis": req.previous_profile_analysis,
+    }
+    try:
+        ai_result = ai_client.extract_investment_preferences(preferences_payload)
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail="AI investment preference extraction failed. The AI returned an invalid response.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="AI investment preference extraction failed due to an unexpected error.",
+        )
+
+    # ── 4. Cargar universo ────────────────────────────────────────────────
+    csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+    try:
+        universe = CSVInstrumentUniverseProvider(csv_path).load()
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+
+    # ── 5. Aplicar filtro ─────────────────────────────────────────────────
+    filter_prefs: dict = {
+        k: v for k, v in ai_result.items() if k in _AI_FILTER_PREFERENCE_KEYS
+    }
+    try:
+        filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # ── 6. Serializar preferencias ────────────────────────────────────────
+    preferences_resp = AIInvestmentPreferencesResponse(
+        client_id=req.client_id,
+        allowed_instrument_types=[str(t) for t in ai_result.get("allowed_instrument_types", [])],
+        excluded_instrument_types=[str(t) for t in ai_result.get("excluded_instrument_types", [])],
+        currency=ai_result.get("currency"),
+        country=ai_result.get("country"),
+        entity=ai_result.get("entity"),
+        hard_dollar_only=ai_result.get("hard_dollar_only"),
+        avoid_sectors=[str(s) for s in ai_result.get("avoid_sectors", [])],
+        prefer_sectors=[str(s) for s in ai_result.get("prefer_sectors", [])],
+        avoid_issuers=[str(i) for i in ai_result.get("avoid_issuers", [])],
+        prefer_issuers=[str(i) for i in ai_result.get("prefer_issuers", [])],
+        min_liquidity_score=ai_result.get("min_liquidity_score"),
+        max_maturity_year=ai_result.get("max_maturity_year"),
+        hard_constraints=[str(c) for c in ai_result.get("hard_constraints", [])],
+        soft_preferences=[str(p) for p in ai_result.get("soft_preferences", [])],
+        unparsed_preferences=[str(u) for u in ai_result.get("unparsed_preferences", [])],
+        confidence=float(ai_result["confidence"]),
+        advisor_notes=[str(n) for n in ai_result.get("advisor_notes", [])],
+    )
+
+    # ── 7. Serializar instrumentos elegibles y exclusiones ────────────────
+    eligible_out = [
+        InstrumentResponse(
+            ticker=inst.ticker,
+            name=inst.name,
+            issuer=inst.issuer,
+            instrument_type=inst.instrument_type.value,
+            asset_class=inst.asset_class.value,
+            currency=inst.currency,
+            country=inst.country,
+            sector=inst.sector,
+            available_entities=list(inst.available_entities),
+            hard_dollar=inst.hard_dollar,
+            maturity_date=inst.maturity_date,
+            coupon_rate=inst.coupon_rate,
+            ytm=inst.ytm,
+            duration=inst.duration,
+            liquidity_score=inst.liquidity_score,
+            min_piece=inst.min_piece,
+            rating=inst.rating,
+            notes=list(inst.notes),
+        )
+        for inst in filter_result.eligible_universe.instruments
+    ]
+    exclusions_out = [
+        InstrumentExclusionResponse(ticker=exc.ticker, reasons=list(exc.reasons))
+        for exc in filter_result.exclusions
+    ]
+
+    # ── 8. Convertir a snapshots ──────────────────────────────────────────
+    all_snapshots = InstrumentMarketDataAdapter().to_many(
+        filter_result.eligible_universe.instruments
+    )
+    usable_snapshots = [s for s in all_snapshots if s.is_usable]
+
+    snapshots_out = [
+        FilteredSnapshotResponse(
+            ticker=s.ticker,
+            expected_return_annual=s.expected_return_annual,
+            volatility_annual=s.volatility_annual,
+            duration=s.duration,
+            liquidity_score=s.liquidity_score,
+            notes=list(s.notes),
+        )
+        for s in all_snapshots
+    ]
+
+    # ── Helper: armar respuesta parcial (para casos bloqueados) ───────────
+    def _make_response(
+        status: str,
+        message: str,
+        candidates: list[LivePortfolioCandidateResponse] | None = None,
+    ) -> AIFilteredPortfolioResponse:
+        cands = candidates or []
+        return AIFilteredPortfolioResponse(
+            client_id=req.client_id,
+            profile=req.profile,
+            preferences=preferences_resp,
+            eligible_count=len(eligible_out),
+            excluded_count=len(exclusions_out),
+            eligible_instruments=eligible_out,
+            exclusions=exclusions_out,
+            applied_filters=list(filter_result.applied_filters),
+            warnings=list(filter_result.warnings),
+            snapshots=snapshots_out,
+            snapshot_count=len(snapshots_out),
+            status=status,
+            message=message,
+            candidates=cands,
+            candidate_count=len(cands),
+        )
+
+    # ── 9. Bloqueo 1: mínimo absoluto ─────────────────────────────────────
+    if len(usable_snapshots) < 3:
+        return _make_response(
+            status="blocked_insufficient_universe",
+            message=(
+                f"Solo {len(usable_snapshots)} snapshot(s) usable(s) en el universo filtrado. "
+                "Se necesitan al menos 3 para generar un portfolio."
+            ),
+        )
+
+    # ── 10. Construir RiskBudget ──────────────────────────────────────────
+    risk_budget = _build_live_risk_budget(req.profile)
+    msa = risk_budget.max_single_asset
+
+    if msa <= 0.0:
+        return _make_response(
+            status="infeasible",
+            message="RiskBudget inválido: max_single_asset debe ser > 0.",
+        )
+
+    # ── 11. Bloqueo 2: capacidad de diversificación ───────────────────────
+    required_min = math.ceil(1.0 / msa)
+    if len(usable_snapshots) < required_min:
+        return _make_response(
+            status="blocked_insufficient_diversification_capacity",
+            message=(
+                f"Solo {len(usable_snapshots)} snapshot(s) usable(s) para el perfil "
+                f"'{req.profile}' (max_single_asset={msa:.0%}). "
+                f"Se necesitan al menos {required_min} instrumentos para asignar el 100%."
+            ),
+        )
+
+    # ── 12. Estimar retornos y covarianzas ────────────────────────────────
+    return_estimates = ReturnEstimator().estimate_many(usable_snapshots)
+    covariance_matrix = CovarianceEngine().build(usable_snapshots)
+
+    # ── 13. Generar carteras candidatas ───────────────────────────────────
+    try:
+        candidate_set = PortfolioGenerationCoordinator().generate(
+            client_id=req.client_id,
+            approved_profile_name=req.profile,
+            return_estimates=return_estimates,
+            covariance_matrix=covariance_matrix,
+            risk_budget=risk_budget,
+        )
+    except ValueError as exc:
+        return _make_response(
+            status="infeasible",
+            message=f"Ninguna variante de cartera factible: {exc}",
+        )
+
+    # ── 14. Serializar candidatos ─────────────────────────────────────────
+    _variant_order = [
+        PortfolioVariant.DEFENSIVE,
+        PortfolioVariant.BALANCED,
+        PortfolioVariant.GROWTH,
+    ]
+    candidates_out: list[LivePortfolioCandidateResponse] = []
+    for variant in _variant_order:
+        if variant not in candidate_set.candidates:
+            continue
+        portfolio = candidate_set.candidates[variant]
+        meta = candidate_set.metadata.get(variant)
+
+        sorted_weights = sorted(
+            ((t, w) for t, w in portfolio.weights.items() if w > 1e-6),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )
+        meta_out = LivePortfolioMetadataResponse(
+            risk_budget_exceeded=meta.risk_budget_exceeded if meta else False,
+            requires_advisor_override=meta.requires_advisor_override if meta else False,
+            exceeded_constraints=list(meta.exceeded_constraints) if meta else [],
+            reason_codes=list(meta.reason_codes) if meta else [],
+            notes=list(meta.notes) if meta else [],
+        )
+        candidates_out.append(
+            LivePortfolioCandidateResponse(
+                variant=variant.value,
+                objective=portfolio.objective.value,
+                expected_return_annual=portfolio.expected_return_annual,
+                volatility_annual=portfolio.volatility_annual,
+                risk_score=portfolio.risk_score,
+                constraints_satisfied=portfolio.constraints_satisfied,
+                reason_codes=list(portfolio.reason_codes),
+                notes=list(portfolio.notes),
+                metadata=meta_out,
+                weights=[
+                    LivePortfolioWeightResponse(ticker=t, weight=w)
+                    for t, w in sorted_weights
+                ],
+            )
+        )
+
+    return _make_response(
+        status="completed",
+        message=f"{len(candidates_out)} candidato(s) generado(s) para perfil '{req.profile}'.",
+        candidates=candidates_out,
     )
 
 

@@ -366,3 +366,43 @@ class AIUniverseFilterResponse(BaseModel):
     exclusions:           list[InstrumentExclusionResponse]
     applied_filters:      list[str]
     warnings:             list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /ai/filtered-portfolio-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AIFilteredPortfolioRequest(BaseModel):
+    client_id:                    str  = Field(min_length=1)
+    profile:                      str  = "moderado"
+    natural_language_preferences: str  = Field(min_length=1)
+    kyc_context:                  dict | None = None
+    previous_profile_analysis:    dict | None = None
+
+
+class FilteredSnapshotResponse(BaseModel):
+    ticker:                  str
+    expected_return_annual:  float
+    volatility_annual:       float
+    duration:                float | None
+    liquidity_score:         float
+    notes:                   list[str]
+
+
+class AIFilteredPortfolioResponse(BaseModel):
+    client_id:            str
+    profile:              str
+    preferences:          AIInvestmentPreferencesResponse
+    eligible_count:       int
+    excluded_count:       int
+    eligible_instruments: list[InstrumentResponse]
+    exclusions:           list[InstrumentExclusionResponse]
+    applied_filters:      list[str]
+    warnings:             list[str]
+    snapshots:            list[FilteredSnapshotResponse]
+    snapshot_count:       int
+    status:               str
+    message:              str
+    candidates:           list[LivePortfolioCandidateResponse]
+    candidate_count:      int
