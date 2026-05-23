@@ -129,3 +129,56 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 - El override del asesor todavía no es una acción persistida/firmada. El reporte lo expone visualmente, pero no existe un endpoint o UI donde el asesor confirme explícitamente que acepta la variante GROWTH fuera del budget.
 - Eso queda para la capa de workflow/UI futura (firma de override, trazabilidad en audit trail).
+
+---
+
+## AI Filtered Portfolio — pendientes de diseño (MVP post)
+
+### Persistencia y reporte
+
+`POST /ai/filtered-portfolio-demo` actualmente no persiste el resultado ni genera reporte Markdown. El flujo completo (preferencias extraídas, instrumentos elegibles, portfolios generados) desaparece al terminar la request.
+
+**Pendiente:**
+- Integrar `MarkdownReportGenerator` en el handler del endpoint para generar un reporte del portfolio filtrado.
+- Persistir en SQLite: preferencias estructuradas, instrumentos elegibles, exclusiones, snapshots y portfolios candidatos, bajo un nuevo `record_type` (ej. `filtered_portfolio_run`).
+- Devolver `record_id` en la respuesta del endpoint, igual que `/workflow/run`.
+
+### Universo de instrumentos
+
+El universo actual (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) es un fixture de demo con datos ficticios de YTM, cupón y liquidez. No es apto para producción.
+
+**Pendiente:**
+- Diseñar `InstrumentUniverseProvider` con soporte para múltiples fuentes: CSV, base de datos, API externa.
+- Conectar `InstrumentMarketDataAdapter` a datos reales de mercado con SLA de frescura documentado.
+- Definir política de actualización del universo (manual, automática, auditada).
+
+### Retornos proxy vs. datos de mercado reales
+
+`InstrumentMarketDataAdapter` deriva `expected_return_annual` desde `ytm` o `coupon_rate` del CSV. Esto es una aproximación válida para instrumentos de renta fija en demo, pero:
+- Ignora duration, convexidad, spread de crédito y precio de mercado real.
+- No aplica para ETFs, CEDEARs ni acciones (que producen `snapshot=None`).
+- En producción debe reemplazarse por datos de precio histórico o estimaciones de un modelo de retorno calibrado.
+
+### Diversification pre-check
+
+El pre-check actual es: `usable_snapshots < ceil(1.0 / max_single_asset)` → bloqueado.
+
+Esta lógica es correcta para portfolios de máxima concentración uniforme, pero no contempla:
+- Instrumentos con distintos límites de concentración (ej. activos con restricción sectorial).
+- Portfolios con restricciones de activo mínimo (no solo máximo).
+- La posibilidad de que el optimizador encuentre solución con concentraciones asimétricas aunque `usable < required_min_uniform`.
+
+Revisar si el pre-check debe ser más permisivo o si el bloqueo es suficientemente conservador para el MVP.
+
+### Caching de preferencias de OpenAI
+
+Cada request a `/ai/filtered-portfolio-demo` llama a OpenAI para extraer preferencias, incluso si el texto de preferencias es idéntico al de una request anterior. Para un demo de volumen bajo esto es aceptable, pero en producción añadir:
+- Cache con clave `hash(natural_language_preferences)` con TTL configurable.
+- O un endpoint separado de "guardar preferencias" para que el asesor valide y reutilice el resultado de OpenAI sin re-llamar cada vez.
+
+### Firma del asesor en el flujo filtrado
+
+El endpoint actual devuelve portfolios candidatos sin ninguna acción de aprobación del asesor. En producción, el flujo debe incluir:
+- Un paso de revisión donde el asesor valida las preferencias extraídas por la IA antes de que se apliquen al filtro.
+- Un paso de aprobación del portfolio seleccionado (DEFENSIVE, BALANCED o GROWTH) con registro en audit trail.
+- Si GROWTH requiere override, firma explícita del asesor con justificación documentada.

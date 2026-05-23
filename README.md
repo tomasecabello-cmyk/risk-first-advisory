@@ -2,32 +2,198 @@
 
 Motor backend de asesoría financiera supervisada. La IA propone, el asesor decide.
 
-El workflow es risk-first: suitability, governance, ESG, data quality y portfolio feasibility se verifican antes de generar carteras. El resultado se persiste en SQLite y se expone vía FastAPI.
+El workflow es risk-first: suitability, governance, ESG, data quality y portfolio feasibility se verifican antes de generar carteras. El resultado se persiste en SQLite y se expone vía FastAPI con un frontend estático de demo.
+
+---
 
 ## Estado actual
 
-- Milestone M1/M2-prep — backend core completo
-- **1007 tests, todos verdes**
-- Sin IA real (MockAIClient)
-- Sin Bloomberg (MockMarketDataProvider)
-- Sin frontend
-- Sin autenticación
-- Sin PostgreSQL (SQLite en local)
+- **1841 tests, todos verdes** (unit + integration)
+- MVP local visual completo — frontend estático en `frontend/index.html`
+- Backend FastAPI con 14 endpoints expuestos
+- **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
+- **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
+- **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
+- Sin Bloomberg (datos de mercado reales para producción son out-of-scope del MVP)
+- Sin PostgreSQL (SQLite local para persistencia de sesión)
+- Sin autenticación (desarrollo local únicamente)
+
+---
 
 ## Capas implementadas
 
 | Capa | Módulo | Descripción |
 |---|---|---|
 | KYC | `kyc` | `KYCData`, `FinancialGoal`, `ESGProfile`, `AuditTrail` |
-| IA | `ai_layer` | `MockAIClient` — respuestas predeterminadas por fixture |
-| Humana | `human_layer` | `ScriptedAdvisorInterface` — decisiones por fixture |
-| Reglas | `rules_layer` | Governance, suitability, ESG, data quality |
-| Datos | `data_layer` | `MockMarketDataProvider` — precios por fixture YAML |
-| Portfolio | `portfolio_layer` | Optimizador, feasibility checker, generación de variantes con metadata de override |
-| Workflow | `workflow_layer` | `AdvisoryWorkflowCoordinator` — orquesta todo el flujo |
-| Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes visible |
+| IA — perfil | `ai_layer` | `OpenAIProfileClient` — análisis KYC, detección de contradicciones, follow-up, perfil revisado |
+| IA — preferencias | `ai_layer` | `OpenAIProfileClient.extract_investment_preferences()` — texto libre → restricciones estructuradas |
+| Humana | `human_layer` | `ScriptedAdvisorInterface` — decisiones por fixture (workflow completo) |
+| Reglas | `rules_layer` | Governance, suitability, ESG, data quality, risk budget |
+| Universo | `universe_layer` | `CSVInstrumentUniverseProvider` + `PreferenceFilterEngine` — filtro determinístico de universo de instrumentos |
+| Datos | `data_layer` | `MockMarketDataProvider` (fixtures YAML) + `InstrumentMarketDataAdapter` (CSV → snapshots proxy) |
+| Portfolio | `portfolio_layer` | Optimizador, feasibility checker, generación de variantes DEFENSIVE/BALANCED/GROWTH con metadata de override |
+| Workflow | `workflow_layer` | `AdvisoryWorkflowCoordinator` — orquesta el flujo completo con `MockAIClient` |
+| Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes |
 | Persistencia | `persistence_layer` | SQLite + repositorios in-memory |
-| API | `api_layer` | FastAPI: 9 endpoints — ejecución, recuperación y listado de registros |
+| API | `api_layer` | FastAPI: 14 endpoints — ejecución, recuperación, demo IA y demo portfolio |
+
+---
+
+## MVP Flows
+
+El frontend estático expone cinco flujos de demo de forma visual. Todos requieren el backend FastAPI corriendo localmente.
+
+### 1. AI Profile Demo — `POST /ai/profile-demo`
+
+Analiza un formulario KYC con OpenAI. Detecta contradicciones entre campos, propone un perfil preliminar y genera preguntas de follow-up para el asesor.
+
+- Input: `KYCData` estructurado + `client_id`
+- Output: `preliminary_profile`, `confidence`, `contradictions`, `follow_up_questions`, `advisor_notes`
+- **La IA no aprueba el perfil.** Solo el asesor puede hacerlo.
+
+### 2. AI Profile Follow-up — `POST /ai/profile-follow-up`
+
+Segunda ronda de análisis. El asesor responde las preguntas de follow-up y la IA revisa su propuesta de perfil.
+
+- Input: KYC original + análisis previo + respuestas del asesor a las preguntas
+- Output: `revised_profile`, `confidence` actualizada, `remaining_contradictions`, `profile_change_reason`
+
+### 3. Live Portfolio Demo — `POST /live/portfolio-demo`
+
+Descarga datos históricos de ETFs reales desde yfinance y genera hasta 3 portfolios candidatos (DEFENSIVE / BALANCED / GROWTH) para el perfil seleccionado.
+
+- No usa IA. No usa KYC. El perfil se selecciona directamente.
+- Universo fijo: 11 ETFs (BIL, SHV, AGG, BND, IEF, VTI, SPY, VEA, VWO, HYG, GLD)
+- Requiere internet. Puede tardar 5–15 segundos.
+
+### 4. AI Universe Filter Demo — `POST /ai/filter-universe-demo`
+
+Extrae preferencias de inversión desde texto libre (OpenAI) y las aplica sobre el universo CSV para filtrar instrumentos elegibles.
+
+- Input: `client_id` + texto libre de preferencias
+- Output: instrumentos elegibles, excluidos con razones, filtros aplicados, warnings
+- No genera portfolios. Solo filtra.
+
+### 5. AI Filtered Portfolio Demo — `POST /ai/filtered-portfolio-demo`
+
+Pipeline completo de cuatro pasos: texto libre → preferencias → filtro → snapshots → portfolios candidatos.
+
+Ver sección detallada más abajo.
+
+---
+
+## AI Filtered Portfolio Demo
+
+### Pipeline
+
+```
+texto libre del cliente
+       │
+       ▼
+OpenAIProfileClient.extract_investment_preferences()
+       │  preferencias estructuradas
+       ▼
+PreferenceFilterEngine.apply(universe_csv, preferences)
+       │  instrumentos elegibles / excluidos
+       ▼
+InstrumentMarketDataAdapter.to_many(eligible_instruments)
+       │  snapshots proxy (ytm/coupon → expected_return_annual)
+       ▼
+ReturnEstimator + CovarianceEngine
+       │  retornos estimados + matriz de covarianza
+       ▼
+PortfolioGenerationCoordinator.generate(snapshots, risk_budget)
+       │
+       ▼
+DEFENSIVE / BALANCED / GROWTH  (o status bloqueado)
+```
+
+### Endpoint
+
+```
+POST /ai/filtered-portfolio-demo
+```
+
+### Input ejemplo
+
+```json
+{
+  "client_id": "CLI-PREF-PORT-001",
+  "profile": "moderado",
+  "natural_language_preferences": "Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia."
+}
+```
+
+Campos opcionales: `kyc_context`, `previous_profile_analysis`.
+
+### Output esperado
+
+```json
+{
+  "client_id": "CLI-PREF-PORT-001",
+  "profile": "moderado",
+  "status": "completed",
+  "message": "Portfolio generation completed successfully.",
+  "preferences": {
+    "allowed_instrument_types": ["CORPORATE_BOND"],
+    "currency": "USD",
+    "country": "Argentina",
+    "entity": "Balanz",
+    "hard_dollar_only": true,
+    "avoid_sectors": ["Energy"],
+    "confidence": 0.92,
+    "..."  : "..."
+  },
+  "eligible_count": 9,
+  "excluded_count": 11,
+  "eligible_instruments": ["..."],
+  "exclusions": ["..."],
+  "applied_filters": ["instrument_type:CORPORATE_BOND", "currency:USD", "..."],
+  "warnings": [],
+  "snapshots": ["..."],
+  "snapshot_count": 9,
+  "candidates": ["..."],
+  "candidate_count": 2
+}
+```
+
+### Status posibles
+
+| `status` | Significado |
+|---|---|
+| `completed` | Portfolios generados correctamente |
+| `blocked_insufficient_universe` | Menos de 3 snapshots usables (universo filtrado demasiado pequeño) |
+| `blocked_insufficient_diversification_capacity` | Snapshots usables < `ceil(1 / max_single_asset)` del perfil (p.ej. `moderado` requiere ≥ 7) |
+| `infeasible` | El optimizador no encontró solución factible con los constraints del risk budget |
+
+### Rol de la IA vs. motor determinístico
+
+| Componente | Qué hace | Qué NO hace |
+|---|---|---|
+| OpenAI (`extract_investment_preferences`) | Estructura las preferencias del cliente en texto libre en un JSON con tipos de instrumento, moneda, entidad, sectores, restricciones | **No filtra instrumentos. No calcula pesos. No aprueba el perfil.** |
+| `PreferenceFilterEngine` | Aplica las preferencias estructuradas al CSV de instrumentos de forma determinística y reproducible | No interpreta texto libre. No hace excepciones. |
+| `PortfolioGenerationCoordinator` | Genera variantes DEFENSIVE / BALANCED / GROWTH respetando el `RiskBudget` del perfil | No ajusta restricciones aprobadas. No relaja el budget automáticamente. |
+| Asesor | Aprueba el perfil final. Revisa GROWTH si requiere override. | La IA nunca reemplaza esta decisión. |
+
+### GROWTH con advisor override
+
+Cuando la variante GROWTH excede `max_volatility` del `RiskBudget` aprobado, el sistema **no la silencia**. En cambio, la marca explícitamente:
+
+```json
+{
+  "variant": "GROWTH",
+  "metadata": {
+    "risk_budget_exceeded": true,
+    "requires_advisor_override": true,
+    "exceeded_constraints": ["max_volatility"],
+    "reason_codes": ["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"]
+  }
+}
+```
+
+El frontend muestra un banner de advertencia amarillo con los constraints excedidos. El asesor debe revisar y aprobar explícitamente antes de presentar GROWTH al cliente.
+
+---
 
 ## Setup (Windows PowerShell)
 
@@ -44,50 +210,69 @@ Para instalar dependencias de desarrollo (pytest, ruff, mypy):
 python -m pip install -e ".[dev]"
 ```
 
+---
+
 ## Correr tests
 
 ```powershell
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~7 segundos.
+Suite completa (unit + integration): ~10 segundos, 1841 tests.
 
 ```powershell
 # Solo tests de API
 python -m pytest tests/integration/test_api_demo.py -v
 
-# Solo tests de persistencia SQLite
-python -m pytest tests/integration/test_sqlite_persistence.py -v
+# Solo tests del AI Filtered Portfolio Demo
+python -m pytest tests/integration/test_api_ai_filtered_portfolio.py -v
 
 # Solo tests unitarios
 python -m pytest tests/unit/ -v
 ```
 
-## Demo por consola
+---
 
-Ejecuta el workflow completo con fixtures y muestra el resultado en terminal:
+## Demo local — inicio rápido
 
-```powershell
-python scripts/run_demo.py
-```
-
-Genera:
-- `reports/demo_advisory_report.md` — reporte Markdown del workflow
-
-## API FastAPI
-
-Iniciar servidor:
+### Backend
 
 ```powershell
+# Sin IA (solo endpoints de workflow y live portfolio)
+uvicorn risk_first_advisory.api_layer.main:app --reload
+
+# Con IA (habilita /ai/profile-demo, /ai/filter-universe-demo, /ai/filtered-portfolio-demo)
+$env:OPENAI_API_KEY="your_key_here"
 uvicorn risk_first_advisory.api_layer.main:app --reload
 ```
 
-Documentación interactiva con el servidor corriendo:
-
+Documentación interactiva:
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
-### Endpoints disponibles
+### Frontend
+
+```powershell
+python -m http.server 5500 -d frontend
+```
+
+Abrir en el navegador: `http://127.0.0.1:5500`
+
+> Si se abre `frontend/index.html` directamente desde `file://`, el navegador puede bloquear las requests por CORS. Usar el servidor HTTP local.
+
+### Scripts de consola
+
+```powershell
+# Workflow completo con fixtures (MockAIClient + ScriptedAdvisorInterface)
+python scripts/run_demo.py
+
+# Demo de filtrado con preferencias de texto libre
+python scripts/run_ai_filtered_portfolio_demo.py --preferences "Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia."
+```
+
+---
+
+## API FastAPI — endpoints
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -100,28 +285,28 @@ Documentación interactiva con el servidor corriendo:
 | `GET` | `/workflow` | Lista todos los workflows (filtrable por `client_id`) |
 | `GET` | `/reports` | Lista todos los reportes (filtrable por `client_id`) |
 | `GET` | `/audit` | Lista todos los audit trails (filtrable por `client_id`) |
+| `POST` | `/live/portfolio-demo` | Portfolios con datos reales de yfinance (requiere internet) |
+| `POST` | `/universe/filter-demo` | Filtro de universo CSV por preferencias estructuradas |
+| `POST` | `/ai/profile-demo` | Análisis KYC con OpenAI (requiere API key) |
+| `POST` | `/ai/profile-follow-up` | Segunda ronda de análisis con respuestas del asesor |
+| `POST` | `/ai/filter-universe-demo` | Texto libre → OpenAI → filtro de universo |
+| `POST` | `/ai/filtered-portfolio-demo` | Texto libre → OpenAI → filtro → snapshots → portfolios |
 
-### GET /health
+### Ejemplos de uso
 
-```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:8000/health
-```
-
-```json
-{"status": "ok", "service": "risk-first-advisory"}
-```
-
-### POST /demo/run
-
-Ejecuta el workflow demo con fixtures, genera reporte Markdown y persiste en SQLite.
+#### POST /ai/filtered-portfolio-demo
 
 ```powershell
-curl.exe -s -X POST http://127.0.0.1:8000/demo/run
+curl.exe -s -X POST http://127.0.0.1:8000/ai/filtered-portfolio-demo `
+  -H "Content-Type: application/json" `
+  -d '{
+    "client_id": "CLI-PREF-PORT-001",
+    "profile": "moderado",
+    "natural_language_preferences": "Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia."
+  }'
 ```
 
-### POST /workflow/run
-
-Ejecuta el workflow con KYCData y FinancialGoal enviados por JSON. Usa `MockAIClient` y `ScriptedAdvisorInterface` por defecto. La respuesta incluye los IDs de los registros persistidos.
+#### POST /workflow/run
 
 ```powershell
 curl.exe -s -X POST http://127.0.0.1:8000/workflow/run `
@@ -149,83 +334,21 @@ curl.exe -s -X POST http://127.0.0.1:8000/workflow/run `
   }'
 ```
 
-Respuesta (campos principales):
+---
 
-```json
-{
-  "status": "blocked_by_portfolio_feasibility",
-  "client_id": "CLI-001",
-  "approved_profile_name": "moderado",
-  "has_portfolios": false,
-  "reason_codes": ["..."],
-  "warnings": ["..."],
-  "final_optimizer_tickers": ["BIL", "SHV", "..."],
-  "portfolio_feasibility_status": "infeasible",
-  "candidate_count": 0,
-  "report_path": "C:\\...\\reports\\workflow_CLI-001.md",
-  "records": {
-    "workflow_record_id": "workflow_000001",
-    "audit_record_id": "audit_000001",
-    "report_record_id": "report_000001"
-  }
-}
-```
+## Portfolio: variantes y metadata de override
 
-Los IDs devueltos en `records` permiten recuperar los registros persistidos vía GET.
+Cada ejecución del motor de portfolio genera hasta tres variantes candidatas:
 
-### GET /workflow/{record_id} · GET /reports/{record_id} · GET /audit/{record_id}
+| Variante | Objetivo | Relación con RiskBudget aprobado |
+|---|---|---|
+| `DEFENSIVE` | Mínima varianza | Más conservadora que el perfil aprobado |
+| `BALANCED` | Máxima utilidad | Respeta estrictamente el RiskBudget aprobado — recomendación base |
+| `GROWTH` | Máximo retorno | Puede exceder `max_volatility` del RiskBudget aprobado |
 
-Recuperan un registro persistido por su ID. Devuelven 404 si no existe.
+Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena en `metadata` un `PortfolioVariantMetadata` con `risk_budget_exceeded=True`, `requires_advisor_override=True`, `exceeded_constraints` y `reason_codes`. Este flag se expone en la API, en el reporte Markdown y en el frontend (banner de advertencia).
 
-```powershell
-curl.exe http://127.0.0.1:8000/workflow/workflow_000001
-curl.exe http://127.0.0.1:8000/reports/report_000001
-curl.exe http://127.0.0.1:8000/audit/audit_000001
-```
-
-Respuesta:
-
-```json
-{
-  "record_id": "workflow_000001",
-  "record_type": "workflow_run",
-  "created_at_utc": "2026-05-19T04:00:00Z",
-  "payload": { "status": "...", "client_id": "CLI-001", "..." : "..." },
-  "metadata": { "client_id": "CLI-001", "source_type": "workflow_result", "..." : "..." }
-}
-```
-
-### GET /workflow · GET /reports · GET /audit
-
-Listan todos los registros. Aceptan query param opcional `client_id` para filtrar.
-
-```powershell
-# Todos los workflows
-curl.exe http://127.0.0.1:8000/workflow
-
-# Filtrados por cliente
-curl.exe "http://127.0.0.1:8000/workflow?client_id=CLI-001"
-curl.exe "http://127.0.0.1:8000/reports?client_id=CLI-001"
-curl.exe "http://127.0.0.1:8000/audit?client_id=CLI-001"
-
-# Todos los reportes y audit trails
-curl.exe http://127.0.0.1:8000/reports
-curl.exe http://127.0.0.1:8000/audit
-```
-
-Respuesta:
-
-```json
-{
-  "count": 2,
-  "records": [
-    { "record_id": "workflow_000001", "..." : "..." },
-    { "record_id": "workflow_000002", "..." : "..." }
-  ]
-}
-```
-
-Los registros se devuelven en orden de inserción. `count` siempre coincide con `len(records)`.
+---
 
 ## Archivos generados localmente
 
@@ -234,61 +357,59 @@ Los registros se devuelven en orden de inserción. `count` siempre coincide con 
 | `reports/demo_advisory_report.md` | `scripts/run_demo.py` | Reporte Markdown del workflow demo |
 | `reports/demo_api_report.md` | `POST /demo/run` | Reporte Markdown vía API |
 | `reports/workflow_<client_id>.md` | `POST /workflow/run` | Reporte Markdown por cliente |
-| `data/demo_api.db` | `POST /demo/run` o `POST /workflow/run` | SQLite compartido con workflow, audit y report records |
+| `data/demo_api.db` | `POST /demo/run` o `POST /workflow/run` | SQLite con workflow, audit y report records |
 
-Estos archivos están en `.gitignore`. Los record IDs (`workflow_000001`, `audit_000001`, etc.) se generan localmente en SQLite y son secuenciales por prefijo. El SQLite local es para desarrollo y demo — no está diseñado para producción.
+Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefijo y se resetean si el servidor se reinicia sin persistencia previa.
 
-## Fixtures de prueba
+---
 
-Los fixtures están en `tests/fixtures/`:
+## Fixtures
 
 | Directorio | Contenido |
 |---|---|
-| `kyc_profiles/` | Perfiles KYC en JSON (e.g. `contradictorio_alta_severidad.json`) |
-| `universes/` | Universos de productos aprobados en YAML |
-| `suitability/` | Matriz de suitability en YAML |
-| `esg/` | Metadata ESG de instrumentos en YAML |
-| `market_data/` | Precios y datos de mercado en YAML |
+| `tests/fixtures/kyc_profiles/` | Perfiles KYC en JSON |
+| `tests/fixtures/universes/` | Universos de productos aprobados en YAML |
+| `tests/fixtures/suitability/` | Matriz de suitability en YAML |
+| `tests/fixtures/esg/` | Metadata ESG en YAML |
+| `tests/fixtures/market_data/` | Precios y datos de mercado en YAML |
+| `tests/fixtures/universe/sample_instrument_universe.csv` | 20 instrumentos (ETF, CORPORATE_BOND, SOVEREIGN_BOND, MONEY_MARKET, CEDEAR) para demo de filtrado y portfolio |
 
-## Portfolio: variantes y metadata de override
+---
 
-Cada ejecución del workflow puede generar hasta tres variantes de cartera candidata:
+## Próximos pasos
 
-| Variante | Objetivo | Relación con RiskBudget aprobado |
+| Área | Descripción | Prioridad |
 |---|---|---|
-| `DEFENSIVE` | Mínima varianza | Más conservadora que el perfil aprobado |
-| `BALANCED` | Máxima utilidad | Respeta estrictamente el RiskBudget aprobado — recomendación base |
-| `GROWTH` | Máximo retorno | Puede exceder `max_volatility` del RiskBudget aprobado |
+| Reportes AI filtered portfolio | Integrar `MarkdownReportGenerator` en el flujo de `POST /ai/filtered-portfolio-demo` para generar y persistir reporte del portfolio filtrado | Alta |
+| Persistencia del flujo filtrado | Guardar en SQLite el resultado completo del AI Filtered Portfolio (preferencias, instrumentos elegibles, portfolios) para trazabilidad y audit | Alta |
+| Firma de override del asesor | Endpoint/UI donde el asesor confirme explícitamente la aceptación de GROWTH fuera del budget, con registro en audit trail (ver DD-010) | Alta |
+| Expandir universo de instrumentos | Reemplazar el CSV de 20 instrumentos de muestra por un universo real de ONs, ETFs y bonos soberanos con datos actualizados | Media |
+| Provider de datos externo | Conectar `InstrumentMarketDataAdapter` a una fuente de datos de producción (Bloomberg, Refinitiv, proveedor local) en lugar de derivar retornos desde ytm/coupon del CSV | Media |
+| Autenticación y seguridad | Auth JWT o API key para todos los endpoints; control de acceso por rol (asesor vs. cliente) antes de cualquier exposición en red | Alta (pre-producción) |
+| Reporte profesional | Formato de reporte para presentación al cliente y al asesor; PDF generado desde Markdown o template HTML | Media |
+| PostgreSQL y multi-sesión | Migrar SQLite a PostgreSQL para soporte multi-usuario y persistencia entre reinicios del servidor | Media |
+| MiFID II / CNBV compliance completo | Cuestionario de idoneidad regulatoria explícito, firma digital del asesor, modelo de conocimiento y experiencia detallado | Baja (M3) |
 
-Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena en su campo `metadata` un `PortfolioVariantMetadata` con:
-
-- `risk_budget_exceeded: true`
-- `requires_advisor_override: true`
-- `exceeded_constraints: [max_volatility]`
-- `reason_codes: [PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET]`
-
-El reporte Markdown muestra esa metadata por variante bajo **Variant Metadata**, incluyendo:
-- `risk_budget_exceeded`
-- `requires_advisor_override`
-- `exceeded_constraints`
-- `reason_codes`
-- `notes`
-
-Si no existe metadata explícita para una variante, el reporte muestra defaults seguros (`false` / `None`) sin romper.
+---
 
 ## Principios del sistema
 
 1. La IA no recomienda inversiones ni decide pesos de cartera.
-2. El asesor valida perfil, resuelve contradicciones y aprueba carteras.
+2. El asesor valida el perfil, resuelve contradicciones y aprueba carteras.
 3. El universo nace de governance, no del proveedor de datos.
 4. El perfil surge de tolerancia + capacidad — nunca de la necesidad de retorno.
 5. `preliminary_profile` (propuesto por IA) y `approved_profile` (validado por asesor) son conceptos distintos.
 6. Solo `ApprovedPortfolio` puede presentarse al cliente.
 7. Todo motivo cita un `ReasonCode`. Todo evento queda en audit trail.
-8. Si `GROWTH` excede el RiskBudget aprobado, ese exceso no queda oculto — queda marcado, auditado y visible en el reporte.
+8. Si `GROWTH` excede el RiskBudget aprobado, ese exceso no queda oculto — queda marcado, auditado y visible en el reporte y en el frontend.
+9. La IA estructura preferencias del cliente; el motor determinístico filtra el universo. La separación es explícita e inmutable.
+
+---
 
 ## Compliance
 
 Este software no constituye recomendación de inversión. Es una herramienta de soporte para asesores financieros matriculados, que mantienen la responsabilidad profesional sobre toda decisión presentada al cliente.
 
-Los retornos esperados son estimaciones técnicas, no predicciones ni garantías.
+Los retornos esperados son estimaciones técnicas derivadas de datos proxy (YTM, cupón) para el universo de demo. No son predicciones ni garantías. En producción deben reemplazarse por datos de mercado con fuente auditada y SLA de frescura documentado.
+
+Ver `docs/COMPLIANCE_NOTES.md` para el análisis detallado de las decisiones de arquitectura con impacto regulatorio.

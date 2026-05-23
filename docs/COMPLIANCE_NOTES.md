@@ -8,11 +8,13 @@ Notas de diseño relevantes para la revisión regulatoria y de compliance del si
 
 El sistema implementa una separación explícita y auditada entre la propuesta computacional (IA) y la decisión vinculante (asesor humano):
 
-- **`PreliminaryProfile`** (output de `MockAIClient`): es una propuesta. `advisor_review_required = True` siempre. El perfil propuesto no tiene efecto vinculante.
+- **`PreliminaryProfile`** (output del análisis de IA via `OpenAIProfileClient`): es una propuesta. `advisor_review_required = True` siempre. El perfil propuesto no tiene efecto vinculante.
 - **`ApprovedProfile`** (output de `ScriptedAdvisorInterface`): es la decisión. El asesor puede aceptar, modificar o rechazar la propuesta de la IA. `is_modified` y `advisor_comment` quedan registrados.
 - Los dos objetos son de tipos distintos y se mantienen separados en `M1SessionResult`.
 
-Ningún flujo del sistema genera portfolios sin un `ApprovedProfile` previo. El perfil aprobado es el input de `RiskBudgetBuilder` y de todo el pipeline posterior.
+Ningún flujo del sistema genera portfolios sin un `ApprovedProfile` previo en el workflow completo. El perfil aprobado es el input de `RiskBudgetBuilder` y de todo el pipeline posterior.
+
+**Nota sobre el AI Filtered Portfolio Demo:** `POST /ai/filtered-portfolio-demo` acepta un `profile` directamente como parámetro de la request (sin pasar por el proceso de aprobación del asesor) porque es un endpoint de **demo aislado**, no parte del workflow completo. En un flujo de producción, el perfil debe surgir siempre de `ApprovedProfile`. Ver sección 13 de este documento.
 
 ---
 
@@ -101,14 +103,15 @@ Esto garantiza que el contenido del reporte sea siempre consistente con los dato
 
 ---
 
-## 10. Limitaciones actuales (M1/M2-prep)
+## 10. Limitaciones actuales (M2-prep / MVP)
 
 Las siguientes funcionalidades no están implementadas en M1 y representan áreas de riesgo de compliance a resolver en M2 o posterior:
 
 | Limitación | Impacto de compliance | Sprint objetivo |
 |---|---|---|
-| `MockAIClient` con respuestas scripted | La IA real debe validarse contra un modelo de prompts con revisión humana antes de producción. | M2/M3 |
+| `OpenAIProfileClient` en producción | Los prompts de la IA real deben validarse periódicamente. Las respuestas de OpenAI son no determinísticas: el mismo KYC puede producir perfiles distintos en distintas llamadas. Requiere logging de todas las respuestas de OpenAI para auditoría. | M2/M3 |
 | `MockMarketDataProvider` con datos de fixture | Los datos de mercado en producción deben tener SLA de frescura, auditoría de fuente y control de calidad automatizado. | M2 |
+| Universo CSV de demo (`sample_instrument_universe.csv`) | Los retornos esperados de los instrumentos del universo CSV son derivados de YTM/cupón estáticos, no de precios de mercado actualizados. No aptos para producción. | M2 |
 | `GROWTH` no tiene advisor override persistido/firmado | GROWTH se marca con `PortfolioVariantMetadata` cuando excede el RiskBudget (implementado). Falta: endpoint/UI donde el asesor firme el override explícitamente y quede en el audit trail. | M2+ (DD-010) |
 | `ESGPreference` con `prefer_tag`/`avoid_tag` | Las preferencias cualitativas no se evalúan en M1. Los instrumentos afectados reciben `ESG_DATA_INCOMPLETE`. | M2 |
 | Sin persistencia de sesión | El `AuditTrail` se genera en memoria. En producción debe persistirse antes del cierre de sesión. | M2 |
@@ -165,3 +168,35 @@ Esta metadata se almacena en `PortfolioCandidateSet.metadata` y se muestra en el
 **Pendiente de compliance:**
 
 La firma explícita del asesor aceptando la variante `GROWTH` fuera del budget no está todavía implementada como acción persistida. El reporte expone la metadata visualmente, pero no existe un endpoint o UI donde el asesor confirme con trazabilidad que acepta presentar la variante `GROWTH` al cliente. Eso queda para la capa de workflow/UI futura. Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/TODO_DESIGN_NOTES.md`.
+
+---
+
+## 13. AI Filtered Portfolio Demo — postura de compliance
+
+`POST /ai/filtered-portfolio-demo` implementa un pipeline de cuatro pasos: extracción de preferencias (OpenAI) → filtro determinístico (universo CSV) → snapshots proxy → generación de portfolios.
+
+### Separación de responsabilidades en el pipeline
+
+La separación entre IA y motor determinístico es un principio de diseño central:
+
+1. **OpenAI solo estructura el texto libre del cliente.** La IA convierte "quiero ONs argentinas en Balanz sin energía" en campos estructurados (`allowed_instrument_types`, `entity`, `avoid_sectors`, etc.). No selecciona instrumentos. No calcula pesos. No aprueba nada.
+
+2. **`PreferenceFilterEngine` es determinístico y auditado.** Dadas las mismas preferencias estructuradas y el mismo universo CSV, el resultado del filtro es siempre idéntico. Cada exclusión tiene una razón explícita (`instrument_type_not_allowed:ETF`, `sector_avoided:Energy`, etc.) auditable sin acceso al código fuente.
+
+3. **El optimizador respeta el `RiskBudget` del perfil.** El perfil seleccionado en la request determina el `RiskBudget` via `PROFILE_BASE_PARAMS`. El motor no lo relaja automáticamente. Si el universo filtrado es insuficiente para satisfacer el budget, el endpoint devuelve un status bloqueado con diagnóstico explícito.
+
+### Lo que este endpoint NO hace (límites de diseño)
+
+- **No aprueba el perfil del cliente.** El `profile` se selecciona directamente como parámetro de demo. En producción debe surgir del proceso de perfilamiento y aprobación del asesor.
+- **No persiste el resultado.** Los portfolios generados no quedan en el audit trail. Esto es una limitación de la versión MVP documentada en `TODO_DESIGN_NOTES.md`.
+- **No genera un reporte para el cliente.** El endpoint devuelve JSON; la generación de un reporte Markdown o PDF para presentación al cliente está pendiente.
+- **No valida que el asesor haya revisado las preferencias extraídas por la IA.** Las preferencias estructuradas por OpenAI se aplican directamente al filtro sin un paso de revisión intermedio del asesor. En producción, el asesor debe poder ver y corregir las preferencias antes de que se apliquen.
+
+### Datos proxy y sus limitaciones
+
+Los retornos esperados en el universo CSV se derivan de `ytm` (yield to maturity) o `coupon_rate` como proxy. Esto es aceptable para una demo de arquitectura, pero no para producción:
+- El YTM estático no refleja el precio de mercado actual ni el spread de crédito corriente.
+- La volatilidad proxy es una constante derivada del `ytm / 10`, no una estimación calibrada.
+- ETFs, CEDEARs y acciones no tienen `ytm` ni `coupon_rate` en el CSV, por lo que el adaptador no genera snapshots usables para esos instrumentos.
+
+Antes de usar este endpoint con clientes reales, los datos de mercado deben reemplazarse por fuentes con SLA de frescura documentado y proceso de validación auditado.
