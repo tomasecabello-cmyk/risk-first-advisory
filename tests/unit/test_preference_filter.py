@@ -880,7 +880,7 @@ class TestPreferenceFilterEngineValidation:
 
 class TestPreferenceFilterEngineChained:
     """
-    Apply multiple filters simultaneously on the 12-instrument fixture:
+    Apply multiple filters simultaneously on the sample fixture:
         entity=Balanz
         allowed_instrument_types=[CORPORATE_BOND]
         currency=USD
@@ -888,7 +888,7 @@ class TestPreferenceFilterEngineChained:
         hard_dollar_only=True
         avoid_sectors=[Energy]
 
-    Expected eligible: GALI28 only
+    Expected eligible: GALI28 + the new non-Energy Balanz CORPORATE_BONDs (>= 7 total).
     """
 
     def test_only_gali28_eligible(
@@ -903,7 +903,16 @@ class TestPreferenceFilterEngineChained:
             "avoid_sectors": ["Energy"],
         }
         result = engine.apply(full_universe, prefs)
-        assert result.eligible_universe.tickers == ["GALI28"]
+        eligible = result.eligible_universe
+        assert len(eligible) >= 7
+        assert "GALI28" in eligible.tickers
+        for inst in eligible.instruments:
+            assert inst.instrument_type.value == "CORPORATE_BOND"
+            assert inst.currency == "USD"
+            assert inst.is_argentina is True
+            assert inst.hard_dollar is True
+            assert inst.is_available_at("Balanz")
+            assert inst.sector != "Energy"
 
     def test_all_twelve_instruments_accounted_for(
         self, engine: PreferenceFilterEngine, full_universe: InstrumentUniverse

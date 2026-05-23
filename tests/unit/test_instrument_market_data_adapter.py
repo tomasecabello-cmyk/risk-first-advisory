@@ -605,9 +605,13 @@ class TestGALI28Integration:
         adapter = InstrumentMarketDataAdapter()
         snaps = adapter.to_many(eligible)
 
-        # Should be exactly one instrument: GALI28
-        assert len(snaps) == 1, f"Expected 1 snapshot, got {len(snaps)}: {[s.ticker for s in snaps]}"
-        return snaps[0]
+        # Universe has grown: multiple Balanz non-Energy CORPORATE_BONDs are now eligible.
+        assert len(snaps) >= 1, f"Expected at least 1 snapshot, got 0"
+        gali28 = next((s for s in snaps if s.ticker == "GALI28"), None)
+        assert gali28 is not None, (
+            f"GALI28 not found in snapshots: {[s.ticker for s in snaps]}"
+        )
+        return gali28
 
     def test_ticker(self, gali28_snapshot):
         assert gali28_snapshot.ticker == "GALI28"

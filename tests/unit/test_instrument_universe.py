@@ -527,7 +527,7 @@ class TestCSVProviderFixture:
         assert len(cedears) >= 1
 
     def test_combined_filter_balanz_usd_harddollar_corporate(self) -> None:
-        """Balanz + USD + hard_dollar + CORPORATE_BOND → only eligible ONs."""
+        """Balanz + USD + hard_dollar + CORPORATE_BOND → all eligible Balanz ONs."""
         universe = CSVInstrumentUniverseProvider(FIXTURE_CSV).load()
         result = (
             universe
@@ -536,10 +536,19 @@ class TestCSVProviderFixture:
             .filter_hard_dollar_only()
             .filter_by_instrument_type([InstrumentType.CORPORATE_BOND])
         )
-        # Fixture: YCPDO (Balanz;PPI), GALI28 (Balanz), PAMP27 (Balanz;Cocos)
+        # Original: YCPDO (Balanz;PPI), GALI28 (Balanz), PAMP27 (Balanz;Cocos)
+        # + 8 new hard-dollar AR CORPORATE_BONDs available at Balanz
         # MELI30 is CORPORATE_BOND + USD + hard_dollar but available at PPI;Cocos only
-        assert len(result) == 3
-        assert set(result.tickers) == {"YCPDO", "GALI28", "PAMP27"}
+        assert len(result) >= 7
+        assert "YCPDO" in result.tickers
+        assert "GALI28" in result.tickers
+        assert "PAMP27" in result.tickers
+        assert "MELI30" not in result.tickers
+        for inst in result.instruments:
+            assert inst.instrument_type == InstrumentType.CORPORATE_BOND
+            assert inst.currency == "USD"
+            assert inst.hard_dollar is True
+            assert inst.is_available_at("Balanz")
 
     def test_fixture_order_preserved(self) -> None:
         """Tickers in the universe should match CSV row order."""

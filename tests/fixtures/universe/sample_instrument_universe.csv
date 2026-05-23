@@ -11,3 +11,11 @@ AL35,Bono Soberano LEDE 2035,Republica Argentina,SOVEREIGN_BOND,FIXED_INCOME,USD
 FIMA,Fima Premium Money Market,Galicia Asset Management,MONEY_MARKET,CASH,ARS,AR,Cash,Balanz,false,0.98,,,,,,,Fondo money market ARS;alta liquidez
 BONO0,Sigma Liquidez USD,Sigma Asset Management,MONEY_MARKET,CASH,USD,AR,Cash,PPI,true,0.95,,,,,,,Fondo de liquidez USD
 APBR,Petrobras Brasil CEDEAR,Petrobras,CEDEAR,EQUITY,ARS,AR,Energy,Balanz;PPI,false,0.60,,,,,,B+,CEDEAR Petrobras;precio en ARS
+MACR29,Banco Macro ON 2029,Banco Macro,CORPORATE_BOND,FIXED_INCOME,USD,AR,Financials,Balanz;PPI,true,0.75,2029-04-30,8.75,9.20,2.8,1000.0,BB-,ON hard dollar Macro;vto abril 2029
+TEO29,Telecom Argentina ON 2029,Telecom Argentina,CORPORATE_BOND,FIXED_INCOME,USD,AR,Telecom,Balanz;Cocos,true,0.68,2029-06-15,7.50,7.90,3.6,1000.0,B+,ON hard dollar Telecom;vto junio 2029
+IRSA28,IRSA CP ON 2028,IRSA Propiedades,CORPORATE_BOND,FIXED_INCOME,USD,AR,Real Estate,Balanz,true,0.62,2028-07-01,8.00,8.50,2.3,1000.0,B,ON hard dollar IRSA;vto julio 2028
+AERO27,Aeropuertos Argentina ON 2027,Aeropuertos Argentina 2000,CORPORATE_BOND,FIXED_INCOME,USD,AR,Utilities,Balanz;PPI,true,0.72,2027-11-15,7.25,7.60,1.9,1000.0,B+,ON hard dollar Aeropuertos;vto noviembre 2027
+CRES29,Credito del Sur ON 2029,Credito del Sur,CORPORATE_BOND,FIXED_INCOME,USD,AR,Financials,Balanz;Cocos,true,0.65,2029-08-01,9.00,9.50,3.1,1000.0,B,ON hard dollar Credito Sur;vto agosto 2029
+SUPV28,Supervielle ON 2028,Grupo Supervielle,CORPORATE_BOND,FIXED_INCOME,USD,AR,Financials,Balanz,true,0.70,2028-09-30,8.50,8.90,2.6,1000.0,BB-,ON hard dollar Supervielle;vto septiembre 2028
+TGS29,Transportadora Gas Sur ON 2029,Transportadora Gas Sur,CORPORATE_BOND,FIXED_INCOME,USD,AR,Utilities,Balanz;PPI;Cocos,true,0.78,2029-03-15,8.25,8.60,4.2,1000.0,BB,ON hard dollar TGS;vto marzo 2029
+LOMA29,Loma Negra ON 2029,Loma Negra,CORPORATE_BOND,FIXED_INCOME,USD,AR,Construction,Balanz,true,0.67,2029-02-28,8.75,9.10,3.4,1000.0,B+,ON hard dollar Loma Negra;vto febrero 2029

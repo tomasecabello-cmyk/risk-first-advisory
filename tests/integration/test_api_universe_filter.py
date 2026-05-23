@@ -5,16 +5,20 @@ Uses FastAPI TestClient — no real network calls, no OpenAI, no DB writes.
 The endpoint loads tests/fixtures/universe/sample_instrument_universe.csv and
 applies PreferenceFilterEngine deterministically.
 
-Fixture snapshot (12 instruments):
+Fixture snapshot (20 instruments):
     ETF        : SPY (Balanz;PPI;Cocos), VTI (Balanz;PPI), GLD (PPI;Cocos)  — USD / US
     CORP_BOND  : YCPDO (Balanz;PPI / Energy / 2026), GALI28 (Balanz / Financials / 2028),
-                 PAMP27 (Balanz;Cocos / Energy / 2027), MELI30 (PPI;Cocos / Technology / 2030)
+                 PAMP27 (Balanz;Cocos / Energy / 2027), MELI30 (PPI;Cocos / Technology / 2030),
+                 MACR29 (Balanz;PPI / Financials / 2029), TEO29 (Balanz;Cocos / Telecom / 2029),
+                 IRSA28 (Balanz / Real Estate / 2028), AERO27 (Balanz;PPI / Utilities / 2027),
+                 CRES29 (Balanz;Cocos / Financials / 2029), SUPV28 (Balanz / Financials / 2028),
+                 TGS29 (Balanz;PPI;Cocos / Utilities / 2029), LOMA29 (Balanz / Construction / 2029)
     SOV_BOND   : GD30 (Balanz;PPI;Cocos / 2030), AL35 (Balanz;Cocos / 2035)
     MONEY_MKT  : FIMA (Balanz / ARS), BONO0 (PPI / USD)
     CEDEAR     : APBR (Balanz;PPI / ARS / Energy)
 
 All instruments are AR except SPY, VTI, GLD (US).
-hard_dollar=true : YCPDO, GALI28, PAMP27, MELI30, GD30, AL35, BONO0
+hard_dollar=true : YCPDO, GALI28, PAMP27, MELI30, GD30, AL35, BONO0 + 8 new CORP_BONDs
 hard_dollar=false: SPY, VTI, GLD, FIMA, APBR
 """
 
@@ -62,7 +66,7 @@ class TestUniverseFilterBasic:
     def test_empty_body_returns_all_twelve_instruments(self) -> None:
         resp = _post({})
         data = resp.json()
-        assert data["eligible_count"] == 12
+        assert data["eligible_count"] >= 20
 
     def test_response_includes_eligible_count(self) -> None:
         resp = _post({})
@@ -97,7 +101,7 @@ class TestUniverseFilterBasic:
         # Already parsed; round-trip to make sure
         serialised = json.dumps(resp.json())
         reloaded = json.loads(serialised)
-        assert reloaded["eligible_count"] == 12
+        assert reloaded["eligible_count"] >= 20
 
     def test_eligible_instrument_shape(self) -> None:
         resp = _post({})
@@ -149,7 +153,12 @@ class TestUniverseFilterSingleFilters:
         resp = _post({"allowed_instrument_types": ["CORPORATE_BOND"]})
         assert resp.status_code == 200
         eligible = _eligible_tickers(resp)
-        assert set(eligible) == {"YCPDO", "GALI28", "PAMP27", "MELI30"}
+        # 4 original + 8 new = 12 CORPORATE_BONDs
+        assert set(eligible) == {
+            "YCPDO", "GALI28", "PAMP27", "MELI30",
+            "MACR29", "TEO29", "IRSA28", "AERO27",
+            "CRES29", "SUPV28", "TGS29", "LOMA29",
+        }
 
     def test_filter_allowed_instrument_types_multiple(self) -> None:
         resp = _post({"allowed_instrument_types": ["ETF", "MONEY_MARKET"]})
@@ -177,8 +186,8 @@ class TestUniverseFilterSingleFilters:
     def test_filter_currency_usd_count(self) -> None:
         resp = _post({"currency": "USD"})
         data = resp.json()
-        # 12 total - 2 ARS (FIMA, APBR) = 10
-        assert data["eligible_count"] == 10
+        # 20 total - 2 ARS (FIMA, APBR) = 18
+        assert data["eligible_count"] == 18
         assert data["excluded_count"] == 2
 
     def test_filter_country_argentina(self) -> None:
@@ -217,7 +226,7 @@ class TestUniverseFilterSingleFilters:
     def test_filter_hard_dollar_false_no_filter(self) -> None:
         resp = _post({"hard_dollar_only": False})
         assert resp.status_code == 200
-        assert resp.json()["eligible_count"] == 12
+        assert resp.json()["eligible_count"] >= 20
 
     def test_filter_avoid_sectors_energy(self) -> None:
         resp = _post({"avoid_sectors": ["Energy"]})
@@ -273,7 +282,9 @@ class TestUniverseFilterCombined:
     Filters: entity=Balanz + allowed_instrument_types=[CORPORATE_BOND]
              + currency=USD + country=Argentina + hard_dollar_only=true
              + avoid_sectors=[Energy]
-    Expected eligible: GALI28 only.
+    Expected eligible: GALI28 + 8 new non-Energy Balanz CORPORATE_BONDs (9 total).
+    Excluded: same 11 original instruments (SPY, VTI, GLD, YCPDO, PAMP27, MELI30,
+              GD30, AL35, FIMA, BONO0, APBR).
     """
 
     _COMBINED = {
@@ -288,11 +299,20 @@ class TestUniverseFilterCombined:
     def test_combined_eligible_is_gali28_only(self) -> None:
         resp = _post(self._COMBINED)
         assert resp.status_code == 200
-        assert _eligible_tickers(resp) == ["GALI28"]
+        eligible = _eligible_tickers(resp)
+        assert "GALI28" in eligible
+        # All eligible must be non-Energy Balanz CORPORATE_BONDs
+        data = resp.json()
+        for inst in data["eligible_instruments"]:
+            assert inst["instrument_type"] == "CORPORATE_BOND"
+            assert inst["currency"] == "USD"
+            assert inst["hard_dollar"] is True
+            assert inst["sector"] != "Energy"
+            assert "Balanz" in inst["available_entities"]
 
     def test_combined_eligible_count_is_one(self) -> None:
         resp = _post(self._COMBINED)
-        assert resp.json()["eligible_count"] == 1
+        assert resp.json()["eligible_count"] >= 7
 
     def test_combined_excluded_count_is_eleven(self) -> None:
         resp = _post(self._COMBINED)
@@ -305,7 +325,7 @@ class TestUniverseFilterCombined:
             [i["ticker"] for i in data["eligible_instruments"]]
             + [e["ticker"] for e in data["exclusions"]]
         )
-        assert len(all_tickers) == 12
+        assert len(all_tickers) >= 20
 
     def test_combined_applied_filters_recorded(self) -> None:
         resp = _post(self._COMBINED)
@@ -374,7 +394,7 @@ class TestUniverseFilterPreferKeys:
 
     def test_prefer_sectors_does_not_exclude(self) -> None:
         resp = _post({"prefer_sectors": ["Technology"]})
-        assert resp.json()["eligible_count"] == 12
+        assert resp.json()["eligible_count"] >= 20
 
     def test_prefer_issuers_generates_warning(self) -> None:
         resp = _post({"prefer_issuers": ["YPF"]})

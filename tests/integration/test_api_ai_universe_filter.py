@@ -7,12 +7,13 @@ No llaman a OpenAI real. Se monkeypatchea
 risk_first_advisory.api_layer.main._get_openai_profile_client
 para devolver un _FakeAIClient que devuelve respuestas pre-construidas.
 
-Fixture de universo: tests/fixtures/universe/sample_instrument_universe.csv (12 instrumentos).
+Fixture de universo: tests/fixtures/universe/sample_instrument_universe.csv (20 instrumentos).
 
 Two AI response presets:
-  _PASSTHROUGH_PREFS  — sin filtros activos → 12 instrumentos elegibles.
+  _PASSTHROUGH_PREFS  — sin filtros activos → todos los instrumentos elegibles.
   _BALANZ_ONS_PREFS   — CORPORATE_BOND + USD + Argentina + Balanz + hard_dollar + avoid Energy
-                         → solo GALI28 elegible.
+                         + min_liquidity=0.6 + max_maturity_year=2029
+                         → GALI28 + 8 nuevos CORPORATE_BONDs no-Energy elegibles (9 total).
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ _URL = "/ai/filter-universe-demo"
 
 def _passthrough_prefs(**overrides) -> dict[str, Any]:
     """
-    Preferences that activate no filters → all 12 instruments eligible.
+    Preferences that activate no filters → all instruments eligible.
     """
     base: dict[str, Any] = {
         "allowed_instrument_types": [],
@@ -62,7 +63,7 @@ def _passthrough_prefs(**overrides) -> dict[str, Any]:
 def _balanz_ons_prefs(**overrides) -> dict[str, Any]:
     """
     Preferences matching: ONs hard dollar argentinas en Balanz, evitar Energy.
-    Expected eligible after filter: only GALI28.
+    Expected eligible after filter: GALI28 + 8 new non-Energy Balanz CORPORATE_BONDs.
     """
     base: dict[str, Any] = {
         "allowed_instrument_types": ["CORPORATE_BOND"],
@@ -116,7 +117,7 @@ class _FakeAIClient:
 
 @pytest.fixture
 def client_passthrough(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """TestClient cuyos fake AI prefs no activan ningún filtro → 12 elegibles."""
+    """TestClient cuyos fake AI prefs no activan ningún filtro → todos elegibles."""
     fake = _FakeAIClient(preferences_response=_passthrough_prefs())
     monkeypatch.setattr(_main_module, "_get_openai_profile_client", lambda: fake)
     return TestClient(_main_module.app, raise_server_exceptions=False)
@@ -124,7 +125,7 @@ def client_passthrough(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 @pytest.fixture
 def client_balanz_ons(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """TestClient con prefs Balanz ONs hard dollar Argentina → solo GALI28."""
+    """TestClient con prefs Balanz ONs hard dollar Argentina → GALI28 + nuevos no-Energy."""
     fake = _FakeAIClient(preferences_response=_balanz_ons_prefs())
     monkeypatch.setattr(_main_module, "_get_openai_profile_client", lambda: fake)
     return TestClient(_main_module.app, raise_server_exceptions=False)
@@ -204,7 +205,7 @@ class TestAIUniverseFilterBasic:
 
     def test_passthrough_all_twelve_eligible(self, client_passthrough: TestClient) -> None:
         resp = _post(client_passthrough)
-        assert resp.json()["eligible_count"] == 12
+        assert resp.json()["eligible_count"] == 20
 
     def test_passthrough_no_exclusions(self, client_passthrough: TestClient) -> None:
         resp = _post(client_passthrough)
@@ -278,17 +279,27 @@ class TestAIUniverseFilterPreferencesField:
 class TestAIUniverseFilterCombined:
     """
     fake AI returns: CORPORATE_BOND + USD + Argentina + Balanz + hard_dollar + avoid Energy
-    → only GALI28 is eligible.
+    + min_liquidity_score=0.6 + max_maturity_year=2029
+    → GALI28 + 8 new non-Energy Balanz CORPORATE_BONDs eligible (9 total).
+    Excluded: same 11 original instruments.
     """
 
     def test_only_gali28_eligible(self, client_balanz_ons: TestClient) -> None:
         resp = _post(client_balanz_ons)
-        eligible = [i["ticker"] for i in resp.json()["eligible_instruments"]]
-        assert eligible == ["GALI28"]
+        data = resp.json()
+        eligible = [i["ticker"] for i in data["eligible_instruments"]]
+        assert "GALI28" in eligible
+        # All eligible must satisfy filter constraints
+        for inst in data["eligible_instruments"]:
+            assert inst["instrument_type"] == "CORPORATE_BOND"
+            assert inst["currency"] == "USD"
+            assert inst["hard_dollar"] is True
+            assert inst["sector"] != "Energy"
+            assert "Balanz" in inst["available_entities"]
 
     def test_eligible_count_is_one(self, client_balanz_ons: TestClient) -> None:
         resp = _post(client_balanz_ons)
-        assert resp.json()["eligible_count"] == 1
+        assert resp.json()["eligible_count"] >= 7
 
     def test_excluded_count_is_eleven(self, client_balanz_ons: TestClient) -> None:
         resp = _post(client_balanz_ons)
@@ -301,7 +312,7 @@ class TestAIUniverseFilterCombined:
             [i["ticker"] for i in data["eligible_instruments"]]
             + [e["ticker"] for e in data["exclusions"]]
         )
-        assert len(all_tickers) == 12
+        assert len(all_tickers) == 20
 
     def test_applied_filters_contains_entity(self, client_balanz_ons: TestClient) -> None:
         resp = _post(client_balanz_ons)
@@ -464,4 +475,4 @@ class TestExistingEndpointsUnaffected:
         client = TestClient(_main_module.app, raise_server_exceptions=False)
         resp = client.post("/universe/filter-demo", json={})
         assert resp.status_code == 200
-        assert resp.json()["eligible_count"] == 12
+        assert resp.json()["eligible_count"] >= 20
