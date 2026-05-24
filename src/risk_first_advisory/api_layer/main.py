@@ -20,6 +20,7 @@ Constantes monkeypatcheables en tests:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -82,12 +83,17 @@ from risk_first_advisory.persistence_layer.repositories import (
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
+    SQLiteAIFilteredPortfolioRepository,
     SQLiteAuditRepository,
     SQLitePersistenceStore,
     SQLiteReportRepository,
     SQLiteWorkflowRunRepository,
 )
-from risk_first_advisory.reporting_layer import MarkdownReportGenerator
+from risk_first_advisory.reporting_layer import (
+    AIFilteredPortfolioReportGenerator,
+    MarkdownReport,
+    MarkdownReportGenerator,
+)
 from risk_first_advisory.rules_layer.esg_compliance import ESGMetadataStore
 from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityMatrix,
@@ -397,6 +403,57 @@ def _persist_workflow(
         ),
         str(report_path),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper de persistencia para /ai/filtered-portfolio-demo
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_ai_filtered_portfolio(
+    payload: dict,
+    report_md: str,
+    client_id: str,
+    profile: str,
+    status: str,
+    candidate_count: int,
+    db_path: Path,
+) -> tuple[str, str]:
+    """
+    Persiste en SQLite:
+        1. El payload completo de la respuesta como record "ai_filtered_portfolio".
+        2. El report_markdown como MarkdownReport ("markdown_report" record).
+
+    Devuelve (record_id, report_record_id) para que el endpoint los exponga
+    en la response.
+
+    No escribe el reporte a disco; solo lo persiste en el record store SQLite.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLitePersistenceStore(db_path) as store:
+        store.init_schema()
+        ai_repo = SQLiteAIFilteredPortfolioRepository(store)
+        r_repo = SQLiteReportRepository(store)
+
+        ai_record = ai_repo.save_ai_filtered_portfolio(
+            payload=payload,
+            client_id=client_id,
+            profile=profile,
+            status=status,
+            candidate_count=candidate_count,
+        )
+
+        report = MarkdownReport(
+            title=f"AI Filtered Portfolio Report — {client_id}",
+            content=report_md,
+            client_id=client_id,
+            generated_at_utc=datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+        )
+        report_record = r_repo.save_report(report)
+
+    return ai_record.record_id, report_record.record_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1328,14 +1385,16 @@ def ai_filtered_portfolio_demo(
         for s in all_snapshots
     ]
 
-    # ── Helper: armar respuesta parcial (para casos bloqueados) ───────────
+    # ── Helper: armar respuesta + generar reporte + persistir ─────────────
+    # Todas las rutas (completed, blocked_*, infeasible) pasan por aquí, así
+    # que cada respuesta del endpoint incluye report_markdown + record_ids.
     def _make_response(
         status: str,
         message: str,
         candidates: list[LivePortfolioCandidateResponse] | None = None,
     ) -> AIFilteredPortfolioResponse:
         cands = candidates or []
-        return AIFilteredPortfolioResponse(
+        response = AIFilteredPortfolioResponse(
             client_id=req.client_id,
             profile=req.profile,
             preferences=preferences_resp,
@@ -1352,6 +1411,44 @@ def ai_filtered_portfolio_demo(
             candidates=cands,
             candidate_count=len(cands),
         )
+
+        # ── Generar reporte Markdown determinístico ────────────────────────
+        try:
+            report_payload = response.model_dump()
+            report_payload["natural_language_preferences"] = (
+                req.natural_language_preferences
+            )
+            report_md = AIFilteredPortfolioReportGenerator().generate(report_payload)
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="AI filtered portfolio report generation failed.",
+            )
+        response.report_markdown = report_md
+
+        # ── Persistir en SQLite (payload + report) ─────────────────────────
+        # Se lee DEFAULT_DB_PATH en tiempo de llamada para que monkeypatch
+        # en tests pueda redirigir a tmp_path.
+        try:
+            persist_payload = response.model_dump()
+            record_id, report_record_id = _persist_ai_filtered_portfolio(
+                payload=persist_payload,
+                report_md=report_md,
+                client_id=response.client_id,
+                profile=response.profile,
+                status=response.status,
+                candidate_count=response.candidate_count,
+                db_path=DEFAULT_DB_PATH,
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="AI filtered portfolio persistence failed.",
+            )
+        response.record_id = record_id
+        response.report_record_id = report_record_id
+
+        return response
 
     # ── 9. Bloqueo 1: mínimo absoluto ─────────────────────────────────────
     if len(usable_snapshots) < 3:

@@ -134,14 +134,21 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ## AI Filtered Portfolio — pendientes de diseño (MVP post)
 
-### Persistencia y reporte
+### Persistencia y reporte ✅ CERRADO EN FASE 0
 
-`POST /ai/filtered-portfolio-demo` actualmente no persiste el resultado ni genera reporte Markdown. El flujo completo (preferencias extraídas, instrumentos elegibles, portfolios generados) desaparece al terminar la request.
+`POST /ai/filtered-portfolio-demo` ahora:
+- Devuelve `report_markdown` generado por `AIFilteredPortfolioReportGenerator` (determinístico, 10 secciones).
+- Persiste el payload completo de la respuesta en SQLite como record `ai_filtered_portfolio` (id `ai_filtered_portfolio_NNNNNN`) y expone `record_id` en la response.
+- Persiste el reporte Markdown como `MarkdownReport` (id `report_NNNNNN`) y expone `report_record_id` en la response.
+- Metadata persistida: `client_id`, `profile`, `status`, `candidate_count`, `endpoint`.
+- Esto aplica para los cuatro `status` posibles (completed + tres variantes blocked).
 
-**Pendiente:**
-- Integrar `MarkdownReportGenerator` en el handler del endpoint para generar un reporte del portfolio filtrado.
-- Persistir en SQLite: preferencias estructuradas, instrumentos elegibles, exclusiones, snapshots y portfolios candidatos, bajo un nuevo `record_type` (ej. `filtered_portfolio_run`).
-- Devolver `record_id` en la respuesta del endpoint, igual que `/workflow/run`.
+No se escriben archivos `.md` a disco; sólo se persiste en el record store SQLite.
+
+**Pendiente (post-Fase 0):**
+- Endpoint para que el asesor seleccione la variante a presentar al cliente (DEFENSIVE/BALANCED/GROWTH) con registro en audit trail.
+- Endpoint para firmar/aprobar override de GROWTH con justificación documentada.
+- Endpoint genérico de retrieval para records `ai_filtered_portfolio` (análogo a `GET /workflow/{record_id}`).
 
 ### Universo de instrumentos
 

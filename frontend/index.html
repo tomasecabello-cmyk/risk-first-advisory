@@ -2517,6 +2517,16 @@
             <label>message</label>
             <div class="value" style="color:#166534;">${escapeHTML(data.message ?? "")}</div>
           </div>` : ""}
+          ${data.record_id ? `
+          <div class="summary-item">
+            <label>record_id</label>
+            <div class="value mono" style="font-size:11px;">${escapeHTML(data.record_id)}</div>
+          </div>` : ""}
+          ${data.report_record_id ? `
+          <div class="summary-item">
+            <label>report_record_id</label>
+            <div class="value mono" style="font-size:11px;">${escapeHTML(data.report_record_id)}</div>
+          </div>` : ""}
         </div>
       </div>
     `;
@@ -2740,7 +2750,33 @@
       </div>
     `;
 
-    // ── 8. Full JSON ─────────────────────────────────────────────
+    // ── 8. Markdown Report ───────────────────────────────────────
+    // Auditable Markdown report generated server-side by
+    // AIFilteredPortfolioReportGenerator. Shown verbatim with a
+    // "Copy Markdown Report" button.
+    const reportMd = typeof data.report_markdown === "string" ? data.report_markdown : "";
+    const reportHtml = reportMd ? `
+      <div style="padding:16px 20px;border-bottom:1px solid #dde2ea;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+          <div class="ai-section-title" style="margin:0;">Markdown Report (for advisor review)</div>
+          <button class="btn-secondary"
+                  type="button"
+                  id="aifp-copy-md-btn"
+                  onclick="copyAIFilteredPortfolioMarkdown()">
+            Copy Markdown Report
+          </button>
+        </div>
+        <div id="aifp-copy-md-msg" style="font-size:12px;margin-bottom:8px;min-height:18px;"></div>
+        <details>
+          <summary style="font-size:12px;">Show Markdown source (${reportMd.length} chars)</summary>
+          <pre id="aifp-md-source"
+               class="json-block"
+               style="white-space:pre-wrap;word-break:break-word;max-height:480px;overflow:auto;">${escapeHTML(reportMd)}</pre>
+        </details>
+      </div>
+    ` : "";
+
+    // ── 9. Full JSON ─────────────────────────────────────────────
     const jsonHtml = `
       <details>
         <summary>Full JSON response</summary>
@@ -2748,7 +2784,58 @@
       </details>
     `;
 
-    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${prefsHtml}${filtersHtml}${eligibleHtml}${snapshotsHtml}${candidatesHtml}${exclusionsHtml}${jsonHtml}</div>`;
+    return `<div class="result-box" style="margin-top:20px;">${summaryHtml}${prefsHtml}${filtersHtml}${eligibleHtml}${snapshotsHtml}${candidatesHtml}${exclusionsHtml}${reportHtml}${jsonHtml}</div>`;
+  }
+
+  // ── Copy Markdown Report button handler ─────────────────────
+  function copyAIFilteredPortfolioMarkdown() {
+    const pre = el("aifp-md-source");
+    const msg = el("aifp-copy-md-msg");
+    if (!pre) {
+      if (msg) {
+        msg.style.color = "#991b1b";
+        msg.textContent = "No Markdown report to copy.";
+      }
+      return;
+    }
+    const text = pre.textContent || "";
+    if (!text.trim()) {
+      if (msg) {
+        msg.style.color = "#991b1b";
+        msg.textContent = "Markdown report is empty.";
+      }
+      return;
+    }
+    const onSuccess = () => {
+      if (msg) {
+        msg.style.color = "#166534";
+        msg.textContent = "✓ Markdown report copied to clipboard.";
+      }
+    };
+    const onFailure = (err) => {
+      if (msg) {
+        msg.style.color = "#991b1b";
+        msg.textContent = "Copy failed: " + (err && err.message ? err.message : String(err));
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(onFailure);
+    } else {
+      // Fallback for older browsers / non-secure contexts.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        if (ok) onSuccess(); else onFailure(new Error("execCommand returned false"));
+      } catch (err) {
+        onFailure(err);
+      }
+    }
   }
 
   // ── 7. portfolio candidate renderer ─────────────────────────

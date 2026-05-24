@@ -416,3 +416,11 @@ class AIFilteredPortfolioResponse(BaseModel):
     message:              str
     candidates:           list[LivePortfolioCandidateResponse]
     candidate_count:      int
+    # ── Phase-0 MVP additions ─────────────────────────────────────────────────
+    # Auditable Markdown report for advisor review, generated deterministically
+    # by AIFilteredPortfolioReportGenerator from this response payload.
+    report_markdown:      str         = ""
+    # SQLite persistence IDs (None only if persistence layer is bypassed in
+    # tests that monkeypatch the persistence helper).
+    record_id:            str | None  = None
+    report_record_id:     str | None  = None

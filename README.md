@@ -8,9 +8,10 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **1841 tests, todos verdes** (unit + integration)
+- **1994 tests, todos verdes** (unit + integration)
 - MVP local visual completo — frontend estático en `frontend/index.html`
 - Backend FastAPI con 14 endpoints expuestos
+- **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -153,9 +154,22 @@ Campos opcionales: `kyc_context`, `previous_profile_analysis`.
   "snapshots": ["..."],
   "snapshot_count": 9,
   "candidates": ["..."],
-  "candidate_count": 2
+  "candidate_count": 2,
+  "report_markdown": "# Risk-First Advisory — AI Filtered Portfolio Report\n\n## 1. Executive Summary ...",
+  "record_id": "ai_filtered_portfolio_000001",
+  "report_record_id": "report_000001"
 }
 ```
+
+### Reporte Markdown auditable
+
+Cada respuesta de `/ai/filtered-portfolio-demo` — **bajo cualquier `status`** (`completed`, `blocked_insufficient_universe`, `blocked_insufficient_diversification_capacity`, `infeasible`) — incluye:
+
+- **`report_markdown`** — string Markdown determinístico con 10 secciones: Executive Summary, Natural Language Preferences, AI Extracted Preferences, Applied Universe Filters, Eligible Instruments, Exclusions, Portfolio-Ready Snapshots, Candidate Portfolios, Advisor Override y Limitations & Disclaimers. Generado por `AIFilteredPortfolioReportGenerator`. Mismo payload → mismo reporte.
+- **`record_id`** — identificador del registro `ai_filtered_portfolio_NNNNNN` en SQLite con el payload completo de la respuesta y metadata (`client_id`, `profile`, `status`, `candidate_count`, `endpoint`).
+- **`report_record_id`** — identificador del `MarkdownReport` (`report_NNNNNN`) en SQLite con `title`, `content` (el mismo `report_markdown`), `client_id` y `generated_at_utc`.
+
+El reporte Markdown es **para revisión del asesor**. No es un documento comercial para el cliente. No hay PDF ni firma digital en esta fase. El reporte vive sólo en el record store SQLite — no se escribe `.md` a disco. El frontend ofrece un botón **"Copy Markdown Report"** para copiar el reporte al portapapeles.
 
 ### Status posibles
 
@@ -218,7 +232,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~10 segundos, 1841 tests.
+Suite completa (unit + integration): ~40 segundos, 1994 tests.
 
 ```powershell
 # Solo tests de API
@@ -397,7 +411,7 @@ Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena 
 | `reports/demo_advisory_report.md` | `scripts/run_demo.py` | Reporte Markdown del workflow demo |
 | `reports/demo_api_report.md` | `POST /demo/run` | Reporte Markdown vía API |
 | `reports/workflow_<client_id>.md` | `POST /workflow/run` | Reporte Markdown por cliente |
-| `data/demo_api.db` | `POST /demo/run` o `POST /workflow/run` | SQLite con workflow, audit y report records |
+| `data/demo_api.db` | `POST /demo/run`, `POST /workflow/run` o `POST /ai/filtered-portfolio-demo` | SQLite con workflow, audit, report y ai_filtered_portfolio records |
 
 Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefijo y se resetean si el servidor se reinicia sin persistencia previa.
 
@@ -420,9 +434,10 @@ Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefi
 
 | Área | Descripción | Prioridad |
 |---|---|---|
-| Reportes AI filtered portfolio | Integrar `MarkdownReportGenerator` en el flujo de `POST /ai/filtered-portfolio-demo` para generar y persistir reporte del portfolio filtrado | Alta |
-| Persistencia del flujo filtrado | Guardar en SQLite el resultado completo del AI Filtered Portfolio (preferencias, instrumentos elegibles, portfolios) para trazabilidad y audit | Alta |
+| ~~Reportes AI filtered portfolio~~ | ✅ Cerrado en Fase 0. `POST /ai/filtered-portfolio-demo` devuelve `report_markdown` generado por `AIFilteredPortfolioReportGenerator`. | — |
+| ~~Persistencia del flujo filtrado~~ | ✅ Cerrado en Fase 0. La respuesta se persiste en SQLite como record `ai_filtered_portfolio` (con `record_id`) y el reporte como `markdown_report` (con `report_record_id`). | — |
 | Firma de override del asesor | Endpoint/UI donde el asesor confirme explícitamente la aceptación de GROWTH fuera del budget, con registro en audit trail (ver DD-010) | Alta |
+| Selección de variante por asesor | Endpoint para que el asesor seleccione la variante (DEFENSIVE/BALANCED/GROWTH) a presentar al cliente, con registro en audit trail | Alta |
 | Expandir universo de instrumentos | Reemplazar el CSV de 20 instrumentos de muestra por un universo real de ONs, ETFs y bonos soberanos con datos actualizados | Media |
 | Provider de datos externo | Conectar `InstrumentMarketDataAdapter` a una fuente de datos de producción (Bloomberg, Refinitiv, proveedor local) en lugar de derivar retornos desde ytm/coupon del CSV | Media |
 | Autenticación y seguridad | Auth JWT o API key para todos los endpoints; control de acceso por rol (asesor vs. cliente) antes de cualquier exposición en red | Alta (pre-producción) |

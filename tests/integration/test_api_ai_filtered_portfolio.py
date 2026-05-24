@@ -26,6 +26,7 @@ AI response presets used in this file:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,6 +35,21 @@ from fastapi.testclient import TestClient
 import risk_first_advisory.api_layer.main as _main_module
 
 _URL = "/ai/filtered-portfolio-demo"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Autouse fixture: redirige la persistencia SQLite a tmp_path en cada test
+# para no contaminar data/demo_api.db (la DB de desarrollo real).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _redirect_db_to_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    db_path = tmp_path / "ai_filtered_portfolio.db"
+    monkeypatch.setattr(_main_module, "DEFAULT_DB_PATH", db_path)
+    return db_path
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AI response presets
@@ -591,3 +607,263 @@ class TestExistingEndpointsUnaffected:
         )
         assert resp.status_code == 200
         assert resp.json()["eligible_count"] == 20
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase-0 MVP additions: report_markdown
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIFilteredPortfolioReportMarkdown:
+    """The endpoint must return a deterministic Markdown report under every
+    final status (completed and the three blocked variants)."""
+
+    def test_completed_response_includes_report_markdown(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        assert "report_markdown" in data
+        assert isinstance(data["report_markdown"], str)
+        assert len(data["report_markdown"]) > 0
+
+    def test_completed_report_contains_title(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        assert "Risk-First Advisory" in report
+        assert "AI Filtered Portfolio Report" in report
+
+    def test_completed_report_contains_client_id(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        assert "CLI-TEST-PORT-001" in report
+
+    def test_completed_report_contains_natural_language_preferences(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        # The natural-language preferences text should appear under section 2.
+        assert "Balanz" in report or "hard dollar" in report.lower()
+
+    def test_completed_report_contains_balanced_variant(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        # BALANCED appears either as variant name or as section heading.
+        assert "BALANCED" in report
+
+    def test_completed_report_contains_candidate_portfolios_section(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        assert "Candidate Portfolios" in report
+
+    def test_completed_report_contains_eligible_instrument_ticker(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        report = data["report_markdown"]
+        tickers = {i["ticker"] for i in data["eligible_instruments"]}
+        # At least one eligible ticker should appear in the report's instrument table.
+        assert any(t in report for t in tickers)
+
+    def test_completed_report_contains_disclaimers(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        report = resp.json()["report_markdown"]
+        assert "Limitations and Disclaimers" in report
+
+    def test_blocked_insufficient_universe_includes_report_markdown(
+        self, client_no_usable: TestClient
+    ) -> None:
+        resp = _post(client_no_usable)
+        data = resp.json()
+        assert isinstance(data["report_markdown"], str)
+        assert len(data["report_markdown"]) > 0
+
+    def test_blocked_insufficient_universe_report_mentions_status(
+        self, client_no_usable: TestClient
+    ) -> None:
+        resp = _post(client_no_usable)
+        report = resp.json()["report_markdown"]
+        assert "blocked_insufficient_universe" in report
+
+    def test_blocked_insufficient_universe_report_has_no_candidates_section_content(
+        self, client_no_usable: TestClient
+    ) -> None:
+        resp = _post(client_no_usable)
+        report = resp.json()["report_markdown"]
+        # Section 8 heading appears, but with a "no candidate portfolios" message.
+        assert "Candidate Portfolios" in report
+        assert "No candidate portfolios" in report
+
+    def test_blocked_insufficient_diversification_includes_report_markdown(
+        self, client_five_snapshots: TestClient
+    ) -> None:
+        resp = _post(client_five_snapshots, body=_CONSERVADOR_PAYLOAD)
+        data = resp.json()
+        assert isinstance(data["report_markdown"], str)
+        assert len(data["report_markdown"]) > 0
+        assert "blocked_insufficient_diversification_capacity" in data["report_markdown"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase-0 MVP additions: persistence (record_id, report_record_id)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAIFilteredPortfolioPersistence:
+    def test_completed_response_returns_record_id(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        assert "record_id" in data
+        assert isinstance(data["record_id"], str)
+        assert data["record_id"].startswith("ai_filtered_portfolio_")
+
+    def test_completed_response_returns_report_record_id(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        assert "report_record_id" in data
+        assert isinstance(data["report_record_id"], str)
+        assert data["report_record_id"].startswith("report_")
+
+    def test_record_ids_are_json_serializable(
+        self, client_balanz_ons: TestClient
+    ) -> None:
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        # Round-trip the response and confirm the IDs survive.
+        serialised = json.dumps(data)
+        reloaded = json.loads(serialised)
+        assert reloaded["record_id"] == data["record_id"]
+        assert reloaded["report_record_id"] == data["report_record_id"]
+
+    def test_blocked_insufficient_universe_persists(
+        self, client_no_usable: TestClient
+    ) -> None:
+        resp = _post(client_no_usable)
+        data = resp.json()
+        assert data["record_id"] is not None
+        assert data["record_id"].startswith("ai_filtered_portfolio_")
+        assert data["report_record_id"] is not None
+        assert data["report_record_id"].startswith("report_")
+
+    def test_blocked_insufficient_diversification_persists(
+        self, client_five_snapshots: TestClient
+    ) -> None:
+        resp = _post(client_five_snapshots, body=_CONSERVADOR_PAYLOAD)
+        data = resp.json()
+        assert data["record_id"] is not None
+        assert data["report_record_id"] is not None
+
+    def test_record_can_be_retrieved_by_id(
+        self, client_balanz_ons: TestClient, _redirect_db_to_tmp: Path
+    ) -> None:
+        """The persisted AI Filtered Portfolio record must round-trip via the
+        SQLite store using the returned record_id."""
+        from risk_first_advisory.persistence_layer.sqlite_repository import (
+            SQLiteAIFilteredPortfolioRepository,
+            SQLitePersistenceStore,
+        )
+
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        record_id = data["record_id"]
+
+        with SQLitePersistenceStore(_redirect_db_to_tmp) as store:
+            store.init_schema()
+            ai_repo = SQLiteAIFilteredPortfolioRepository(store)
+            record = ai_repo.get_ai_filtered_portfolio(record_id)
+
+        assert record.record_id == record_id
+        assert record.record_type == "ai_filtered_portfolio"
+        assert record.metadata["client_id"] == "CLI-TEST-PORT-001"
+        assert record.metadata["profile"] == "moderado"
+        assert record.metadata["status"] == "completed"
+        assert record.metadata["endpoint"] == "/ai/filtered-portfolio-demo"
+        assert record.metadata["candidate_count"] >= 1
+        # Payload includes the actual response data.
+        assert record.payload["client_id"] == "CLI-TEST-PORT-001"
+        assert "candidates" in record.payload
+        assert "report_markdown" in record.payload
+
+    def test_report_record_can_be_retrieved_by_id(
+        self, client_balanz_ons: TestClient, _redirect_db_to_tmp: Path
+    ) -> None:
+        """The persisted MarkdownReport record must round-trip via the
+        SQLite store using the returned report_record_id."""
+        from risk_first_advisory.persistence_layer.sqlite_repository import (
+            SQLitePersistenceStore,
+            SQLiteReportRepository,
+        )
+
+        resp = _post(client_balanz_ons)
+        data = resp.json()
+        report_record_id = data["report_record_id"]
+
+        with SQLitePersistenceStore(_redirect_db_to_tmp) as store:
+            store.init_schema()
+            r_repo = SQLiteReportRepository(store)
+            record = r_repo.get_report(report_record_id)
+
+        assert record.record_id == report_record_id
+        assert record.record_type == "markdown_report"
+        assert "CLI-TEST-PORT-001" in record.payload["content"]
+        assert record.metadata["client_id"] == "CLI-TEST-PORT-001"
+
+    def test_persistence_failure_returns_500(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the persistence helper raises, the endpoint must respond 500
+        with a clear message — not propagate the underlying exception."""
+        fake = _FakeAIClient(preferences_response=_balanz_ons_prefs())
+        monkeypatch.setattr(_main_module, "_get_openai_profile_client", lambda: fake)
+
+        def _persistence_blows_up(**_kwargs):
+            raise RuntimeError("simulated SQLite failure")
+
+        monkeypatch.setattr(
+            _main_module,
+            "_persist_ai_filtered_portfolio",
+            _persistence_blows_up,
+        )
+
+        client = TestClient(_main_module.app, raise_server_exceptions=False)
+        resp = _post(client)
+        assert resp.status_code == 500
+        assert "persistence" in resp.json()["detail"].lower()
+
+    def test_report_generation_failure_returns_500(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the report generator raises, the endpoint must respond 500."""
+        fake = _FakeAIClient(preferences_response=_balanz_ons_prefs())
+        monkeypatch.setattr(_main_module, "_get_openai_profile_client", lambda: fake)
+
+        class _ExplodingReportGenerator:
+            def generate(self, _payload: dict) -> str:
+                raise RuntimeError("simulated report generator failure")
+
+        monkeypatch.setattr(
+            _main_module,
+            "AIFilteredPortfolioReportGenerator",
+            _ExplodingReportGenerator,
+        )
+
+        client = TestClient(_main_module.app, raise_server_exceptions=False)
+        resp = _post(client)
+        assert resp.status_code == 500
+        assert "report generation" in resp.json()["detail"].lower()

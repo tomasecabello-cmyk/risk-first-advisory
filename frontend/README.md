@@ -276,7 +276,8 @@ Llama a `POST /ai/filtered-portfolio-demo` — pipeline completo de cuatro pasos
 
 **Notas importantes:**
 - **Requiere OPENAI_API_KEY.** Sin la key, HTTP 400 con instrucciones de inicio.
-- **No persiste resultados** en SQLite ni genera reporte Markdown.
+- **Persiste resultados en SQLite** (Fase 0). Cada respuesta — bajo cualquier `status` — guarda el payload completo como record `ai_filtered_portfolio` (`record_id`) y el reporte como `markdown_report` (`report_record_id`). El frontend muestra ambos IDs en el bloque "Result". **No se escriben archivos `.md` a disco.**
+- **Devuelve `report_markdown`** — string Markdown determinístico (10 secciones) generado por `AIFilteredPortfolioReportGenerator`. El frontend lo muestra en una sección colapsable con un botón **"Copy Markdown Report"** que copia el reporte al portapapeles para que el asesor lo pegue donde necesite revisarlo.
 - **No aprueba** el perfil final — solo el asesor puede hacerlo.
 - Los retornos esperados y volatilidades se calculan desde los campos `ytm` y `coupon_rate` del CSV (instrumentos de renta fija). ETFs, CEDEARs y acciones no tienen snapshots usables en esta demo.
 - **Universo fijo:** `tests/fixtures/universe/sample_instrument_universe.csv` — 20 instrumentos de muestra.

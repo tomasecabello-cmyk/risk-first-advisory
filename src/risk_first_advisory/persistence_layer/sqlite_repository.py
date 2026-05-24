@@ -331,6 +331,65 @@ class SQLiteAuditRepository(AuditRepository):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class SQLiteAIFilteredPortfolioRepository:
+    """
+    Persiste el resultado completo de POST /ai/filtered-portfolio-demo.
+
+    record_type = "ai_filtered_portfolio"
+    id prefix   = "ai_filtered_portfolio_"
+
+    Metadata mínima persistida (para filtrar sin deserializar el payload):
+        - client_id
+        - profile
+        - status
+        - candidate_count
+        - endpoint
+        - source_type
+
+    Diseño: no usa ABC todavía porque no hay un patrón in-memory equivalente.
+    Si en el futuro se necesita, mover el contrato a repositories.py.
+    """
+
+    def __init__(self, store: SQLitePersistenceStore) -> None:
+        self._store = store
+
+    def save_ai_filtered_portfolio(
+        self,
+        payload: dict[str, Any],
+        client_id: str,
+        profile: str,
+        status: str,
+        candidate_count: int,
+    ) -> StoredRecord:
+        record_id = self._store._next_id("ai_filtered_portfolio_")
+        return self._store._insert_record(
+            record_id=record_id,
+            record_type="ai_filtered_portfolio",
+            client_id=client_id,
+            created_at_utc=_now_utc(),
+            payload=payload,
+            metadata={
+                "client_id": client_id,
+                "profile": profile,
+                "status": status,
+                "candidate_count": candidate_count,
+                "endpoint": "/ai/filtered-portfolio-demo",
+                "source_type": "ai_filtered_portfolio",
+            },
+        )
+
+    def get_ai_filtered_portfolio(self, record_id: str) -> StoredRecord:
+        return self._store._get_record(
+            record_id,
+            f"AI Filtered Portfolio no encontrado: {record_id!r}",
+        )
+
+    def list_ai_filtered_portfolios(
+        self, client_id: str | None = None
+    ) -> list[StoredRecord]:
+        return self._store._list_records("ai_filtered_portfolio", client_id)
+
+
 class SQLiteReportRepository(ReportRepository):
     def __init__(self, store: SQLitePersistenceStore) -> None:
         self._store = store
