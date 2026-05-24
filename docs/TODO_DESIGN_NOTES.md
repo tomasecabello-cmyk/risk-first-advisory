@@ -160,14 +160,16 @@ Expone dos dependencias FastAPI:
 
 ### Próximos pasos (post-Fase 1 inicial)
 
-1. **Proteger endpoints de aprobación uno por uno** con `Depends(get_current_advisor_required)`:
+1. ~~**Primer endpoint protegido del asesor**~~ ✅ `POST /advisor/profile-approval` agregado: registra `approve`/`modify`/`reject` con rationale obligatorio. Persiste como `advisor_profile_approval_NNNNNN`. Sin RBAC todavía (cualquier identidad demo puede registrar).
+2. **Proteger endpoints adicionales** con `Depends(get_current_advisor_required)`:
    - Firma de advisor override de GROWTH.
    - Selección de variante a presentar al cliente.
    - Cualquier endpoint que registre eventos en audit trail debe atribuirse a un `advisor_id` real.
-2. **Reemplazar el mapa hard-coded** por un identity provider externo (OIDC, SAML, JWT firmado por IdP).
-3. **Persistir `advisor_id` en audit trail** en cada acción de aprobación (no solo el `advisor_id` declarado en `WorkflowRunRequest`).
-4. **Multi-tenant**: poblar `firm_id` desde el IdP y propagar como filtro implícito en todas las consultas al record store.
-5. **Roles**: actualmente sólo `advisor` y `compliance`; ampliar (`reviewer`, `admin`, etc.) cuando los flujos de aprobación lo justifiquen, y agregar checks por rol en cada endpoint que lo necesite.
+3. **RBAC por rol** — restringir `POST /advisor/profile-approval` a `roles=["advisor"]`; permitir a `compliance` solo retrieval/listado. Endpoint pending: `GET /advisor/profile-approval/{record_id}`.
+4. **Reemplazar el mapa hard-coded** por un identity provider externo (OIDC, SAML, JWT firmado por IdP).
+5. **Persistir `advisor_id` en audit trail** en cada acción de aprobación (no solo el `advisor_id` declarado en `WorkflowRunRequest`).
+6. **Multi-tenant**: poblar `firm_id` desde el IdP y propagar como filtro implícito en todas las consultas al record store.
+7. **Roles**: actualmente sólo `advisor` y `compliance`; ampliar (`reviewer`, `admin`, etc.) cuando los flujos de aprobación lo justifiquen, y agregar checks por rol en cada endpoint que lo necesite.
 
 ---
 

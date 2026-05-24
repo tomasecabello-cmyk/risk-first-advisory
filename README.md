@@ -8,11 +8,11 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **2024 tests, todos verdes** (unit + integration)
+- **2063 tests, todos verdes** (unit + integration)
 - MVP local visual completo — frontend estático en `frontend/index.html`
-- Backend FastAPI con 15 endpoints expuestos
+- Backend FastAPI con 16 endpoints expuestos
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
-- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`). Sin auth global todavía; los endpoints de aprobación se irán protegiendo uno por uno.
+- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + primer endpoint protegido `POST /advisor/profile-approval` para registrar decisiones del asesor sobre perfiles propuestos. Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -263,6 +263,76 @@ Los siguientes endpoints siguen funcionando **sin token**:
 
 La protección se aplicará endpoint por endpoint en próximas tareas de Fase 1 (advisor override, selección de variante, etc.).
 
+### Advisor profile approval — `POST /advisor/profile-approval`
+
+> ⚠ Development-only. Usa el auth scaffold de arriba. No tiene RBAC: cualquier token demo válido (advisor o compliance) puede registrar una decisión. RBAC más estricto queda para tareas posteriores.
+
+Primer acto formal del asesor: registrar una decisión sobre un perfil propuesto (por la IA o por el sistema).
+
+#### Request body
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `client_id` | str | min_length=1 |
+| `proposed_profile` | str | uno de: `conservador`, `moderado-defensivo`, `moderado`, `moderado-agresivo`, `agresivo` |
+| `decision` | str | uno de: `approve`, `modify`, `reject` |
+| `approved_profile` | str \| null | reglas cruzadas, ver abajo |
+| `rationale` | str | min_length=1, sin solo-whitespace |
+| `source` | str | default `"manual"` |
+| `related_record_id` | str \| null | opcional — para enlazar con `ai_filtered_portfolio_NNNNNN` u otro record |
+
+#### Reglas cruzadas por `decision`
+
+| Decision | `approved_profile` esperado | Comportamiento |
+|---|---|---|
+| `approve` | `None` o igual a `proposed_profile` | Si es `None`, el endpoint completa `approved_profile = proposed_profile` y lo devuelve. Si es distinto al propuesto → 422 (usar `modify` en ese caso). |
+| `modify` | str válido, obligatorio | Permite cambiar el perfil aprobado. Aceptado aún si coincide con `proposed_profile` (el asesor lo declara explícitamente). |
+| `reject` | DEBE ser `None` | Si viene cualquier valor → 422. |
+
+#### Ejemplo — approve
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/advisor/profile-approval `
+  -H "Authorization: Bearer dev-advisor-token" `
+  -H "Content-Type: application/json" `
+  -d '{
+    "client_id": "CLI-001",
+    "proposed_profile": "moderado",
+    "decision": "approve",
+    "rationale": "Perfil consistente con KYC del cliente."
+  }'
+```
+
+Response:
+
+```json
+{
+  "record_id": "advisor_profile_approval_000001",
+  "client_id": "CLI-001",
+  "advisor_id": "ADV-001",
+  "advisor_display_name": "Demo Advisor",
+  "firm_id": null,
+  "proposed_profile": "moderado",
+  "decision": "approve",
+  "approved_profile": "moderado",
+  "rationale": "Perfil consistente con KYC del cliente.",
+  "source": "manual",
+  "related_record_id": null,
+  "created_at_utc": "2026-05-24T12:34:56Z",
+  "status": "recorded"
+}
+```
+
+#### Errores
+
+- `401` — sin token, token inválido, o header malformado.
+- `422` — request body inválido (Pydantic), o regla cruzada violada (ej. `decision=approve` con `approved_profile` distinto al propuesto).
+- `500` — `"Advisor profile approval persistence failed."` si SQLite falla.
+
+#### Persistencia
+
+Cada decisión se persiste como record SQLite con `record_type="advisor_profile_approval"` y metadata mínima (`client_id`, `advisor_id`, `decision`, `proposed_profile`, `approved_profile`, `endpoint`, `source_type`). El payload JSON contiene los mismos campos de la response salvo `record_id`, `created_at_utc` y `status`. Aún no hay endpoint de retrieval genérico (`GET /advisor/profile-approval/{record_id}`) — se agregará en una tarea posterior.
+
 ---
 
 ## Setup (Windows PowerShell)
@@ -288,7 +358,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~50 segundos, 2024 tests.
+Suite completa (unit + integration): ~50 segundos, 2063 tests.
 
 ```powershell
 # Solo tests de API
@@ -386,6 +456,7 @@ python scripts/run_ai_filtered_portfolio_demo.py --preferences "Solo quiero inve
 |---|---|---|
 | `GET` | `/health` | Estado del backend |
 | `GET` | `/auth/me` | **Fase 1 — scaffold de auth (development-only).** Resuelve la identidad del asesor a partir del header `Authorization: Bearer <token>`. Devuelve 401 si falta o es inválido. Tokens demo hard-coded; no usar en producción. Ver sección "Auth scaffold (Fase 1)". |
+| `POST` | `/advisor/profile-approval` | **Fase 1 — primer acto formal del asesor.** Registra la decisión del asesor (`approve` / `modify` / `reject`) sobre un perfil propuesto, con rationale obligatorio. Persiste como record `advisor_profile_approval_NNNNNN`. Requiere Bearer token válido. Sin RBAC todavía (advisor y compliance ambos pueden registrar). |
 | `POST` | `/demo/run` | Ejecuta workflow demo con fixtures |
 | `POST` | `/workflow/run` | **Scripted deterministic demo.** Ejecuta el pipeline (governance → suitability → ESG → DQ → optimizer) con `MockAIClient` y `ScriptedAdvisorInterface`. No llama OpenAI ni involucra a un asesor real. Sirve para validar persistencia, audit y reporte. La respuesta incluye `execution_mode="scripted_demo"` y `is_production_ready=false`. |
 | `GET` | `/workflow/{record_id}` | Recupera un workflow por ID |
@@ -468,7 +539,7 @@ Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena 
 | `reports/demo_advisory_report.md` | `scripts/run_demo.py` | Reporte Markdown del workflow demo |
 | `reports/demo_api_report.md` | `POST /demo/run` | Reporte Markdown vía API |
 | `reports/workflow_<client_id>.md` | `POST /workflow/run` | Reporte Markdown por cliente |
-| `data/demo_api.db` | `POST /demo/run`, `POST /workflow/run` o `POST /ai/filtered-portfolio-demo` | SQLite con workflow, audit, report y ai_filtered_portfolio records |
+| `data/demo_api.db` | `POST /demo/run`, `POST /workflow/run`, `POST /ai/filtered-portfolio-demo` o `POST /advisor/profile-approval` | SQLite con workflow, audit, report, ai_filtered_portfolio y advisor_profile_approval records |
 
 Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefijo y se resetean si el servidor se reinicia sin persistencia previa.
 

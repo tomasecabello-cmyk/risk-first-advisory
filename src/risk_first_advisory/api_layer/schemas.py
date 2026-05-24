@@ -414,6 +414,131 @@ class FilteredSnapshotResponse(BaseModel):
     notes:                   list[str]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# /advisor/profile-approval  (Phase 1 — primer acto formal del asesor)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Perfiles válidos. Se mantiene una copia local (en lugar de importar
+# VALID_PROFILES) para que schemas.py no dependa de la lógica del optimizador.
+# Sincronizado manualmente con rules_layer.risk_budget_builder.PROFILE_BASE_PARAMS.
+_ADVISOR_VALID_PROFILES: frozenset[str] = frozenset({
+    "conservador",
+    "moderado-defensivo",
+    "moderado",
+    "moderado-agresivo",
+    "agresivo",
+})
+
+_ADVISOR_VALID_DECISIONS: frozenset[str] = frozenset({"approve", "modify", "reject"})
+
+
+class AdvisorProfileApprovalRequest(BaseModel):
+    """
+    Decisión del asesor sobre un perfil propuesto (por la IA o por el sistema).
+
+    Reglas cruzadas (validadas en `model_validator`):
+        - approve  : approved_profile None o igual a proposed_profile.
+                     Si viene None, se completa con proposed_profile.
+                     Si viene distinto → 422.
+        - modify   : approved_profile obligatorio y debe ser perfil válido.
+                     Puede coincidir con proposed_profile (no se bloquea).
+        - reject   : approved_profile DEBE ser None.
+    """
+
+    client_id:          str         = Field(min_length=1)
+    proposed_profile:   str         = Field(min_length=1)
+    decision:           str
+    approved_profile:   str | None  = None
+    rationale:          str         = Field(min_length=1)
+    source:             str         = "manual"
+    related_record_id:  str | None  = None
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, v: str) -> str:
+        if v not in _ADVISOR_VALID_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_VALID_DECISIONS)}."
+            )
+        return v
+
+    @field_validator("proposed_profile")
+    @classmethod
+    def _validate_proposed_profile(cls, v: str) -> str:
+        if v not in _ADVISOR_VALID_PROFILES:
+            raise ValueError(
+                f"proposed_profile inválido: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_VALID_PROFILES)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _validate_rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_decision_consistency(self) -> "AdvisorProfileApprovalRequest":
+        if self.decision == "approve":
+            if self.approved_profile is None:
+                # Completar approved_profile con proposed_profile para
+                # mantener invariante: si decision != reject → approved_profile != None.
+                object.__setattr__(self, "approved_profile", self.proposed_profile)
+            elif self.approved_profile != self.proposed_profile:
+                raise ValueError(
+                    "decision='approve' requiere approved_profile igual a "
+                    "proposed_profile (o None para auto-completar). "
+                    f"Recibido proposed={self.proposed_profile!r}, "
+                    f"approved={self.approved_profile!r}. "
+                    "Usar decision='modify' para aprobar un perfil distinto."
+                )
+
+        elif self.decision == "modify":
+            if self.approved_profile is None:
+                raise ValueError(
+                    "decision='modify' requiere approved_profile no nulo."
+                )
+            if self.approved_profile not in _ADVISOR_VALID_PROFILES:
+                raise ValueError(
+                    f"approved_profile inválido: {self.approved_profile!r}. "
+                    f"Opciones: {sorted(_ADVISOR_VALID_PROFILES)}."
+                )
+
+        elif self.decision == "reject":
+            if self.approved_profile is not None:
+                raise ValueError(
+                    "decision='reject' requiere approved_profile=None."
+                )
+
+        return self
+
+
+class AdvisorProfileApprovalResponse(BaseModel):
+    record_id:              str
+    client_id:              str
+    advisor_id:             str
+    advisor_display_name:   str
+    firm_id:                str | None
+    proposed_profile:       str
+    decision:               str
+    approved_profile:       str | None
+    rationale:              str
+    source:                 str
+    related_record_id:      str | None
+    created_at_utc:         str
+    status:                 str = "recorded"
+
+
 class AIFilteredPortfolioResponse(BaseModel):
     client_id:            str
     profile:              str

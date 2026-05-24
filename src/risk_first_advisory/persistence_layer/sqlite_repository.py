@@ -331,6 +331,69 @@ class SQLiteAuditRepository(AuditRepository):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class SQLiteAdvisorProfileApprovalRepository:
+    """
+    Persiste decisiones del asesor sobre perfiles propuestos
+    (`POST /advisor/profile-approval`).
+
+    record_type = "advisor_profile_approval"
+    id prefix   = "advisor_profile_approval_"
+
+    Metadata mínima persistida (para filtrar sin deserializar el payload):
+        - client_id
+        - advisor_id
+        - decision           (approve | modify | reject)
+        - proposed_profile
+        - approved_profile   (puede ser None si decision=reject)
+        - endpoint
+        - source_type
+
+    Diseño: igual que SQLiteAIFilteredPortfolioRepository — no usa ABC porque
+    no existe un patrón in-memory equivalente todavía.
+    """
+
+    def __init__(self, store: SQLitePersistenceStore) -> None:
+        self._store = store
+
+    def save_approval(
+        self,
+        payload: dict[str, Any],
+        client_id: str,
+        advisor_id: str,
+        decision: str,
+        proposed_profile: str,
+        approved_profile: str | None,
+    ) -> StoredRecord:
+        record_id = self._store._next_id("advisor_profile_approval_")
+        return self._store._insert_record(
+            record_id=record_id,
+            record_type="advisor_profile_approval",
+            client_id=client_id,
+            created_at_utc=_now_utc(),
+            payload=payload,
+            metadata={
+                "client_id": client_id,
+                "advisor_id": advisor_id,
+                "decision": decision,
+                "proposed_profile": proposed_profile,
+                "approved_profile": approved_profile,
+                "endpoint": "/advisor/profile-approval",
+                "source_type": "advisor_profile_approval",
+            },
+        )
+
+    def get_approval(self, record_id: str) -> StoredRecord:
+        return self._store._get_record(
+            record_id,
+            f"Advisor profile approval no encontrado: {record_id!r}",
+        )
+
+    def list_approvals(
+        self, client_id: str | None = None
+    ) -> list[StoredRecord]:
+        return self._store._list_records("advisor_profile_approval", client_id)
+
+
 class SQLiteAIFilteredPortfolioRepository:
     """
     Persiste el resultado completo de POST /ai/filtered-portfolio-demo.

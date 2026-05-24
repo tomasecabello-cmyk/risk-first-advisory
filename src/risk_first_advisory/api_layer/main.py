@@ -33,6 +33,8 @@ from risk_first_advisory.api_layer.auth import (
 )
 from risk_first_advisory.api_layer.schemas import (
     AdvisorIdentityResponse,
+    AdvisorProfileApprovalRequest,
+    AdvisorProfileApprovalResponse,
     AIContradictionResponse,
     AIFilteredPortfolioRequest,
     AIFilteredPortfolioResponse,
@@ -88,6 +90,7 @@ from risk_first_advisory.persistence_layer.repositories import (
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
+    SQLiteAdvisorProfileApprovalRepository,
     SQLiteAIFilteredPortfolioRepository,
     SQLiteAuditRepository,
     SQLitePersistenceStore,
@@ -462,6 +465,42 @@ def _persist_ai_filtered_portfolio(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helper de persistencia para /advisor/profile-approval
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_advisor_profile_approval(
+    payload: dict,
+    client_id: str,
+    advisor_id: str,
+    decision: str,
+    proposed_profile: str,
+    approved_profile: str | None,
+    db_path: Path,
+) -> tuple[str, str]:
+    """
+    Persiste la decisión del asesor en SQLite como record
+    "advisor_profile_approval".
+
+    Devuelve (record_id, created_at_utc) para que el endpoint los exponga
+    en la response.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLitePersistenceStore(db_path) as store:
+        store.init_schema()
+        approval_repo = SQLiteAdvisorProfileApprovalRepository(store)
+        record = approval_repo.save_approval(
+            payload=payload,
+            client_id=client_id,
+            advisor_id=advisor_id,
+            decision=decision,
+            proposed_profile=proposed_profile,
+            approved_profile=approved_profile,
+        )
+    return record.record_id, record.created_at_utc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers para /live/portfolio-demo (privados, inyectables en tests)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -734,6 +773,82 @@ def auth_me(
         display_name=advisor.display_name,
         firm_id=advisor.firm_id,
         roles=list(advisor.roles),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /advisor/profile-approval — primer acto formal del asesor (Fase 1).
+#
+# Registra la decisión del asesor sobre un perfil propuesto (por la IA o por
+# el sistema). Auth: get_current_advisor_required → 401 sin token válido.
+#
+# Por ahora cualquier identidad demo (advisor o compliance) puede registrar
+# una decisión. RBAC más estricto (solo rol "advisor") queda para tareas
+# posteriores de Fase 1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/advisor/profile-approval",
+    response_model=AdvisorProfileApprovalResponse,
+)
+def advisor_profile_approval(
+    req: AdvisorProfileApprovalRequest,
+    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorProfileApprovalResponse:
+    # La validación cruzada (decision/approved_profile) se hace en
+    # AdvisorProfileApprovalRequest.model_validator → 422 automático
+    # si las reglas se violan.
+
+    # ── 1. Persistir ──────────────────────────────────────────────────────
+    # Construimos primero el payload "preliminar" (sin record_id ni
+    # created_at_utc) que es exactamente lo que serializaríamos como JSON
+    # del lado del cliente. record_id y created_at_utc los agrega la
+    # capa de persistencia y se completan en la response final.
+    persist_payload: dict = {
+        "client_id":             req.client_id,
+        "advisor_id":            advisor.advisor_id,
+        "advisor_display_name":  advisor.display_name,
+        "firm_id":               advisor.firm_id,
+        "proposed_profile":      req.proposed_profile,
+        "decision":              req.decision,
+        "approved_profile":      req.approved_profile,
+        "rationale":             req.rationale,
+        "source":                req.source,
+        "related_record_id":     req.related_record_id,
+    }
+
+    try:
+        record_id, created_at_utc = _persist_advisor_profile_approval(
+            payload=persist_payload,
+            client_id=req.client_id,
+            advisor_id=advisor.advisor_id,
+            decision=req.decision,
+            proposed_profile=req.proposed_profile,
+            approved_profile=req.approved_profile,
+            db_path=DEFAULT_DB_PATH,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Advisor profile approval persistence failed.",
+        )
+
+    # ── 2. Construir respuesta ────────────────────────────────────────────
+    return AdvisorProfileApprovalResponse(
+        record_id=record_id,
+        client_id=req.client_id,
+        advisor_id=advisor.advisor_id,
+        advisor_display_name=advisor.display_name,
+        firm_id=advisor.firm_id,
+        proposed_profile=req.proposed_profile,
+        decision=req.decision,
+        approved_profile=req.approved_profile,
+        rationale=req.rationale,
+        source=req.source,
+        related_record_id=req.related_record_id,
+        created_at_utc=created_at_utc,
+        status="recorded",
     )
 
 
