@@ -36,6 +36,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from risk_first_advisory.config_layer.risk_assumptions import (
+    get_default_achievable_returns,
+)
 from risk_first_advisory.kyc.models import FinancialGoal
 
 # ── Constantes públicas ──────────────────────────────────────────────────────
@@ -46,14 +49,15 @@ DISCLAIMER = (
 )
 
 # Retornos anuales alcanzables estimados por perfil.
-# Fuente: supuestos internos de la firma. Serán reemplazados por CMA en sprint posterior.
-DEFAULT_ACHIEVABLE_RETURNS: dict[str, float] = {
-    "conservador": 0.04,
-    "moderado-defensivo": 0.055,
-    "moderado": 0.07,
-    "moderado-agresivo": 0.09,
-    "agresivo": 0.11,
-}
+#
+# Fase 1: estos valores se externalizan a `config/achievable_returns.yaml` y se
+# cargan acá vía el loader auditable. La constante DEFAULT_ACHIEVABLE_RETURNS
+# sigue existiendo y exportándose con la misma forma (`dict[profile, rate]`)
+# para no romper consumidores que la importan directamente.
+#
+# Siguen siendo supuestos demo internos — no reemplazan un CMA productivo
+# ni la decisión de un comité de inversiones.
+DEFAULT_ACHIEVABLE_RETURNS: dict[str, float] = get_default_achievable_returns()
 
 # ── Parámetros internos ──────────────────────────────────────────────────────
 

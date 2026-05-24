@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Risk profile base parameters — DEMO ASSUMPTIONS, NOT productive CMA.
+#
+# Estos valores eran hardcoded en
+# `src/risk_first_advisory/rules_layer/risk_budget_builder.PROFILE_BASE_PARAMS`.
+# Se externalizan para que una firma piloto pueda versionarlos / revisarlos
+# en code review sin tocar Python.
+#
+# IMPORTANTE:
+#   - Estos valores son supuestos demo. NO reemplazan un proceso de CMA
+#     (Capital Market Assumptions) formal ni la decisión de un comité de
+#     inversiones.
+#   - El loader (`config_layer/risk_assumptions.py`) requiere los 5 perfiles
+#     exactos y los 11 campos por perfil enumerados abajo. Faltantes, campos
+#     desconocidos o tipos inválidos → ValueError al iniciar el módulo.
+#   - `min_liquidity` y `preferred_currency` se aceptan en el YAML por
+#     completitud, pero en el flujo actual de RiskBudgetBuilder son
+#     OVERRIDEADOS por `kyc.liquidity_need_pct` y `kyc.preferred_currency`
+#     respectivamente. Los valores aquí son "fallback / contrato" de cara
+#     a futuras revisiones donde el perfil pueda imponer un piso.
+#
+# Sincronizado al 100% con los valores anteriores hardcoded — cero cambios
+# numéricos al hacer este corte. Cualquier ajuste posterior queda registrado
+# en git history sobre este archivo.
+# ─────────────────────────────────────────────────────────────────────────────
+
+profiles:
+  conservador:
+    target_volatility: 0.035
+    max_volatility: 0.050
+    max_drawdown: -0.070
+    max_equity: 0.10
+    max_high_yield: 0.00
+    max_single_asset: 0.15
+    max_sector_exposure: 0.20
+    max_duration: 2.0
+    min_liquidity: 0.0
+    preferred_currency: "USD"
+    complex_products_allowed: false
+
+  moderado-defensivo:
+    target_volatility: 0.055
+    max_volatility: 0.075
+    max_drawdown: -0.100
+    max_equity: 0.25
+    max_high_yield: 0.05
+    max_single_asset: 0.15
+    max_sector_exposure: 0.25
+    max_duration: 3.5
+    min_liquidity: 0.0
+    preferred_currency: "USD"
+    complex_products_allowed: false
+
+  moderado:
+    target_volatility: 0.075
+    max_volatility: 0.100
+    max_drawdown: -0.150
+    max_equity: 0.40
+    max_high_yield: 0.10
+    max_single_asset: 0.15
+    max_sector_exposure: 0.30
+    max_duration: 5.0
+    min_liquidity: 0.0
+    preferred_currency: "USD"
+    complex_products_allowed: false
+
+  moderado-agresivo:
+    target_volatility: 0.105
+    max_volatility: 0.140
+    max_drawdown: -0.220
+    max_equity: 0.60
+    max_high_yield: 0.15
+    max_single_asset: 0.20
+    max_sector_exposure: 0.35
+    max_duration: 7.0
+    min_liquidity: 0.0
+    preferred_currency: "USD"
+    complex_products_allowed: true
+
+  agresivo:
+    target_volatility: 0.140
+    max_volatility: 0.200
+    max_drawdown: -0.300
+    max_equity: 0.80
+    max_high_yield: 0.25
+    max_single_asset: 0.25
+    max_sector_exposure: 0.40
+    max_duration: 10.0
+    min_liquidity: 0.0
+    preferred_currency: "USD"
+    complex_products_allowed: true

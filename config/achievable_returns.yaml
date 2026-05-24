@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Achievable return assumptions per profile — DEMO ASSUMPTIONS, NOT productive CMA.
+#
+# Estos valores eran hardcoded en
+# `src/risk_first_advisory/rules_layer/goal_feasibility.DEFAULT_ACHIEVABLE_RETURNS`.
+# Se externalizan para que una firma piloto pueda versionarlos / revisarlos
+# en code review sin tocar Python.
+#
+# IMPORTANTE:
+#   - Estos valores son supuestos demo. NO reemplazan un proceso de CMA
+#     formal ni la decisión de un comité de inversiones.
+#   - El loader (`config_layer/risk_assumptions.py`) requiere los 5 perfiles
+#     exactos. Faltantes, perfiles desconocidos, o valores no numéricos /
+#     bool → ValueError al iniciar el módulo.
+#   - El retorno está expresado como decimal anual: 0.07 = 7.0%/año.
+#   - El campo `disclaimer` documenta la naturaleza no-garantizada de estos
+#     supuestos a nivel de archivo de config.
+#
+# Sincronizado al 100% con los valores anteriores hardcoded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+disclaimer: >
+  Los retornos anuales declarados son supuestos técnicos internos para uso
+  en el demo del MVP. No constituyen predicción ni garantía. Deben ser
+  reemplazados por un Capital Market Assumptions (CMA) formal y aprobado
+  por el comité de inversiones de la firma antes de uso productivo.
+
+achievable_returns:
+  conservador: 0.04
+  moderado-defensivo: 0.055
+  moderado: 0.07
+  moderado-agresivo: 0.09
+  agresivo: 0.11

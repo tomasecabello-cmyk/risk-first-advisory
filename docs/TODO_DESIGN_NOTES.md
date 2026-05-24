@@ -132,6 +132,41 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ---
 
+## Supuestos críticos en config YAML — Fase 1.6 ✅
+
+### Estado actual
+
+Los siguientes supuestos que antes vivían como literales Python ahora se cargan desde YAMLs versionables:
+
+| Antes (hardcoded) | Ahora |
+|---|---|
+| `rules_layer.risk_budget_builder.PROFILE_BASE_PARAMS` (dict literal) | Cargado desde `config/risk_profiles.yaml` vía `config_layer.risk_assumptions.get_default_risk_profile_params()`. La constante `PROFILE_BASE_PARAMS` sigue exportándose (re-bind del loader) para no romper imports. |
+| `rules_layer.goal_feasibility.DEFAULT_ACHIEVABLE_RETURNS` (dict literal) | Cargado desde `config/achievable_returns.yaml` vía `config_layer.risk_assumptions.get_default_achievable_returns()`. La constante `DEFAULT_ACHIEVABLE_RETURNS` sigue exportándose. |
+
+Cero cambios numéricos: tests de regresión (`test_PROFILE_BASE_PARAMS_re_exports_loader_values`, `test_DEFAULT_ACHIEVABLE_RETURNS_re_exports_loader_values`) verifican identidad punto-a-punto vs los valores anteriores.
+
+### Beneficios
+
+- Una firma puede revisar/versionar los supuestos críticos en code review sin tocar Python.
+- Git history del archivo YAML documenta cuándo y por qué cambiaron los supuestos (vs. un commit que tocaba lógica + supuestos mezclados).
+- Validación estricta del schema al inicio del proceso: si el YAML está mal, el módulo falla con `ValueError` claro en lugar de degradar silenciosamente con valores `None` / vacíos.
+
+### Limitaciones aceptadas (no es un sistema de CMA)
+
+- **No reemplaza un proceso CMA formal.** Sigue siendo un demo. Cambios al YAML no pasan por validación de un comité de inversiones automatizada — depende del proceso de la firma alrededor de git/PRs.
+- **No hay firma criptográfica de los YAMLs.** Cualquiera con write access al repo puede cambiar los valores. Para piloto productivo: branch protection + required reviewers.
+- **No hay versioning explícito de los YAMLs.** No incluyen `schema_version`. Si la lista de campos requeridos cambia, hay que coordinar update del loader y del YAML en el mismo PR. Mientras el set sea fijo (los 11 campos actuales), no es un problema.
+- **`min_liquidity` y `preferred_currency` en el YAML son contractuales pero no efectivos.** El `RiskBudgetBuilder` los OVERRIDE-EA con `kyc.liquidity_need_pct` y `kyc.preferred_currency` respectivamente. Quedan en el YAML por completitud para futuras revisiones donde el perfil pueda imponer un piso/moneda.
+
+### Próximos pasos opcionales
+
+1. **`schema_version` en cada YAML** + check explícito en el loader — útil cuando la lista de campos crezca o cambie semántica.
+2. **`config/cma/<year>/...`** estructura por año cuando exista un CMA real con vencimiento.
+3. **Override por env var** para entornos de QA: `RISK_FIRST_ADVISORY_CONFIG_DIR` → permitir apuntar a otro directorio de config sin tocar código.
+4. **Hash/checksum del YAML logueado al inicio** de la API — para auditoría posterior de "qué supuestos estaba usando el sistema cuando se generó esta cartera".
+
+---
+
 ## KYCDataRequest extended fields — Fase 1.5 ✅
 
 ### Estado actual

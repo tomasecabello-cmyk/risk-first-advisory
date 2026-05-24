@@ -14,6 +14,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
 - **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). El frontend estático ya expone un card **"Advisor Decisions Demo — Phase 1"** que invoca los cuatro endpoints (`/auth/me` + las tres acciones formales). Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
 - **Fase 1.5 — KYC fields auditables:** `KYCDataRequest` del `/workflow/run` acepta ahora `jurisdiction`, `preferred_currency`, `investment_objective`, `prefers_simple_products`, `annual_income_usd` y campos ESG (`esg_strictness_level`, `esg_exclusions`, `esg_preferences`). Antes el helper `_build_kyc_data` hardcodeaba estos campos silenciosamente; ahora se reciben y validan. Todos llevan defaults backward-compatible para no romper payloads existentes.
+- **Fase 1.6 — Supuestos críticos en config versionable:** los parámetros de `RiskBudgetBuilder` (`PROFILE_BASE_PARAMS`) y los retornos alcanzables de `GoalFeasibilityEngine` (`DEFAULT_ACHIEVABLE_RETURNS`) ya no son literales en Python — se cargan desde `config/risk_profiles.yaml` y `config/achievable_returns.yaml` vía `config_layer/risk_assumptions.py`. Los valores numéricos quedan idénticos; lo que cambia es que ahora viven en archivos auditables versionables en git. Siguen siendo supuestos demo, NO un CMA productivo.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -38,6 +39,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 | Workflow | `workflow_layer` | `AdvisoryWorkflowCoordinator` — orquesta el flujo completo con `MockAIClient` |
 | Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes |
 | Persistencia | `persistence_layer` | SQLite + repositorios in-memory |
+| Config | `config_layer` | Loader auditable de `config/risk_profiles.yaml` y `config/achievable_returns.yaml` (supuestos de RiskBudget y retornos alcanzables externalizados) |
 | API | `api_layer` | FastAPI: 14 endpoints — ejecución, recuperación, demo IA y demo portfolio |
 
 ---
@@ -480,6 +482,47 @@ Cada selección se persiste como record SQLite con `record_type="advisor_portfol
 
 ---
 
+## Supuestos críticos en config YAML (Fase 1.6)
+
+> ⚠ **Demo assumptions.** Los archivos bajo `config/` son supuestos internos para el demo del MVP. **No reemplazan** un CMA (Capital Market Assumptions) formal ni la decisión de un comité de inversiones. Para un piloto productivo, una firma debe revisarlos y aprobarlos formalmente.
+
+### Archivos
+
+| Archivo | Contenido | Consumido por |
+|---|---|---|
+| `config/risk_profiles.yaml` | 5 perfiles × 11 parámetros base (`target_volatility`, `max_volatility`, `max_drawdown`, `max_equity`, `max_high_yield`, `max_single_asset`, `max_sector_exposure`, `max_duration`, `min_liquidity`, `preferred_currency`, `complex_products_allowed`) | `rules_layer/risk_budget_builder.PROFILE_BASE_PARAMS` |
+| `config/achievable_returns.yaml` | 5 perfiles → retorno anual esperado (decimal) | `rules_layer/goal_feasibility.DEFAULT_ACHIEVABLE_RETURNS` |
+
+### Loader
+
+`src/risk_first_advisory/config_layer/risk_assumptions.py` expone:
+
+- `load_risk_profile_params(path=None)` y `load_achievable_returns(path=None)` — carga + validación estricta. `ValueError` si faltan perfiles, sobran perfiles, faltan campos, los tipos no coinciden, o `complex_products_allowed`/numéricos son del tipo equivocado (con bool-guard explícito porque `isinstance(True, int) == True`).
+- `get_default_risk_profile_params()` y `get_default_achievable_returns()` — wrappers cacheados que devuelven copia profunda (evita mutación accidental del cache compartido). Son los que consumen `RiskBudgetBuilder` y `GoalFeasibilityEngine` al importar.
+- `DEFAULT_RISK_PROFILES_PATH`, `DEFAULT_ACHIEVABLE_RETURNS_PATH`, `EXPECTED_PROFILES`, `REQUIRED_PROFILE_FIELDS` — constantes públicas para tests / herramientas.
+
+### Política de validación
+
+| Regla | Comportamiento |
+|---|---|
+| Perfiles esperados | Exactamente los 5: `conservador`, `moderado-defensivo`, `moderado`, `moderado-agresivo`, `agresivo`. Faltantes → `ValueError`. Extras desconocidos → `ValueError`. |
+| Campos requeridos por perfil | Los 11 listados arriba. Faltantes → `ValueError`. |
+| Campos numéricos (`target_volatility`, `max_drawdown`, etc.) | `int` o `float`. **`bool` rechazado explícitamente** (`isinstance(True, int) == True` en Python). |
+| `complex_products_allowed` | Debe ser `bool` real (no `0`/`1`, no `"yes"`/`"no"`). |
+| `preferred_currency` | `str` no vacío ni solo-whitespace. |
+| Retornos alcanzables | `int|float`, no `bool`. Se convierten a `float`. |
+| YAML inválido / archivo vacío | `ValueError` con path y razón. |
+| Archivo inexistente | `FileNotFoundError`. |
+
+### Cómo cambiar los supuestos
+
+1. Editar el archivo YAML correspondiente bajo `config/`.
+2. Correr `pytest tests/unit/test_risk_assumptions_config.py` — falla si el schema rompe.
+3. Correr `pytest -q` completo — los tests de regresión de `RiskBudgetBuilder` y `GoalFeasibilityEngine` detectan cambios numéricos.
+4. Para un piloto productivo: cada cambio debe ir acompañado de revisión del comité de inversiones de la firma, justificación documentada en el PR y aprobación de compliance. **El sistema no enforce este flujo** — depende del proceso de la firma alrededor de git.
+
+---
+
 ## Setup (Windows PowerShell)
 
 ```powershell
@@ -503,7 +546,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~50 segundos, 2208 tests.
+Suite completa (unit + integration): ~50 segundos, 2256 tests.
 
 ```powershell
 # Solo tests de API

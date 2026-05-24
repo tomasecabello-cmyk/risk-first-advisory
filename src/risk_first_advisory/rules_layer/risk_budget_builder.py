@@ -15,68 +15,23 @@ El builder es DETERMINISTA. Mismo input → mismo output. Sin IA.
 
 from typing import Any
 
+from risk_first_advisory.config_layer.risk_assumptions import (
+    get_default_risk_profile_params,
+)
 from risk_first_advisory.kyc.models import FinancialGoal, KYCData
 from risk_first_advisory.models.risk_budget import RiskBudget
 
-# Parámetros base por perfil. Configuración en código por simplicidad de M1;
-# en producción esto vive en config/profiles_params.yaml.
-PROFILE_BASE_PARAMS: dict[str, dict[str, Any]] = {
-    "conservador": {
-        "target_volatility": 0.035,
-        "max_volatility": 0.050,
-        "max_drawdown": -0.070,
-        "max_equity": 0.10,
-        "max_high_yield": 0.00,
-        "max_single_asset": 0.15,
-        "max_sector_exposure": 0.20,
-        "max_duration": 2.0,
-        "complex_products_allowed": False,
-    },
-    "moderado-defensivo": {
-        "target_volatility": 0.055,
-        "max_volatility": 0.075,
-        "max_drawdown": -0.100,
-        "max_equity": 0.25,
-        "max_high_yield": 0.05,
-        "max_single_asset": 0.15,
-        "max_sector_exposure": 0.25,
-        "max_duration": 3.5,
-        "complex_products_allowed": False,
-    },
-    "moderado": {
-        "target_volatility": 0.075,
-        "max_volatility": 0.100,
-        "max_drawdown": -0.150,
-        "max_equity": 0.40,
-        "max_high_yield": 0.10,
-        "max_single_asset": 0.15,
-        "max_sector_exposure": 0.30,
-        "max_duration": 5.0,
-        "complex_products_allowed": False,
-    },
-    "moderado-agresivo": {
-        "target_volatility": 0.105,
-        "max_volatility": 0.140,
-        "max_drawdown": -0.220,
-        "max_equity": 0.60,
-        "max_high_yield": 0.15,
-        "max_single_asset": 0.20,
-        "max_sector_exposure": 0.35,
-        "max_duration": 7.0,
-        "complex_products_allowed": True,
-    },
-    "agresivo": {
-        "target_volatility": 0.140,
-        "max_volatility": 0.200,
-        "max_drawdown": -0.300,
-        "max_equity": 0.80,
-        "max_high_yield": 0.25,
-        "max_single_asset": 0.25,
-        "max_sector_exposure": 0.40,
-        "max_duration": 10.0,
-        "complex_products_allowed": True,
-    },
-}
+# Parámetros base por perfil.
+#
+# Fase 1: estos valores se externalizan a `config/risk_profiles.yaml` y se
+# cargan acá vía el loader auditable. La constante PROFILE_BASE_PARAMS sigue
+# existiendo y exportándose con la misma forma (`dict[profile_name, dict[field, value]]`)
+# para no romper consumidores que la importan directamente.
+#
+# Si el YAML está mal formado / falta, la importación del módulo falla con
+# ValueError o FileNotFoundError — preferimos fail-loud en startup que dejar
+# un sistema con supuestos de riesgo silenciosamente vacíos.
+PROFILE_BASE_PARAMS: dict[str, dict[str, Any]] = get_default_risk_profile_params()
 
 
 VALID_PROFILES = frozenset(PROFILE_BASE_PARAMS.keys())
