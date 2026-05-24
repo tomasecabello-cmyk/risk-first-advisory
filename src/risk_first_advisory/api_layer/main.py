@@ -297,7 +297,7 @@ def _build_kyc_data(req: KYCDataRequest) -> KYCData:
     # annual_income_usd: derivado del liquid_net_worth cuando no se declara explícitamente.
     annual_income = max(req.liquid_net_worth * 0.05, 1.0)
     return KYCData(
-        age=40,
+        age=req.age,
         annual_income_usd=annual_income,
         approx_net_worth_usd=req.net_worth,
         investment_objective=InvestmentObjective.BALANCED,

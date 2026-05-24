@@ -390,3 +390,78 @@ class TestWorkflowRunOptionalFields:
         }
         response = client.post("/workflow/run", json=payload)
         assert response.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: campo age en KYCDataRequest
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestWorkflowRunAge:
+    """
+    Verifica que el campo 'age' en kyc_data sea aceptado, validado y propagado
+    correctamente a KYCData en lugar del valor hardcodeado anterior (40).
+    """
+
+    def test_age_explicit_value_accepted(self, client: TestClient):
+        """age explícito dentro del rango válido devuelve 200."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 55},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_age_minimum_boundary_accepted(self, client: TestClient):
+        """age=18 (mínimo) devuelve 200."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 18},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_age_maximum_boundary_accepted(self, client: TestClient):
+        """age=120 (máximo) devuelve 200."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 120},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_age_below_minimum_returns_422(self, client: TestClient):
+        """age=17 (< 18) devuelve 422."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 17},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_age_above_maximum_returns_422(self, client: TestClient):
+        """age=121 (> 120) devuelve 422."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 121},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_age_zero_returns_422(self, client: TestClient):
+        """age=0 devuelve 422."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "age": 0},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_omitting_age_uses_default_and_returns_200(self, client: TestClient):
+        """
+        Backward compatibility: payload sin 'age' usa default=40
+        y devuelve 200 sin errores.
+        """
+        # _VALID_PAYLOAD no incluye 'age' — debe seguir funcionando.
+        response = client.post("/workflow/run", json=_VALID_PAYLOAD)
+        assert response.status_code == 200

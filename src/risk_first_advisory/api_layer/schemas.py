@@ -55,6 +55,7 @@ _VALID_EXPERIENCES = frozenset(
 
 
 class KYCDataRequest(BaseModel):
+    age: int = Field(default=40, ge=18, le=120)
     risk_tolerance_score: int = Field(ge=1, le=10)
     risk_capacity_score: int = Field(ge=1, le=10)
     liquidity_need_score: int = Field(ge=1, le=10)
