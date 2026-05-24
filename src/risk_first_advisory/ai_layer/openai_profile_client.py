@@ -89,6 +89,63 @@ _DEFAULT_TEMPERATURE: float = 0.2     # baja para respuestas reproducibles
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers de validación de respuestas (privados, a nivel módulo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _assert_not_bool(value: Any, field: str, context: str = "") -> None:
+    """
+    Levanta ValueError si value es bool.
+
+    En Python bool es subclase de int, por lo que isinstance(True, int) es True.
+    Esta guarda debe aplicarse ANTES de cualquier isinstance(..., (int, float))
+    para rechazar explícitamente True/False como valores numéricos.
+    """
+    if isinstance(value, bool):
+        ctx = f" ({context})" if context else ""
+        raise ValueError(
+            f"OpenAI response{ctx} field '{field}' must be a number, not bool. "
+            f"Received {value!r}."
+        )
+
+
+def _assert_list_of_str(lst: list, field: str, context: str = "") -> None:
+    """Levanta ValueError si algún elemento de lst no es str."""
+    ctx = f" ({context})" if context else ""
+    for i, item in enumerate(lst):
+        if not isinstance(item, str):
+            raise ValueError(
+                f"OpenAI response{ctx} field '{field}' must be a list of strings, "
+                f"but item at index {i} is {type(item).__name__}: {item!r}"
+            )
+
+
+def _assert_contradiction_items(lst: list, field: str, context: str = "") -> None:
+    """
+    Valida que cada elemento de lst sea un dict con las claves
+    'field', 'severity' y 'explanation' como strings no vacíos.
+    """
+    ctx = f" ({context})" if context else ""
+    for i, item in enumerate(lst):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"OpenAI response{ctx} field '{field}' item at index {i} "
+                f"must be a dict, got {type(item).__name__}."
+            )
+        for subkey in ("field", "severity", "explanation"):
+            if subkey not in item:
+                raise ValueError(
+                    f"OpenAI response{ctx} '{field}'[{i}] missing required key '{subkey}'."
+                )
+            val = item[subkey]
+            if not isinstance(val, str) or not val.strip():
+                raise ValueError(
+                    f"OpenAI response{ctx} '{field}'[{i}]['{subkey}'] "
+                    f"must be a non-empty string, got {val!r}."
+                )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # System prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -439,39 +496,43 @@ class OpenAIProfileClient:
                 f"no es uno de los perfiles válidos: {sorted(_VALID_PROFILES)}"
             )
 
-        # confidence
+        # confidence — bool debe rechazarse antes del chequeo numérico
         confidence = data["confidence"]
+        _assert_not_bool(confidence, "confidence")
         if not isinstance(confidence, (int, float)):
             raise ValueError(
-                f"Respuesta de IA inválida: confidence debe ser numérico, "
-                f"recibido {type(confidence).__name__}."
+                f"OpenAI response field 'confidence' must be a number between 0 and 1, "
+                f"got {type(confidence).__name__}: {confidence!r}"
             )
         if not 0.0 <= float(confidence) <= 1.0:
             raise ValueError(
-                f"Respuesta de IA inválida: confidence={confidence} "
-                "debe estar en el rango [0.0, 1.0]."
+                f"OpenAI response field 'confidence' must be a number between 0 and 1, "
+                f"got {confidence!r}"
             )
 
-        # contradictions
+        # contradictions — lista + estructura interna de cada item
         if not isinstance(data["contradictions"], list):
             raise ValueError(
                 "Respuesta de IA inválida: 'contradictions' debe ser una lista, "
                 f"recibido {type(data['contradictions']).__name__}."
             )
+        _assert_contradiction_items(data["contradictions"], "contradictions")
 
-        # follow_up_questions
+        # follow_up_questions — lista + items deben ser strings
         if not isinstance(data["follow_up_questions"], list):
             raise ValueError(
                 "Respuesta de IA inválida: 'follow_up_questions' debe ser una lista, "
                 f"recibido {type(data['follow_up_questions']).__name__}."
             )
+        _assert_list_of_str(data["follow_up_questions"], "follow_up_questions")
 
-        # advisor_notes
+        # advisor_notes — lista + items deben ser strings
         if not isinstance(data["advisor_notes"], list):
             raise ValueError(
                 "Respuesta de IA inválida: 'advisor_notes' debe ser una lista, "
                 f"recibido {type(data['advisor_notes']).__name__}."
             )
+        _assert_list_of_str(data["advisor_notes"], "advisor_notes")
 
     # ── API pública ───────────────────────────────────────────────────────────
 
@@ -542,25 +603,29 @@ class OpenAIProfileClient:
                 f"no es uno de los perfiles válidos: {sorted(_VALID_PROFILES)}"
             )
 
-        # confidence
+        # confidence — bool debe rechazarse antes del chequeo numérico
         confidence = data["confidence"]
+        _assert_not_bool(confidence, "confidence", "follow-up")
         if not isinstance(confidence, (int, float)):
             raise ValueError(
-                f"Respuesta de IA inválida (follow-up): confidence debe ser numérico, "
-                f"recibido {type(confidence).__name__}."
+                f"OpenAI response (follow-up) field 'confidence' must be a number between 0 and 1, "
+                f"got {type(confidence).__name__}: {confidence!r}"
             )
         if not 0.0 <= float(confidence) <= 1.0:
             raise ValueError(
-                f"Respuesta de IA inválida (follow-up): confidence={confidence} "
-                "debe estar en el rango [0.0, 1.0]."
+                f"OpenAI response (follow-up) field 'confidence' must be a number between 0 and 1, "
+                f"got {confidence!r}"
             )
 
-        # remaining_contradictions
+        # remaining_contradictions — lista + estructura interna de cada item
         if not isinstance(data["remaining_contradictions"], list):
             raise ValueError(
                 "Respuesta de IA inválida (follow-up): 'remaining_contradictions' debe ser "
                 f"una lista, recibido {type(data['remaining_contradictions']).__name__}."
             )
+        _assert_contradiction_items(
+            data["remaining_contradictions"], "remaining_contradictions", "follow-up"
+        )
 
         # profile_change_reason — string no vacío
         reason = data["profile_change_reason"]
@@ -570,12 +635,13 @@ class OpenAIProfileClient:
                 "un string no vacío."
             )
 
-        # advisor_notes
+        # advisor_notes — lista + items deben ser strings
         if not isinstance(data["advisor_notes"], list):
             raise ValueError(
                 "Respuesta de IA inválida (follow-up): 'advisor_notes' debe ser una lista, "
                 f"recibido {type(data['advisor_notes']).__name__}."
             )
+        _assert_list_of_str(data["advisor_notes"], "advisor_notes", "follow-up")
 
     # ── API pública — follow-up ───────────────────────────────────────────────
 
@@ -674,31 +740,43 @@ class OpenAIProfileClient:
                     f"Respuesta de IA inválida (preferences): '{field}' debe ser una lista, "
                     f"recibido {type(val).__name__}."
                 )
-            for item in val:
+            # Los items deben ser strings antes de comparar con el enum
+            for i, item in enumerate(val):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"OpenAI preferences field '{field}' must be a list of strings, "
+                        f"but item at index {i} is {type(item).__name__}: {item!r}"
+                    )
                 if item not in _VALID_INSTRUMENT_TYPES:
                     raise ValueError(
                         f"Respuesta de IA inválida (preferences): {field} contiene tipo "
                         f"inválido {item!r}. Tipos válidos: {sorted(_VALID_INSTRUMENT_TYPES)}"
                     )
 
-        # currency, country, entity — str or None
+        # currency, country, entity — str no vacío or None
         for field in ("currency", "country", "entity"):
             val = data[field]
-            if val is not None and not isinstance(val, str):
-                raise ValueError(
-                    f"Respuesta de IA inválida (preferences): '{field}' debe ser str o null, "
-                    f"recibido {type(val).__name__}."
-                )
+            if val is not None:
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"OpenAI preferences field '{field}' must be str or null, "
+                        f"got {type(val).__name__}: {val!r}"
+                    )
+                if not val.strip():
+                    raise ValueError(
+                        f"OpenAI preferences field '{field}' must be a non-empty string or null, "
+                        f"got empty string."
+                    )
 
-        # hard_dollar_only — bool or None
+        # hard_dollar_only — bool or None (no strings, no números)
         hdol = data["hard_dollar_only"]
         if hdol is not None and not isinstance(hdol, bool):
             raise ValueError(
-                f"Respuesta de IA inválida (preferences): 'hard_dollar_only' debe ser bool o null, "
-                f"recibido {type(hdol).__name__}."
+                f"OpenAI preferences field 'hard_dollar_only' must be bool or null, "
+                f"got {type(hdol).__name__}: {hdol!r}"
             )
 
-        # List fields
+        # List fields — lista + items deben ser strings
         _list_fields = (
             "avoid_sectors", "prefer_sectors",
             "avoid_issuers", "prefer_issuers",
@@ -711,10 +789,12 @@ class OpenAIProfileClient:
                     f"Respuesta de IA inválida (preferences): '{field}' debe ser una lista, "
                     f"recibido {type(data[field]).__name__}."
                 )
+            _assert_list_of_str(data[field], field, "preferences")
 
-        # min_liquidity_score — None or numeric in [0, 1]
+        # min_liquidity_score — None or numeric (no bool) in [0, 1]
         liq = data["min_liquidity_score"]
         if liq is not None:
+            _assert_not_bool(liq, "min_liquidity_score", "preferences")
             if not isinstance(liq, (int, float)):
                 raise ValueError(
                     f"Respuesta de IA inválida (preferences): 'min_liquidity_score' debe ser "
@@ -722,13 +802,14 @@ class OpenAIProfileClient:
                 )
             if not 0.0 <= float(liq) <= 1.0:
                 raise ValueError(
-                    f"Respuesta de IA inválida (preferences): 'min_liquidity_score'={liq} "
-                    "debe estar en [0.0, 1.0]."
+                    f"OpenAI preferences field 'min_liquidity_score' must be a number between "
+                    f"0 and 1, got {liq!r}"
                 )
 
-        # max_maturity_year — None or int >= 1900
+        # max_maturity_year — None or int (no bool) >= 1900
         year = data["max_maturity_year"]
         if year is not None:
+            _assert_not_bool(year, "max_maturity_year", "preferences")
             if not isinstance(year, int):
                 raise ValueError(
                     f"Respuesta de IA inválida (preferences): 'max_maturity_year' debe ser "
@@ -736,21 +817,22 @@ class OpenAIProfileClient:
                 )
             if year < 1900:
                 raise ValueError(
-                    f"Respuesta de IA inválida (preferences): 'max_maturity_year'={year} "
-                    "debe ser >= 1900."
+                    f"OpenAI preferences field 'max_maturity_year' must be >= 1900, "
+                    f"got {year!r}"
                 )
 
-        # confidence — numeric in [0, 1]
+        # confidence — numeric (no bool) in [0, 1]
         confidence = data["confidence"]
+        _assert_not_bool(confidence, "confidence", "preferences")
         if not isinstance(confidence, (int, float)):
             raise ValueError(
-                f"Respuesta de IA inválida (preferences): 'confidence' debe ser numérico, "
-                f"recibido {type(confidence).__name__}."
+                f"OpenAI response (preferences) field 'confidence' must be a number between "
+                f"0 and 1, got {type(confidence).__name__}: {confidence!r}"
             )
         if not 0.0 <= float(confidence) <= 1.0:
             raise ValueError(
-                f"Respuesta de IA inválida (preferences): confidence={confidence} "
-                "debe estar en [0.0, 1.0]."
+                f"OpenAI response (preferences) field 'confidence' must be a number between "
+                f"0 and 1, got {confidence!r}"
             )
 
     # ── API pública — preferences ─────────────────────────────────────────────

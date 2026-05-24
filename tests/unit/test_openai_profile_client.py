@@ -358,6 +358,69 @@ class TestValidation:
         with pytest.raises(ValueError, match="advisor_notes"):
             client.analyze_kyc(_SAMPLE_KYC)
 
+    # ── bool-as-number ──────────────────────────────────────────────────────
+
+    def test_confidence_true_raises_value_error(self):
+        """confidence=True no debe aceptarse (bool es subclase de int)."""
+        client = _build_client(_valid_response(confidence=True))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_confidence_false_raises_value_error(self):
+        """confidence=False tampoco debe aceptarse."""
+        client = _build_client(_valid_response(confidence=False))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_confidence_none_raises_value_error(self):
+        """confidence=None no debe aceptarse."""
+        client = _build_client(_valid_response(confidence=None))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    # ── list element type validation ────────────────────────────────────────
+
+    def test_follow_up_questions_item_not_string_raises(self):
+        """follow_up_questions con item no-string levanta ValueError."""
+        client = _build_client(_valid_response(follow_up_questions=[123, "¿pregunta?"]))
+        with pytest.raises(ValueError, match="follow_up_questions"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_advisor_notes_item_not_string_raises(self):
+        """advisor_notes con item no-string levanta ValueError."""
+        client = _build_client(_valid_response(advisor_notes=[None, "nota válida"]))
+        with pytest.raises(ValueError, match="advisor_notes"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    # ── contradiction structure ─────────────────────────────────────────────
+
+    def test_contradiction_missing_field_key_raises(self):
+        """Contradiction sin clave 'field' levanta ValueError."""
+        bad = [{"severity": "high", "explanation": "algo"}]
+        client = _build_client(_valid_response(contradictions=bad))
+        with pytest.raises(ValueError, match="field"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_contradiction_empty_severity_raises(self):
+        """Contradiction con severity vacío levanta ValueError."""
+        bad = [{"field": "x", "severity": "  ", "explanation": "algo"}]
+        client = _build_client(_valid_response(contradictions=bad))
+        with pytest.raises(ValueError, match="severity"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_contradiction_missing_explanation_raises(self):
+        """Contradiction sin clave 'explanation' levanta ValueError."""
+        bad = [{"field": "x", "severity": "low"}]
+        client = _build_client(_valid_response(contradictions=bad))
+        with pytest.raises(ValueError, match="explanation"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
+    def test_contradiction_item_not_dict_raises(self):
+        """Contradiction como string (no dict) levanta ValueError."""
+        client = _build_client(_valid_response(contradictions=["no es un dict"]))
+        with pytest.raises(ValueError, match="contradictions"):
+            client.analyze_kyc(_SAMPLE_KYC)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestPromptContent — el system prompt contiene las reglas correctas
@@ -666,6 +729,58 @@ class TestAnalyzeFollowUpValidation:
         fake = _make_fake_client("this is not json at all {{{{")
         client = OpenAIProfileClient(_client=fake)
         with pytest.raises(ValueError, match="JSON"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    # ── bool-as-number ──────────────────────────────────────────────────────
+
+    def test_confidence_true_raises_value_error(self):
+        """confidence=True no debe aceptarse en follow-up."""
+        client = _build_followup_client(_valid_followup_response(confidence=True))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_confidence_none_raises_value_error(self):
+        """confidence=None no debe aceptarse en follow-up."""
+        client = _build_followup_client(_valid_followup_response(confidence=None))
+        with pytest.raises(ValueError, match="confidence"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    # ── advisor_notes element type ──────────────────────────────────────────
+
+    def test_advisor_notes_item_not_string_raises(self):
+        """advisor_notes con item no-string levanta ValueError en follow-up."""
+        client = _build_followup_client(
+            _valid_followup_response(advisor_notes=[42, "nota válida"])
+        )
+        with pytest.raises(ValueError, match="advisor_notes"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    # ── remaining_contradictions structure ──────────────────────────────────
+
+    def test_remaining_contradictions_item_not_dict_raises(self):
+        """remaining_contradictions con item no-dict levanta ValueError."""
+        client = _build_followup_client(
+            _valid_followup_response(remaining_contradictions=["texto plano"])
+        )
+        with pytest.raises(ValueError, match="remaining_contradictions"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_remaining_contradictions_missing_field_raises(self):
+        """remaining_contradictions sin clave 'field' levanta ValueError."""
+        bad = [{"severity": "low", "explanation": "algo"}]
+        client = _build_followup_client(
+            _valid_followup_response(remaining_contradictions=bad)
+        )
+        with pytest.raises(ValueError, match="field"):
+            client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
+
+    def test_remaining_contradictions_empty_severity_raises(self):
+        """remaining_contradictions con severity vacío levanta ValueError."""
+        bad = [{"field": "x", "severity": "", "explanation": "algo"}]
+        client = _build_followup_client(
+            _valid_followup_response(remaining_contradictions=bad)
+        )
+        with pytest.raises(ValueError, match="severity"):
             client.analyze_follow_up(_SAMPLE_FOLLOWUP_PAYLOAD)
 
 
@@ -1031,6 +1146,126 @@ class TestExtractPreferencesValidation:
         fake = _make_fake_client("not a valid json {{{")
         client = OpenAIProfileClient(_client=fake)
         with pytest.raises(ValueError, match="JSON"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    # ── bool-as-number ──────────────────────────────────────────────────────
+
+    def test_confidence_true_raises(self):
+        """confidence=True no debe aceptarse en preferences."""
+        client = _build_preferences_client(
+            _valid_preferences_response(confidence=True)
+        )
+        with pytest.raises(ValueError, match="confidence"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_min_liquidity_score_true_raises(self):
+        """min_liquidity_score=True no debe aceptarse (bool es subclase de int)."""
+        client = _build_preferences_client(
+            _valid_preferences_response(min_liquidity_score=True)
+        )
+        with pytest.raises(ValueError, match="min_liquidity_score"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_min_liquidity_score_false_raises(self):
+        """min_liquidity_score=False no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(min_liquidity_score=False)
+        )
+        with pytest.raises(ValueError, match="min_liquidity_score"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_max_maturity_year_true_raises(self):
+        """max_maturity_year=True no debe aceptarse (bool es subclase de int)."""
+        client = _build_preferences_client(
+            _valid_preferences_response(max_maturity_year=True)
+        )
+        with pytest.raises(ValueError, match="max_maturity_year"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    # ── hard_dollar_only type ───────────────────────────────────────────────
+
+    def test_hard_dollar_only_string_raises(self):
+        """hard_dollar_only='true' (string) no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(hard_dollar_only="true")
+        )
+        with pytest.raises(ValueError, match="hard_dollar_only"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_hard_dollar_only_integer_raises(self):
+        """hard_dollar_only=1 (int) no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(hard_dollar_only=1)
+        )
+        with pytest.raises(ValueError, match="hard_dollar_only"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    # ── currency / entity empty string ──────────────────────────────────────
+
+    def test_currency_empty_string_raises(self):
+        """currency='' (string vacío) no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(currency="")
+        )
+        with pytest.raises(ValueError, match="currency"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_entity_integer_raises(self):
+        """entity=123 (int) no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(entity=123)
+        )
+        with pytest.raises(ValueError, match="entity"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_country_empty_string_raises(self):
+        """country='' (string vacío) no debe aceptarse."""
+        client = _build_preferences_client(
+            _valid_preferences_response(country="")
+        )
+        with pytest.raises(ValueError, match="country"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    # ── list element type validation ────────────────────────────────────────
+
+    def test_allowed_instrument_types_item_not_string_raises(self):
+        """allowed_instrument_types con item no-string levanta ValueError."""
+        client = _build_preferences_client(
+            _valid_preferences_response(allowed_instrument_types=[123])
+        )
+        with pytest.raises(ValueError, match="allowed_instrument_types"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_hard_constraints_item_not_string_raises(self):
+        """hard_constraints con item no-string levanta ValueError."""
+        client = _build_preferences_client(
+            _valid_preferences_response(hard_constraints=["instrument_type", 42])
+        )
+        with pytest.raises(ValueError, match="hard_constraints"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_soft_preferences_item_not_string_raises(self):
+        """soft_preferences con item no-string levanta ValueError."""
+        client = _build_preferences_client(
+            _valid_preferences_response(soft_preferences=[None])
+        )
+        with pytest.raises(ValueError, match="soft_preferences"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_avoid_sectors_item_not_string_raises(self):
+        """avoid_sectors con item no-string levanta ValueError."""
+        client = _build_preferences_client(
+            _valid_preferences_response(avoid_sectors=[{"name": "Energy"}])
+        )
+        with pytest.raises(ValueError, match="avoid_sectors"):
+            client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
+
+    def test_advisor_notes_item_not_string_raises_in_preferences(self):
+        """advisor_notes con item no-string levanta ValueError en preferences."""
+        client = _build_preferences_client(
+            _valid_preferences_response(advisor_notes=[True])
+        )
+        with pytest.raises(ValueError, match="advisor_notes"):
             client.extract_investment_preferences(_SAMPLE_PREFERENCES_PAYLOAD)
 
 
