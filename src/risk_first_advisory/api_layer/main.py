@@ -33,6 +33,8 @@ from risk_first_advisory.api_layer.auth import (
 )
 from risk_first_advisory.api_layer.schemas import (
     AdvisorIdentityResponse,
+    AdvisorOverrideApprovalRequest,
+    AdvisorOverrideApprovalResponse,
     AdvisorProfileApprovalRequest,
     AdvisorProfileApprovalResponse,
     AIContradictionResponse,
@@ -90,6 +92,7 @@ from risk_first_advisory.persistence_layer.repositories import (
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
+    SQLiteAdvisorOverrideApprovalRepository,
     SQLiteAdvisorProfileApprovalRepository,
     SQLiteAIFilteredPortfolioRepository,
     SQLiteAuditRepository,
@@ -501,6 +504,42 @@ def _persist_advisor_profile_approval(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helper de persistencia para /advisor/override-approval
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_advisor_override_approval(
+    payload: dict,
+    client_id: str,
+    advisor_id: str,
+    decision: str,
+    candidate_variant: str,
+    related_record_id: str | None,
+    db_path: Path,
+) -> tuple[str, str]:
+    """
+    Persiste la decisión de advisor override en SQLite como record
+    "advisor_override_approval".
+
+    Devuelve (record_id, created_at_utc) para que el endpoint los exponga
+    en la response.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLitePersistenceStore(db_path) as store:
+        store.init_schema()
+        override_repo = SQLiteAdvisorOverrideApprovalRepository(store)
+        record = override_repo.save_approval(
+            payload=payload,
+            client_id=client_id,
+            advisor_id=advisor_id,
+            decision=decision,
+            candidate_variant=candidate_variant,
+            related_record_id=related_record_id,
+        )
+    return record.record_id, record.created_at_utc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers para /live/portfolio-demo (privados, inyectables en tests)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -844,6 +883,81 @@ def advisor_profile_approval(
         proposed_profile=req.proposed_profile,
         decision=req.decision,
         approved_profile=req.approved_profile,
+        rationale=req.rationale,
+        source=req.source,
+        related_record_id=req.related_record_id,
+        created_at_utc=created_at_utc,
+        status="recorded",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /advisor/override-approval — segundo acto formal del asesor (Fase 1).
+#
+# Registra approve/reject sobre una variante de portfolio que excede el
+# RiskBudget aprobado (típicamente GROWTH con
+# reason_codes=["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"]).
+#
+# Auth: get_current_advisor_required → 401 sin token válido.
+# Nota: no se valida todavía contra existencia real del candidate ni del
+# record relacionado; el asesor declara reason_codes/exceeded_constraints
+# explícitamente. Esa conciliación queda para una tarea posterior.
+# Importante: para reject los reason_codes y exceeded_constraints se
+# conservan en el record (no se borran) para trazabilidad de por qué se
+# rechazó el override.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/advisor/override-approval",
+    response_model=AdvisorOverrideApprovalResponse,
+)
+def advisor_override_approval(
+    req: AdvisorOverrideApprovalRequest,
+    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorOverrideApprovalResponse:
+    # ── 1. Persistir ──────────────────────────────────────────────────────
+    persist_payload: dict = {
+        "client_id":             req.client_id,
+        "advisor_id":            advisor.advisor_id,
+        "advisor_display_name":  advisor.display_name,
+        "firm_id":               advisor.firm_id,
+        "candidate_variant":     req.candidate_variant,
+        "decision":              req.decision,
+        "reason_codes":          list(req.reason_codes),
+        "exceeded_constraints":  list(req.exceeded_constraints),
+        "rationale":             req.rationale,
+        "source":                req.source,
+        "related_record_id":     req.related_record_id,
+    }
+
+    try:
+        record_id, created_at_utc = _persist_advisor_override_approval(
+            payload=persist_payload,
+            client_id=req.client_id,
+            advisor_id=advisor.advisor_id,
+            decision=req.decision,
+            candidate_variant=req.candidate_variant,
+            related_record_id=req.related_record_id,
+            db_path=DEFAULT_DB_PATH,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Advisor override approval persistence failed.",
+        )
+
+    # ── 2. Construir respuesta ────────────────────────────────────────────
+    return AdvisorOverrideApprovalResponse(
+        record_id=record_id,
+        client_id=req.client_id,
+        advisor_id=advisor.advisor_id,
+        advisor_display_name=advisor.display_name,
+        firm_id=advisor.firm_id,
+        candidate_variant=req.candidate_variant,
+        decision=req.decision,
+        reason_codes=list(req.reason_codes),
+        exceeded_constraints=list(req.exceeded_constraints),
         rationale=req.rationale,
         source=req.source,
         related_record_id=req.related_record_id,

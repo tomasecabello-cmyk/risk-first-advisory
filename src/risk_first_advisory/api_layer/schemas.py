@@ -539,6 +539,121 @@ class AdvisorProfileApprovalResponse(BaseModel):
     status:                 str = "recorded"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# /advisor/override-approval  (Phase 1 — segundo acto formal del asesor)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Nota: existe `risk_first_advisory.human_layer.override_approval.AdvisorOverrideApproval`
+# como objeto de dominio para integración con workflow (con enums, comment
+# mínimo 20 chars, y validación contra PortfolioVariantMetadata viva). Ese
+# modelo no encaja con el contrato API que pide la Fase 1 (string-based,
+# rationale min_length=1, sin live metadata). Por eso las schemas aquí son
+# independientes y NO modifican el modelo del dominio. La conciliación
+# advisor_override domain ↔ API queda para una tarea de integración futura.
+
+_ADVISOR_OVERRIDE_VALID_VARIANTS: frozenset[str] = frozenset({
+    "DEFENSIVE", "BALANCED", "GROWTH"
+})
+
+_ADVISOR_OVERRIDE_VALID_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
+
+
+def _validate_str_list_no_empty(value: list[str], field_name: str) -> list[str]:
+    """Cada item debe ser str no vacío (sin solo whitespace)."""
+    for i, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(
+                f"{field_name}[{i}] debe ser un string no vacío. Recibido: {item!r}."
+            )
+    return value
+
+
+class AdvisorOverrideApprovalRequest(BaseModel):
+    """
+    Decisión del asesor sobre una variante de portfolio que excede el RiskBudget
+    aprobado y requiere advisor override (típicamente GROWTH).
+
+    Diseño Fase 1:
+        - NO valida contra existencia real del candidate ni del record relacionado.
+        - NO requiere requires_advisor_override=True (a diferencia del dominio).
+        - El asesor declara reason_codes y exceeded_constraints explícitamente
+          (los copia del payload del portfolio o los escribe a mano).
+        - Para reject, los reason_codes/exceeded_constraints se conservan en el
+          record (no se borran) para mantener trazabilidad de por qué se
+          rechazó el override.
+    """
+
+    client_id:             str         = Field(min_length=1)
+    related_record_id:     str | None  = None
+    candidate_variant:     str         = Field(min_length=1)
+    decision:              str
+    reason_codes:          list[str]   = Field(default_factory=list)
+    exceeded_constraints:  list[str]   = Field(default_factory=list)
+    rationale:             str         = Field(min_length=1)
+    source:                str         = "manual"
+
+    @field_validator("candidate_variant")
+    @classmethod
+    def _validate_candidate_variant(cls, v: str) -> str:
+        if v not in _ADVISOR_OVERRIDE_VALID_VARIANTS:
+            raise ValueError(
+                f"candidate_variant inválido: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_OVERRIDE_VALID_VARIANTS)}."
+            )
+        return v
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, v: str) -> str:
+        if v not in _ADVISOR_OVERRIDE_VALID_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_OVERRIDE_VALID_DECISIONS)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _validate_rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+    @field_validator("reason_codes")
+    @classmethod
+    def _validate_reason_codes(cls, v: list[str]) -> list[str]:
+        return _validate_str_list_no_empty(v, "reason_codes")
+
+    @field_validator("exceeded_constraints")
+    @classmethod
+    def _validate_exceeded_constraints(cls, v: list[str]) -> list[str]:
+        return _validate_str_list_no_empty(v, "exceeded_constraints")
+
+
+class AdvisorOverrideApprovalResponse(BaseModel):
+    record_id:             str
+    client_id:             str
+    advisor_id:            str
+    advisor_display_name:  str
+    firm_id:               str | None
+    candidate_variant:     str
+    decision:              str
+    reason_codes:          list[str]
+    exceeded_constraints:  list[str]
+    rationale:             str
+    source:                str
+    related_record_id:     str | None
+    created_at_utc:        str
+    status:                str = "recorded"
+
+
 class AIFilteredPortfolioResponse(BaseModel):
     client_id:            str
     profile:              str
