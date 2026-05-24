@@ -35,6 +35,8 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisorIdentityResponse,
     AdvisorOverrideApprovalRequest,
     AdvisorOverrideApprovalResponse,
+    AdvisorPortfolioSelectionRequest,
+    AdvisorPortfolioSelectionResponse,
     AdvisorProfileApprovalRequest,
     AdvisorProfileApprovalResponse,
     AIContradictionResponse,
@@ -93,6 +95,7 @@ from risk_first_advisory.persistence_layer.repositories import (
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
     SQLiteAdvisorOverrideApprovalRepository,
+    SQLiteAdvisorPortfolioSelectionRepository,
     SQLiteAdvisorProfileApprovalRepository,
     SQLiteAIFilteredPortfolioRepository,
     SQLiteAuditRepository,
@@ -540,6 +543,42 @@ def _persist_advisor_override_approval(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helper de persistencia para /advisor/portfolio-selection
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_advisor_portfolio_selection(
+    payload: dict,
+    client_id: str,
+    advisor_id: str,
+    selected_variant: str,
+    related_record_id: str | None,
+    override_approval_record_id: str | None,
+    db_path: Path,
+) -> tuple[str, str]:
+    """
+    Persiste la selección final del asesor en SQLite como record
+    "advisor_portfolio_selection".
+
+    Devuelve (record_id, created_at_utc) para que el endpoint los exponga
+    en la response.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLitePersistenceStore(db_path) as store:
+        store.init_schema()
+        selection_repo = SQLiteAdvisorPortfolioSelectionRepository(store)
+        record = selection_repo.save_selection(
+            payload=payload,
+            client_id=client_id,
+            advisor_id=advisor_id,
+            selected_variant=selected_variant,
+            related_record_id=related_record_id,
+            override_approval_record_id=override_approval_record_id,
+        )
+    return record.record_id, record.created_at_utc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers para /live/portfolio-demo (privados, inyectables en tests)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -961,6 +1000,99 @@ def advisor_override_approval(
         rationale=req.rationale,
         source=req.source,
         related_record_id=req.related_record_id,
+        created_at_utc=created_at_utc,
+        status="recorded",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /advisor/portfolio-selection — tercer acto formal del asesor (Fase 1).
+#
+# Registra la decisión final sobre cuál variante (DEFENSIVE / BALANCED /
+# GROWTH) se presenta al cliente. Idealmente posterior a:
+#   - una corrida de /ai/filtered-portfolio-demo (related_record_id)
+#   - y, si la variante elegida es GROWTH, a un advisor override approval
+#     (override_approval_record_id).
+#
+# Auth: get_current_advisor_required → 401 sin token válido.
+# Política Fase 1: NO se valida contra existencia real de los records
+# enlazados; el endpoint solo registra la decisión declarada. Validación
+# cruzada queda para una tarea de integración futura.
+#
+# Warning rules:
+#   - GROWTH sin override_approval_record_id → warning en response:
+#       "GROWTH selected without linked override approval record."
+#   - DEFENSIVE/BALANCED con override_approval_record_id → aceptado sin warning.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_GROWTH_WITHOUT_OVERRIDE_WARNING: str = (
+    "GROWTH selected without linked override approval record."
+)
+
+
+@app.post(
+    "/advisor/portfolio-selection",
+    response_model=AdvisorPortfolioSelectionResponse,
+)
+def advisor_portfolio_selection(
+    req: AdvisorPortfolioSelectionRequest,
+    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorPortfolioSelectionResponse:
+    # ── 1. Calcular warnings ──────────────────────────────────────────────
+    warnings: list[str] = []
+    if (
+        req.selected_variant == "GROWTH"
+        and req.override_approval_record_id is None
+    ):
+        warnings.append(_GROWTH_WITHOUT_OVERRIDE_WARNING)
+
+    # ── 2. Persistir ──────────────────────────────────────────────────────
+    # El warning forma parte del payload persistido para que compliance
+    # pueda detectar selecciones de GROWTH sin override en una revisión
+    # posterior (sin tener que recalcular la regla).
+    persist_payload: dict = {
+        "client_id":                    req.client_id,
+        "advisor_id":                   advisor.advisor_id,
+        "advisor_display_name":         advisor.display_name,
+        "firm_id":                      advisor.firm_id,
+        "selected_variant":             req.selected_variant,
+        "rationale":                    req.rationale,
+        "related_record_id":            req.related_record_id,
+        "override_approval_record_id":  req.override_approval_record_id,
+        "source":                       req.source,
+        "warnings":                     list(warnings),
+    }
+
+    try:
+        record_id, created_at_utc = _persist_advisor_portfolio_selection(
+            payload=persist_payload,
+            client_id=req.client_id,
+            advisor_id=advisor.advisor_id,
+            selected_variant=req.selected_variant,
+            related_record_id=req.related_record_id,
+            override_approval_record_id=req.override_approval_record_id,
+            db_path=DEFAULT_DB_PATH,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Advisor portfolio selection persistence failed.",
+        )
+
+    # ── 3. Construir respuesta ────────────────────────────────────────────
+    return AdvisorPortfolioSelectionResponse(
+        record_id=record_id,
+        client_id=req.client_id,
+        advisor_id=advisor.advisor_id,
+        advisor_display_name=advisor.display_name,
+        firm_id=advisor.firm_id,
+        selected_variant=req.selected_variant,
+        rationale=req.rationale,
+        related_record_id=req.related_record_id,
+        override_approval_record_id=req.override_approval_record_id,
+        source=req.source,
+        warnings=warnings,
         created_at_utc=created_at_utc,
         status="recorded",
     )

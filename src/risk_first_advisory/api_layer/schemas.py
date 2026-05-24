@@ -540,6 +540,80 @@ class AdvisorProfileApprovalResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# /advisor/portfolio-selection  (Phase 1 — tercer acto formal del asesor)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Las variantes válidas coinciden con _ADVISOR_OVERRIDE_VALID_VARIANTS pero se
+# declara explícita para evitar acoplamiento implícito entre dos schemas que
+# pueden evolucionar de forma independiente en el futuro.
+_ADVISOR_SELECTION_VALID_VARIANTS: frozenset[str] = frozenset({
+    "DEFENSIVE", "BALANCED", "GROWTH"
+})
+
+
+class AdvisorPortfolioSelectionRequest(BaseModel):
+    """
+    Selección final del asesor sobre la variante de portfolio a presentar al
+    cliente.
+
+    Reglas Fase 1:
+        - NO valida contra existencia real de `related_record_id`.
+        - NO valida contra existencia real de `override_approval_record_id`.
+        - Si selected_variant == "GROWTH" y override_approval_record_id falta,
+          el endpoint agrega un warning en la response (no bloquea).
+        - Si selected_variant != "GROWTH" y override_approval_record_id viene,
+          se acepta sin warning especial (decisión: menor complejidad).
+    """
+
+    client_id:                    str         = Field(min_length=1)
+    related_record_id:            str | None  = None
+    selected_variant:             str
+    rationale:                    str         = Field(min_length=1)
+    override_approval_record_id:  str | None  = None
+    source:                       str         = "manual"
+
+    @field_validator("selected_variant")
+    @classmethod
+    def _validate_selected_variant(cls, v: str) -> str:
+        if v not in _ADVISOR_SELECTION_VALID_VARIANTS:
+            raise ValueError(
+                f"selected_variant inválido: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_SELECTION_VALID_VARIANTS)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _validate_rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+
+class AdvisorPortfolioSelectionResponse(BaseModel):
+    record_id:                    str
+    client_id:                    str
+    advisor_id:                   str
+    advisor_display_name:         str
+    firm_id:                      str | None
+    selected_variant:             str
+    rationale:                    str
+    related_record_id:            str | None
+    override_approval_record_id:  str | None
+    source:                       str
+    warnings:                     list[str]
+    created_at_utc:               str
+    status:                       str = "recorded"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # /advisor/override-approval  (Phase 1 — segundo acto formal del asesor)
 # ─────────────────────────────────────────────────────────────────────────────
 #

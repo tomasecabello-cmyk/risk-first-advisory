@@ -8,11 +8,11 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **2107 tests, todos verdes** (unit + integration)
+- **2145 tests, todos verdes** (unit + integration)
 - MVP local visual completo — frontend estático en `frontend/index.html`
-- Backend FastAPI con 17 endpoints expuestos
+- Backend FastAPI con 18 endpoints expuestos
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
-- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + endpoints protegidos `POST /advisor/profile-approval` (decisión sobre perfil propuesto) y `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget). Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
+- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -406,6 +406,77 @@ Cada decisión se persiste como record SQLite con `record_type="advisor_override
 
 El módulo `human_layer.override_approval` ya contenía un objeto de dominio `AdvisorOverrideApproval` (con enums, comment mínimo 20 caracteres y validación contra `PortfolioVariantMetadata` viva) pensado para integración con workflow. Ese modelo **no se modifica**: el endpoint API usa schemas Pydantic independientes y más laxos (rationale ≥ 1 carácter, sin validación contra metadata viva) porque registra una decisión ya tomada en lugar de calcularla. La conciliación dominio ↔ API queda para una tarea de integración futura.
 
+### Advisor portfolio selection — `POST /advisor/portfolio-selection`
+
+> ⚠ Development-only. Mismo auth scaffold (Bearer token). Sin RBAC: cualquier token demo (advisor o compliance) puede registrar. **No valida todavía contra existencia real** del `related_record_id` (portfolio candidate) ni del `override_approval_record_id`.
+
+Tercer acto formal del asesor: registrar la selección final de la variante que se va a presentar al cliente.
+
+#### Request body
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `client_id` | str | min_length=1 |
+| `related_record_id` | str \| null | opcional — típicamente `ai_filtered_portfolio_NNNNNN` |
+| `selected_variant` | str | uno de: `DEFENSIVE`, `BALANCED`, `GROWTH` (mayúsculas estrictas) |
+| `rationale` | str | min_length=1, sin solo-whitespace |
+| `override_approval_record_id` | str \| null | opcional — típicamente `advisor_override_approval_NNNNNN`; recomendado cuando se selecciona `GROWTH` |
+| `source` | str | default `"manual"` |
+
+#### Warnings
+
+La response incluye un campo `warnings: list[str]`:
+- Si `selected_variant == "GROWTH"` y `override_approval_record_id` es `null` → se agrega:
+  `"GROWTH selected without linked override approval record."`
+- En todos los demás casos → lista vacía.
+
+El warning **no bloquea** la selección; solo deja un rastro auditable para que compliance pueda detectarlo en revisión posterior (también queda persistido en el payload del record).
+
+#### Ejemplo — GROWTH con override link
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/advisor/portfolio-selection `
+  -H "Authorization: Bearer dev-advisor-token" `
+  -H "Content-Type: application/json" `
+  -d '{
+    "client_id": "CLI-001",
+    "related_record_id": "ai_filtered_portfolio_000001",
+    "selected_variant": "GROWTH",
+    "rationale": "Cliente acepta perfil más agresivo tras revisión.",
+    "override_approval_record_id": "advisor_override_approval_000001"
+  }'
+```
+
+Response:
+
+```json
+{
+  "record_id": "advisor_portfolio_selection_000001",
+  "client_id": "CLI-001",
+  "advisor_id": "ADV-001",
+  "advisor_display_name": "Demo Advisor",
+  "firm_id": null,
+  "selected_variant": "GROWTH",
+  "rationale": "Cliente acepta perfil más agresivo tras revisión.",
+  "related_record_id": "ai_filtered_portfolio_000001",
+  "override_approval_record_id": "advisor_override_approval_000001",
+  "source": "manual",
+  "warnings": [],
+  "created_at_utc": "2026-05-24T12:34:56Z",
+  "status": "recorded"
+}
+```
+
+#### Errores
+
+- `401` — sin token, token inválido o header malformado.
+- `422` — `selected_variant` fuera de enum, `rationale` vacío/whitespace, `client_id` vacío, campos requeridos faltantes.
+- `500` — `"Advisor portfolio selection persistence failed."` si SQLite falla.
+
+#### Persistencia
+
+Cada selección se persiste como record SQLite con `record_type="advisor_portfolio_selection"` y metadata mínima (`client_id`, `advisor_id`, `selected_variant`, `related_record_id`, `override_approval_record_id`, `endpoint`, `source_type`). El payload JSON contiene todos los campos de la response salvo `record_id`, `created_at_utc` y `status` — incluido el `warnings` calculado, para que compliance pueda filtrar selecciones de `GROWTH` sin override link sin recalcular la regla.
+
 ---
 
 ## Setup (Windows PowerShell)
@@ -431,7 +502,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~50 segundos, 2107 tests.
+Suite completa (unit + integration): ~50 segundos, 2145 tests.
 
 ```powershell
 # Solo tests de API
@@ -531,6 +602,7 @@ python scripts/run_ai_filtered_portfolio_demo.py --preferences "Solo quiero inve
 | `GET` | `/auth/me` | **Fase 1 — scaffold de auth (development-only).** Resuelve la identidad del asesor a partir del header `Authorization: Bearer <token>`. Devuelve 401 si falta o es inválido. Tokens demo hard-coded; no usar en producción. Ver sección "Auth scaffold (Fase 1)". |
 | `POST` | `/advisor/profile-approval` | **Fase 1 — primer acto formal del asesor.** Registra la decisión del asesor (`approve` / `modify` / `reject`) sobre un perfil propuesto, con rationale obligatorio. Persiste como record `advisor_profile_approval_NNNNNN`. Requiere Bearer token válido. Sin RBAC todavía (advisor y compliance ambos pueden registrar). |
 | `POST` | `/advisor/override-approval` | **Fase 1 — segundo acto formal del asesor.** Registra `approve` / `reject` sobre una variante (típicamente `GROWTH`) que excede el RiskBudget aprobado, con rationale obligatorio + reason_codes + exceeded_constraints. Persiste como record `advisor_override_approval_NNNNNN`. Requiere Bearer token válido. No valida todavía contra existencia real del candidate. |
+| `POST` | `/advisor/portfolio-selection` | **Fase 1 — tercer acto formal del asesor.** Registra la selección final de la variante (`DEFENSIVE` / `BALANCED` / `GROWTH`) a presentar al cliente, con rationale obligatorio y enlaces opcionales a `related_record_id` (portfolio candidate) y `override_approval_record_id`. Si `GROWTH` se selecciona sin override link, la response incluye un warning. Persiste como record `advisor_portfolio_selection_NNNNNN`. Requiere Bearer token válido. No valida todavía contra existencia real de los records enlazados. |
 | `POST` | `/demo/run` | Ejecuta workflow demo con fixtures |
 | `POST` | `/workflow/run` | **Scripted deterministic demo.** Ejecuta el pipeline (governance → suitability → ESG → DQ → optimizer) con `MockAIClient` y `ScriptedAdvisorInterface`. No llama OpenAI ni involucra a un asesor real. Sirve para validar persistencia, audit y reporte. La respuesta incluye `execution_mode="scripted_demo"` y `is_production_ready=false`. |
 | `GET` | `/workflow/{record_id}` | Recupera un workflow por ID |
@@ -613,7 +685,7 @@ Cuando `GROWTH` excede el RiskBudget aprobado, `PortfolioCandidateSet` almacena 
 | `reports/demo_advisory_report.md` | `scripts/run_demo.py` | Reporte Markdown del workflow demo |
 | `reports/demo_api_report.md` | `POST /demo/run` | Reporte Markdown vía API |
 | `reports/workflow_<client_id>.md` | `POST /workflow/run` | Reporte Markdown por cliente |
-| `data/demo_api.db` | `POST /demo/run`, `POST /workflow/run`, `POST /ai/filtered-portfolio-demo`, `POST /advisor/profile-approval` o `POST /advisor/override-approval` | SQLite con workflow, audit, report, ai_filtered_portfolio, advisor_profile_approval y advisor_override_approval records |
+| `data/demo_api.db` | `POST /demo/run`, `POST /workflow/run`, `POST /ai/filtered-portfolio-demo`, `POST /advisor/profile-approval`, `POST /advisor/override-approval` o `POST /advisor/portfolio-selection` | SQLite con workflow, audit, report, ai_filtered_portfolio, advisor_profile_approval, advisor_override_approval y advisor_portfolio_selection records |
 
 Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefijo y se resetean si el servidor se reinicia sin persistencia previa.
 

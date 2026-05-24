@@ -331,6 +331,69 @@ class SQLiteAuditRepository(AuditRepository):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class SQLiteAdvisorPortfolioSelectionRepository:
+    """
+    Persiste la selección final del asesor sobre la variante de portfolio
+    a presentar al cliente (`POST /advisor/portfolio-selection`).
+
+    record_type = "advisor_portfolio_selection"
+    id prefix   = "advisor_portfolio_selection_"
+
+    Metadata mínima persistida (para filtrar sin deserializar el payload):
+        - client_id
+        - advisor_id
+        - selected_variant            (DEFENSIVE | BALANCED | GROWTH)
+        - related_record_id           (None si no se enlazó)
+        - override_approval_record_id (None si no se enlazó)
+        - endpoint
+        - source_type
+
+    Diseño: igual que los otros SQLite*ApprovalRepository de Fase 1 — no usa
+    ABC porque no existe un patrón in-memory equivalente todavía.
+    """
+
+    def __init__(self, store: SQLitePersistenceStore) -> None:
+        self._store = store
+
+    def save_selection(
+        self,
+        payload: dict[str, Any],
+        client_id: str,
+        advisor_id: str,
+        selected_variant: str,
+        related_record_id: str | None,
+        override_approval_record_id: str | None,
+    ) -> StoredRecord:
+        record_id = self._store._next_id("advisor_portfolio_selection_")
+        return self._store._insert_record(
+            record_id=record_id,
+            record_type="advisor_portfolio_selection",
+            client_id=client_id,
+            created_at_utc=_now_utc(),
+            payload=payload,
+            metadata={
+                "client_id": client_id,
+                "advisor_id": advisor_id,
+                "selected_variant": selected_variant,
+                "related_record_id": related_record_id,
+                "override_approval_record_id": override_approval_record_id,
+                "endpoint": "/advisor/portfolio-selection",
+                "source_type": "advisor_portfolio_selection",
+            },
+        )
+
+    def get_selection(self, record_id: str) -> StoredRecord:
+        return self._store._get_record(
+            record_id,
+            f"Advisor portfolio selection no encontrado: {record_id!r}",
+        )
+
+    def list_selections(
+        self, client_id: str | None = None
+    ) -> list[StoredRecord]:
+        return self._store._list_records("advisor_portfolio_selection", client_id)
+
+
 class SQLiteAdvisorOverrideApprovalRepository:
     """
     Persiste decisiones del asesor sobre advisor override de variantes que

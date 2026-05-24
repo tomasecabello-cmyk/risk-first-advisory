@@ -162,18 +162,22 @@ Expone dos dependencias FastAPI:
 
 1. ~~**Primer endpoint protegido del asesor**~~ ✅ `POST /advisor/profile-approval` agregado: registra `approve`/`modify`/`reject` con rationale obligatorio. Persiste como `advisor_profile_approval_NNNNNN`. Sin RBAC todavía (cualquier identidad demo puede registrar).
 2. ~~**Segundo endpoint: advisor override de GROWTH**~~ ✅ `POST /advisor/override-approval` agregado: registra `approve`/`reject` sobre una variante (típicamente GROWTH) que excede el RiskBudget aprobado, con reason_codes y exceeded_constraints explícitos. Persiste como `advisor_override_approval_NNNNNN`. NO valida todavía contra existencia real del candidate ni del record relacionado.
-3. **Conciliación dominio ↔ API**: el módulo `human_layer.override_approval.AdvisorOverrideApproval` ya existía con un contrato más estricto (enums, comment ≥ 20 chars, validación contra `PortfolioVariantMetadata` viva) pensado para integración con workflow. El endpoint API usa schemas independientes y más laxos (rationale ≥ 1 char, sin live metadata). Cuando exista un endpoint que invoque el override desde dentro de un workflow corriendo (en lugar de "registro post-mortem"), conviene unificar ambos o usar el dominio como capa interna.
-4. **Validación contra existencia real del candidate** (post-Fase 1):
-   - Si `related_record_id` se provee y apunta a un `ai_filtered_portfolio_NNNNNN`, verificar que el candidate_variant exista en ese record y que efectivamente tenga `requires_advisor_override=True`.
+3. ~~**Tercer endpoint: selección final de cartera**~~ ✅ `POST /advisor/portfolio-selection` agregado: registra la variante final (`DEFENSIVE`/`BALANCED`/`GROWTH`) a presentar al cliente, con `related_record_id` y `override_approval_record_id` opcionales. Si selected_variant=GROWTH y override_approval_record_id está vacío, la response incluye warning `"GROWTH selected without linked override approval record."` (persistido también en el payload). NO bloquea — solo deja rastro. NO valida todavía contra existencia real de los records enlazados.
+4. **Conciliación dominio ↔ API**: el módulo `human_layer.override_approval.AdvisorOverrideApproval` ya existía con un contrato más estricto (enums, comment ≥ 20 chars, validación contra `PortfolioVariantMetadata` viva) pensado para integración con workflow. El endpoint API usa schemas independientes y más laxos (rationale ≥ 1 char, sin live metadata). Cuando exista un endpoint que invoque el override desde dentro de un workflow corriendo (en lugar de "registro post-mortem"), conviene unificar ambos o usar el dominio como capa interna.
+5. **Validación contra existencia real de records enlazados** (post-Fase 1):
+   - `/advisor/override-approval`: si `related_record_id` apunta a un `ai_filtered_portfolio_NNNNNN`, verificar que el `candidate_variant` exista en ese record y que efectivamente tenga `requires_advisor_override=True`.
+   - `/advisor/portfolio-selection`: si `related_record_id` apunta a un `ai_filtered_portfolio_NNNNNN`, verificar que `selected_variant` esté entre los candidatos generados. Si `override_approval_record_id` apunta a un `advisor_override_approval_NNNNNN`, verificar que el `advisor_id`, `client_id`, `candidate_variant` y `decision="approve"` sean coherentes con la selección.
    - Si los datos no coinciden, devolver 422 o registrar con flag `_inconsistent_with_source=True` para que compliance lo revise.
-5. **Proteger endpoints adicionales** con `Depends(get_current_advisor_required)`:
-   - Selección de variante a presentar al cliente (`POST /advisor/variant-selection`).
-   - Cualquier endpoint que registre eventos en audit trail debe atribuirse a un `advisor_id` real.
-6. **RBAC por rol** — restringir endpoints de decisión a `roles=["advisor"]`; permitir a `compliance` solo retrieval/listado. Endpoints pending: `GET /advisor/profile-approval/{record_id}`, `GET /advisor/override-approval/{record_id}` y listing por `client_id`.
-7. **Reemplazar el mapa hard-coded** por un identity provider externo (OIDC, SAML, JWT firmado por IdP).
-8. **Persistir `advisor_id` en audit trail** en cada acción de aprobación (no solo el `advisor_id` declarado en `WorkflowRunRequest`).
-9. **Multi-tenant**: poblar `firm_id` desde el IdP y propagar como filtro implícito en todas las consultas al record store.
-10. **Roles**: actualmente sólo `advisor` y `compliance`; ampliar (`reviewer`, `admin`, etc.) cuando los flujos de aprobación lo justifiquen, y agregar checks por rol en cada endpoint que lo necesite.
+6. **Endpoints de retrieval** (post-Fase 1):
+   - `GET /advisor/profile-approval/{record_id}`
+   - `GET /advisor/override-approval/{record_id}`
+   - `GET /advisor/portfolio-selection/{record_id}`
+   - Listing por `client_id` para los tres (los repos ya lo soportan vía `list_*`).
+7. **RBAC por rol** — restringir endpoints de decisión a `roles=["advisor"]`; permitir a `compliance` solo retrieval/listado.
+8. **Reemplazar el mapa hard-coded** por un identity provider externo (OIDC, SAML, JWT firmado por IdP).
+9. **Persistir `advisor_id` en audit trail** en cada acción de aprobación (no solo el `advisor_id` declarado en `WorkflowRunRequest`).
+10. **Multi-tenant**: poblar `firm_id` desde el IdP y propagar como filtro implícito en todas las consultas al record store.
+11. **Roles**: actualmente sólo `advisor` y `compliance`; ampliar (`reviewer`, `admin`, etc.) cuando los flujos de aprobación lo justifiquen, y agregar checks por rol en cada endpoint que lo necesite.
 
 ---
 
