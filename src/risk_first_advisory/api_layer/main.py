@@ -23,11 +23,16 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
+from risk_first_advisory.api_layer.auth import (
+    AdvisorIdentity,
+    get_current_advisor_required,
+)
 from risk_first_advisory.api_layer.schemas import (
+    AdvisorIdentityResponse,
     AIContradictionResponse,
     AIFilteredPortfolioRequest,
     AIFilteredPortfolioResponse,
@@ -707,6 +712,29 @@ def _get_openai_profile_client():
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service="risk-first-advisory")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /auth/me — diagnostic endpoint for the Phase-1 advisor-auth scaffold.
+#
+# DEVELOPMENT-ONLY. Returns the advisor identity resolved from the Bearer
+# token in the Authorization header. Used to validate auth wiring without
+# touching any existing flow. The /ai/*, /workflow/*, /live/*, /universe/*
+# and /demo/* endpoints DO NOT require auth yet — that hardening will be
+# rolled out endpoint-by-endpoint in later Phase-1 tasks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.get("/auth/me", response_model=AdvisorIdentityResponse)
+def auth_me(
+    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorIdentityResponse:
+    return AdvisorIdentityResponse(
+        advisor_id=advisor.advisor_id,
+        display_name=advisor.display_name,
+        firm_id=advisor.firm_id,
+        roles=list(advisor.roles),
+    )
 
 
 @app.post("/demo/run", response_model=DemoRunResponse)

@@ -132,6 +132,45 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ---
 
+## Advisor auth scaffold — Fase 1 (development-only)
+
+### Estado actual
+
+`api_layer/auth.py` implementa una resolución de identidad por Bearer token con un mapa hard-coded de tokens demo:
+
+- `dev-advisor-token` → `ADV-001` (rol `advisor`)
+- `dev-compliance-token` → `CMP-001` (rol `compliance`)
+
+Expone dos dependencias FastAPI:
+
+- `get_current_advisor_required` — usar en endpoints de aprobación / override.
+- `get_current_advisor_optional` — usar en endpoints que aún funcionan de forma anónima en demo.
+
+Único endpoint nuevo: `GET /auth/me` (diagnóstico). Ningún otro endpoint requiere auth en Fase 1; eso se irá habilitando endpoint por endpoint.
+
+### Limitaciones intencionales (por qué NO usar esto en producción)
+
+- Tokens hard-coded en el código fuente. Sin `.env`, sin secret store.
+- Sin firma criptográfica (no JWT, no PASETO).
+- Sin TTL, rotación, revocación, refresh.
+- Sin emisión de tokens (no hay `/auth/login`).
+- Sin tenancy (`firm_id` siempre `None` para los tokens demo).
+- Sin rate limiting / protección de brute force.
+- Sin auditoría de intentos fallidos.
+
+### Próximos pasos (post-Fase 1 inicial)
+
+1. **Proteger endpoints de aprobación uno por uno** con `Depends(get_current_advisor_required)`:
+   - Firma de advisor override de GROWTH.
+   - Selección de variante a presentar al cliente.
+   - Cualquier endpoint que registre eventos en audit trail debe atribuirse a un `advisor_id` real.
+2. **Reemplazar el mapa hard-coded** por un identity provider externo (OIDC, SAML, JWT firmado por IdP).
+3. **Persistir `advisor_id` en audit trail** en cada acción de aprobación (no solo el `advisor_id` declarado en `WorkflowRunRequest`).
+4. **Multi-tenant**: poblar `firm_id` desde el IdP y propagar como filtro implícito en todas las consultas al record store.
+5. **Roles**: actualmente sólo `advisor` y `compliance`; ampliar (`reviewer`, `admin`, etc.) cuando los flujos de aprobación lo justifiquen, y agregar checks por rol en cada endpoint que lo necesite.
+
+---
+
 ## AI Filtered Portfolio — pendientes de diseño (MVP post)
 
 ### Persistencia y reporte ✅ CERRADO EN FASE 0

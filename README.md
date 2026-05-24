@@ -8,10 +8,11 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **1994 tests, todos verdes** (unit + integration)
+- **2024 tests, todos verdes** (unit + integration)
 - MVP local visual completo — frontend estático en `frontend/index.html`
-- Backend FastAPI con 14 endpoints expuestos
+- Backend FastAPI con 15 endpoints expuestos
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
+- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`). Sin auth global todavía; los endpoints de aprobación se irán protegiendo uno por uno.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -209,6 +210,61 @@ El frontend muestra un banner de advertencia amarillo con los constraints excedi
 
 ---
 
+## Auth scaffold (Fase 1)
+
+> ⚠ **DEVELOPMENT-ONLY.** El módulo `api_layer/auth.py` implementa una resolución de identidad por Bearer token usando un mapa hard-coded de tokens demo. No es apto para producción. No carga `.env`. No firma JWT. No rotaciones. No es multi-tenant.
+
+### Tokens demo
+
+| Token (header `Authorization: Bearer <token>`) | `advisor_id` | `roles` |
+|---|---|---|
+| `dev-advisor-token` | `ADV-001` | `["advisor"]` |
+| `dev-compliance-token` | `CMP-001` | `["compliance"]` |
+
+### Dependencias FastAPI
+
+`api_layer/auth.py` expone dos dependencias para que los próximos endpoints de aprobación / override puedan resolver al asesor:
+
+- `get_current_advisor_required` — siempre exige `Authorization: Bearer <token>` válido; 401 en caso contrario. Usar en endpoints donde la identidad del asesor es obligatoria (firma de override, selección de variante, etc.).
+- `get_current_advisor_optional` — devuelve `AdvisorIdentity | None`. Si el header no está, devuelve `None`. Si está presente pero es inválido, 401. Usar en endpoints que pueden seguir funcionando de forma anónima pero quieren aprovechar la identidad cuando exista.
+
+### Endpoint diagnóstico
+
+```
+GET /auth/me
+Authorization: Bearer dev-advisor-token
+
+200 OK
+{
+  "advisor_id": "ADV-001",
+  "display_name": "Demo Advisor",
+  "firm_id": null,
+  "roles": ["advisor"]
+}
+```
+
+Errores de auth siempre devuelven el mismo detalle genérico para no filtrar información:
+
+```
+401 Unauthorized
+WWW-Authenticate: Bearer
+{ "detail": "Invalid or missing advisor authentication token." }
+```
+
+### No regresión en Fase 1
+
+Los siguientes endpoints siguen funcionando **sin token**:
+- `GET /health`
+- `POST /demo/run`, `POST /workflow/run`
+- `POST /live/portfolio-demo`
+- `POST /universe/filter-demo`
+- `POST /ai/profile-demo`, `/ai/profile-follow-up`, `/ai/investment-preferences`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`
+- `GET /workflow`, `/reports`, `/audit`, y sus variantes por `record_id`
+
+La protección se aplicará endpoint por endpoint en próximas tareas de Fase 1 (advisor override, selección de variante, etc.).
+
+---
+
 ## Setup (Windows PowerShell)
 
 ```powershell
@@ -232,7 +288,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~40 segundos, 1994 tests.
+Suite completa (unit + integration): ~50 segundos, 2024 tests.
 
 ```powershell
 # Solo tests de API
@@ -329,6 +385,7 @@ python scripts/run_ai_filtered_portfolio_demo.py --preferences "Solo quiero inve
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/health` | Estado del backend |
+| `GET` | `/auth/me` | **Fase 1 — scaffold de auth (development-only).** Resuelve la identidad del asesor a partir del header `Authorization: Bearer <token>`. Devuelve 401 si falta o es inválido. Tokens demo hard-coded; no usar en producción. Ver sección "Auth scaffold (Fase 1)". |
 | `POST` | `/demo/run` | Ejecuta workflow demo con fixtures |
 | `POST` | `/workflow/run` | **Scripted deterministic demo.** Ejecuta el pipeline (governance → suitability → ESG → DQ → optimizer) con `MockAIClient` y `ScriptedAdvisorInterface`. No llama OpenAI ni involucra a un asesor real. Sirve para validar persistencia, audit y reporte. La respuesta incluye `execution_mode="scripted_demo"` y `is_production_ready=false`. |
 | `GET` | `/workflow/{record_id}` | Recupera un workflow por ID |

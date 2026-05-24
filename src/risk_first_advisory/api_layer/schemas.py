@@ -19,6 +19,20 @@ class HealthResponse(BaseModel):
     service: str
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# /auth/me  (Phase 1 — development-only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AdvisorIdentityResponse(BaseModel):
+    """Identidad resuelta del asesor para diagnóstico (`GET /auth/me`)."""
+
+    advisor_id:   str
+    display_name: str
+    firm_id:      str | None  = None
+    roles:        list[str]
+
+
 class PersistenceRecordIds(BaseModel):
     workflow_record_id: str
     audit_record_id: str | None = None
