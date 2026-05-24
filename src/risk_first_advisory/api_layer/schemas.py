@@ -67,6 +67,68 @@ _VALID_EXPERIENCES = frozenset(
      "none", "basic", "moderate", "advanced", "expert"}
 )
 
+# Mirrors enums in risk_first_advisory.kyc.models. Duplicated to avoid an
+# api_layer→kyc dependency on enum string literals here. If the domain enums
+# change, validators below will reject requests with the old vocabulary.
+_VALID_INVESTMENT_OBJECTIVES = frozenset({
+    "capital_preservation", "income", "balanced", "growth", "aggressive_growth"
+})
+
+_VALID_ESG_STRICTNESS = frozenset({"none", "light", "strict", "impact"})
+
+# Matches ESGExclusion.__post_init__ in kyc.models.
+_VALID_ESG_EXCLUSION_TYPES = frozenset({
+    "sector", "activity", "issuer", "country", "tag", "controversy"
+})
+
+
+class ESGExclusionRequest(BaseModel):
+    """Mirror de `kyc.models.ESGExclusion` para la API."""
+
+    excluded_item:  str  = Field(min_length=1)
+    exclusion_type: str
+    source:         str  = Field(min_length=1)
+    rationale:      str  = ""
+
+    @field_validator("excluded_item")
+    @classmethod
+    def _validate_excluded_item(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("excluded_item no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("exclusion_type")
+    @classmethod
+    def _validate_exclusion_type(cls, v: str) -> str:
+        if v not in _VALID_ESG_EXCLUSION_TYPES:
+            raise ValueError(
+                f"exclusion_type inválido: {v!r}. "
+                f"Opciones: {sorted(_VALID_ESG_EXCLUSION_TYPES)}."
+            )
+        return v
+
+
+class ESGPreferenceRequest(BaseModel):
+    """Mirror de `kyc.models.ESGPreference` para la API."""
+
+    preference_type:    str           = Field(min_length=1)
+    weight:             float         = Field(ge=0.0, le=1.0)
+    minimum_threshold:  float | None  = None
+
+    @field_validator("preference_type")
+    @classmethod
+    def _validate_preference_type(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("preference_type no puede ser solo espacios en blanco.")
+        return v
+
 
 class KYCDataRequest(BaseModel):
     age: int = Field(default=40, ge=18, le=120)
@@ -85,6 +147,25 @@ class KYCDataRequest(BaseModel):
     open_past_experience: str | None = None
     open_concerns: str | None = None
 
+    # ── Phase-1.5: campos antes hardcodeados en _build_kyc_data ───────────
+    # Todos llevan defaults backward-compatible (los mismos valores que
+    # _build_kyc_data hardcodeaba antes). Los tests/payloads existentes
+    # siguen funcionando sin cambios.
+    jurisdiction:            str          = "AR"
+    preferred_currency:      str          = "USD"
+    investment_objective:    str          = "balanced"
+    prefers_simple_products: bool         = False
+    # Si annual_income_usd es None → /workflow/run mantiene el fallback
+    # histórico de derivarlo desde liquid_net_worth * 0.05 (documentado).
+    annual_income_usd:       float | None = Field(default=None, ge=0.0)
+
+    # ESG — opcional. Por defecto se construye un ESGProfile vacío
+    # (strictness_level=none, sin exclusions/preferences) que reproduce
+    # el comportamiento previo del endpoint.
+    esg_strictness_level: str                          = "none"
+    esg_exclusions:       list[ESGExclusionRequest]    = Field(default_factory=list)
+    esg_preferences:      list[ESGPreferenceRequest]   = Field(default_factory=list)
+
     @field_validator("investment_experience")
     @classmethod
     def validate_experience(cls, v: str) -> str:
@@ -94,6 +175,42 @@ class KYCDataRequest(BaseModel):
                 f"Opciones: {sorted(_VALID_EXPERIENCES)}"
             )
         return v.lower()
+
+    @field_validator("jurisdiction")
+    @classmethod
+    def _validate_jurisdiction(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("jurisdiction no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("preferred_currency")
+    @classmethod
+    def _validate_preferred_currency(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("preferred_currency no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("investment_objective")
+    @classmethod
+    def _validate_investment_objective(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in _VALID_INVESTMENT_OBJECTIVES:
+            raise ValueError(
+                f"investment_objective inválido: {v!r}. "
+                f"Opciones: {sorted(_VALID_INVESTMENT_OBJECTIVES)}."
+            )
+        return normalized
+
+    @field_validator("esg_strictness_level")
+    @classmethod
+    def _validate_esg_strictness_level(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in _VALID_ESG_STRICTNESS:
+            raise ValueError(
+                f"esg_strictness_level inválido: {v!r}. "
+                f"Opciones: {sorted(_VALID_ESG_STRICTNESS)}."
+            )
+        return normalized
 
 
 class FinancialGoalRequest(BaseModel):

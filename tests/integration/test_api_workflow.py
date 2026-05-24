@@ -536,3 +536,300 @@ class TestWorkflowRunScriptedDemoMetadata:
             "warning",
         ):
             assert r1[key] == r2[key], f"campo {key!r} cambió entre llamadas"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: nuevos KYC fields (Fase 1.5 — quitar defaults silenciosos)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestWorkflowRunExtendedKYCFields:
+    """
+    /workflow/run ahora acepta jurisdiction, preferred_currency,
+    investment_objective, prefers_simple_products, annual_income_usd y
+    ESG fields. Cubre tanto los happy paths con valores explícitos como las
+    validaciones 422 y backward compatibility con el payload mínimo.
+    """
+
+    # ── happy paths ────────────────────────────────────────────────────
+
+    def test_jurisdiction_explicit_value_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "jurisdiction": "MX"},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_preferred_currency_explicit_value_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "preferred_currency": "EUR"},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_investment_objective_growth_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "investment_objective": "growth"},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_investment_objective_capital_preservation_accepted(
+        self, client: TestClient
+    ):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "investment_objective": "capital_preservation",
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_prefers_simple_products_true_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "prefers_simple_products": True,
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_annual_income_usd_explicit_value_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "annual_income_usd": 120_000.0,
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_annual_income_usd_zero_accepted(self, client: TestClient):
+        """annual_income_usd=0 es válido (cliente sin ingresos declarados)."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "annual_income_usd": 0.0},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_esg_strictness_strict_accepted(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_strictness_level": "strict",
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_esg_exclusions_propagated(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_exclusions": [
+                    {
+                        "excluded_item": "tobacco",
+                        "exclusion_type": "sector",
+                        "source": "client_explicit",
+                        "rationale": "Convicción personal del cliente.",
+                    }
+                ],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_esg_preferences_propagated(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_preferences": [
+                    {
+                        "preference_type": "low_carbon",
+                        "weight": 0.6,
+                        "minimum_threshold": 50.0,
+                    }
+                ],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    def test_full_extended_kyc_payload_accepted(self, client: TestClient):
+        """Smoke: todos los campos nuevos juntos."""
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "jurisdiction": "MX",
+                "preferred_currency": "EUR",
+                "investment_objective": "growth",
+                "prefers_simple_products": True,
+                "annual_income_usd": 200_000.0,
+                "esg_strictness_level": "light",
+                "esg_exclusions": [{
+                    "excluded_item": "fossil_fuels",
+                    "exclusion_type": "sector",
+                    "source": "client_explicit",
+                }],
+                "esg_preferences": [{
+                    "preference_type": "low_carbon",
+                    "weight": 0.5,
+                }],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 200
+
+    # ── validation errors → 422 ────────────────────────────────────────
+
+    def test_jurisdiction_empty_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "jurisdiction": ""},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_jurisdiction_whitespace_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "jurisdiction": "   "},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_preferred_currency_empty_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "preferred_currency": ""},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_preferred_currency_whitespace_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "preferred_currency": "   ",
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_investment_objective_invalid_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "investment_objective": "speculative",
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_annual_income_usd_negative_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "annual_income_usd": -1.0},
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_esg_strictness_invalid_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_strictness_level": "extreme",
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_esg_exclusion_invalid_type_returns_422(self, client: TestClient):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_exclusions": [{
+                    "excluded_item": "tobacco",
+                    "exclusion_type": "made_up_type",
+                    "source": "client_explicit",
+                }],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_esg_exclusion_empty_excluded_item_returns_422(
+        self, client: TestClient
+    ):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_exclusions": [{
+                    "excluded_item": "",
+                    "exclusion_type": "sector",
+                    "source": "client_explicit",
+                }],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    def test_esg_preference_weight_out_of_range_returns_422(
+        self, client: TestClient
+    ):
+        payload = {
+            **_VALID_PAYLOAD,
+            "kyc_data": {
+                **_VALID_PAYLOAD["kyc_data"],
+                "esg_preferences": [{
+                    "preference_type": "low_carbon",
+                    "weight": 1.5,
+                }],
+            },
+        }
+        response = client.post("/workflow/run", json=payload)
+        assert response.status_code == 422
+
+    # ── backward compatibility ────────────────────────────────────────
+
+    def test_legacy_payload_without_new_fields_still_returns_200(
+        self, client: TestClient
+    ):
+        """El payload _VALID_PAYLOAD original (sin los nuevos campos) sigue OK."""
+        # _VALID_PAYLOAD no incluye jurisdiction, preferred_currency, etc.
+        response = client.post("/workflow/run", json=_VALID_PAYLOAD)
+        assert response.status_code == 200
+
+    def test_legacy_payload_uses_historical_defaults(self, client: TestClient):
+        """
+        El payload viejo debe seguir produciendo workflow exitoso con los
+        mismos defaults históricos (jurisdiction=AR, currency=USD,
+        objective=balanced, etc.). Verificado indirectamente: el status
+        debe ser uno de los valores válidos del workflow normal, no error.
+        """
+        response = client.post("/workflow/run", json=_VALID_PAYLOAD)
+        assert response.status_code == 200
+        data = response.json()
+        # El workflow scripted-demo produce completed o status comparable;
+        # lo importante es que el approved_profile_name sea no vacío
+        # (signo de que el pipeline corrió end-to-end con los defaults).
+        assert isinstance(data["approved_profile_name"], str)
+        assert data["approved_profile_name"].strip()

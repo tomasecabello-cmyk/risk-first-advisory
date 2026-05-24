@@ -326,7 +326,19 @@ def _build_goal(fixture: dict) -> FinancialGoal:
 
 
 def _build_kyc_data(req: KYCDataRequest) -> KYCData:
-    """Convierte KYCDataRequest a KYCData con valores por defecto razonables."""
+    """
+    Convierte KYCDataRequest a KYCData usando los campos reales del request.
+
+    Cambios Fase 1.5:
+        - jurisdiction / preferred_currency / investment_objective /
+          prefers_simple_products vienen del request (antes eran hardcoded).
+        - annual_income_usd se respeta cuando viene en el request; si es None,
+          se mantiene el fallback histórico (liquid_net_worth * 0.05) por
+          backward compatibility con payloads existentes.
+        - ESGProfile se construye desde esg_strictness_level / esg_exclusions /
+          esg_preferences del request. Si no se mandan, se construye un perfil
+          vacío equivalente al ESGProfile() anterior.
+    """
     experience = _EXPERIENCE_MAP.get(req.investment_experience, InvestorExperience.MODERATE)
     needs_income = req.income_stability.lower() != "stable"
     # La tolerancia psicológica es el mínimo entre el score y el drawdown declarado.
@@ -334,23 +346,55 @@ def _build_kyc_data(req: KYCDataRequest) -> KYCData:
         req.risk_tolerance_score * 10.0,
         req.max_acceptable_drawdown_pct,
     )
-    # annual_income_usd: derivado del liquid_net_worth cuando no se declara explícitamente.
-    annual_income = max(req.liquid_net_worth * 0.05, 1.0)
+
+    # annual_income_usd:
+    #   - si el request lo provee, se usa tal cual (validado >= 0 por Pydantic).
+    #   - si es None, fallback histórico derivado del liquid_net_worth para no
+    #     romper payloads que no declaran ingresos. Min 1.0 evita 0 que rompería
+    #     ratios downstream.
+    if req.annual_income_usd is not None:
+        annual_income = req.annual_income_usd
+    else:
+        annual_income = max(req.liquid_net_worth * 0.05, 1.0)
+
+    # ESGProfile construido desde el request. Las listas vacías por defecto
+    # producen un perfil sin exclusions/preferences (equivalente a ESGProfile()).
+    esg_profile = ESGProfile(
+        strictness_level=ESGStrictnessLevel(req.esg_strictness_level),
+        hard_exclusions=[
+            ESGExclusion(
+                excluded_item=ex.excluded_item,
+                exclusion_type=ex.exclusion_type,
+                source=ex.source,
+                rationale=ex.rationale,
+            )
+            for ex in req.esg_exclusions
+        ],
+        soft_preferences=[
+            ESGPreference(
+                preference_type=p.preference_type,
+                weight=p.weight,
+                minimum_threshold=p.minimum_threshold,
+            )
+            for p in req.esg_preferences
+        ],
+    )
+
     return KYCData(
         age=req.age,
         annual_income_usd=annual_income,
         approx_net_worth_usd=req.net_worth,
-        investment_objective=InvestmentObjective.BALANCED,
+        investment_objective=InvestmentObjective(req.investment_objective),
         time_horizon_years=req.investment_horizon_years,
         liquidity_need_pct=req.liquidity_need_score / 10.0,
         experience=experience,
         emotional_loss_tolerance_pct=emotional_tolerance,
         financial_loss_capacity_pct=req.risk_capacity_score * 10.0,
-        preferred_currency="USD",
+        preferred_currency=req.preferred_currency,
         needs_income=needs_income,
-        prefers_simple_products=False,
-        jurisdiction="AR",
-        esg_profile=ESGProfile(),
+        prefers_simple_products=req.prefers_simple_products,
+        jurisdiction=req.jurisdiction,
+        esg_profile=esg_profile,
         open_investment_goal=req.open_investment_goal or "",
         open_risk_reaction=req.open_risk_reaction or "",
         open_past_experience=req.open_past_experience or "",

@@ -13,6 +13,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - Backend FastAPI con 18 endpoints expuestos
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
 - **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). El frontend estático ya expone un card **"Advisor Decisions Demo — Phase 1"** que invoca los cuatro endpoints (`/auth/me` + las tres acciones formales). Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
+- **Fase 1.5 — KYC fields auditables:** `KYCDataRequest` del `/workflow/run` acepta ahora `jurisdiction`, `preferred_currency`, `investment_objective`, `prefers_simple_products`, `annual_income_usd` y campos ESG (`esg_strictness_level`, `esg_exclusions`, `esg_preferences`). Antes el helper `_build_kyc_data` hardcodeaba estos campos silenciosamente; ahora se reciben y validan. Todos llevan defaults backward-compatible para no romper payloads existentes.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
 - **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
@@ -502,7 +503,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~50 segundos, 2145 tests.
+Suite completa (unit + integration): ~50 segundos, 2208 tests.
 
 ```powershell
 # Solo tests de API
@@ -658,6 +659,67 @@ curl.exe -s -X POST http://127.0.0.1:8000/workflow/run `
       "target_amount": 200000,
       "horizon_years": 10,
       "annual_contribution": 5000
+    }
+  }'
+```
+
+##### Campos KYC adicionales (Fase 1.5 — opcionales, defaults backward-compatible)
+
+El `kyc_data` acepta también los siguientes campos. Antes, `_build_kyc_data` los hardcodeaba silenciosamente; ahora se reciben del request y se validan.
+
+| Campo | Tipo | Default | Reglas |
+|---|---|---|---|
+| `age` | int | `40` | `18 ≤ age ≤ 120` |
+| `jurisdiction` | str | `"AR"` | min_length=1, sin solo-whitespace |
+| `preferred_currency` | str | `"USD"` | min_length=1, sin solo-whitespace |
+| `investment_objective` | str | `"balanced"` | uno de: `capital_preservation`, `income`, `balanced`, `growth`, `aggressive_growth` (case-insensitive, se normaliza a lowercase) |
+| `prefers_simple_products` | bool | `false` | bool real (Pydantic acepta también truthy/falsy en modo laxo) |
+| `annual_income_usd` | float \| null | `null` | si viene, `>= 0`; si es `null`, **fallback histórico**: `max(liquid_net_worth * 0.05, 1.0)` |
+| `esg_strictness_level` | str | `"none"` | uno de: `none`, `light`, `strict`, `impact` (case-insensitive) |
+| `esg_exclusions` | list[obj] | `[]` | cada item: `excluded_item` (no vacío), `exclusion_type` ∈ {`sector`, `activity`, `issuer`, `country`, `tag`, `controversy`}, `source` (no vacío), `rationale` (opcional) |
+| `esg_preferences` | list[obj] | `[]` | cada item: `preference_type` (no vacío), `weight` ∈ `[0.0, 1.0]`, `minimum_threshold` (opcional float) |
+
+Notas:
+- El único default que sigue "inventando" valor es `annual_income_usd` cuando es `null`: se deriva del `liquid_net_worth` para no romper payloads viejos. Para evitar el fallback, mandar el valor explícito (incluido `0.0`).
+- ESG sigue siendo **básico** intencionalmente: dos listas planas (`esg_exclusions`, `esg_preferences`) + nivel de strictness. No hay `esg_min_score` global porque el dominio (`ESGProfile`) no lo soporta directamente; se modela vía `ESGPreference.minimum_threshold` por preferencia.
+
+Ejemplo con todos los campos nuevos:
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/workflow/run `
+  -H "Content-Type: application/json" `
+  -d '{
+    "client_id": "CLI-002",
+    "advisor_id": "ADV-001",
+    "kyc_data": {
+      "age": 45,
+      "risk_tolerance_score": 7,
+      "risk_capacity_score": 8,
+      "liquidity_need_score": 2,
+      "investment_horizon_years": 15,
+      "investment_experience": "avanzada",
+      "income_stability": "stable",
+      "net_worth": 800000,
+      "liquid_net_worth": 300000,
+      "max_acceptable_drawdown_pct": 30.0,
+      "jurisdiction": "MX",
+      "preferred_currency": "USD",
+      "investment_objective": "growth",
+      "prefers_simple_products": false,
+      "annual_income_usd": 180000,
+      "esg_strictness_level": "light",
+      "esg_exclusions": [
+        { "excluded_item": "tobacco", "exclusion_type": "sector", "source": "client_explicit", "rationale": "Convicción personal." }
+      ],
+      "esg_preferences": [
+        { "preference_type": "low_carbon", "weight": 0.6, "minimum_threshold": 50.0 }
+      ]
+    },
+    "financial_goal": {
+      "initial_amount": 100000,
+      "target_amount": 300000,
+      "horizon_years": 15,
+      "annual_contribution": 8000
     }
   }'
 ```

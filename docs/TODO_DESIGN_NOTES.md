@@ -132,6 +132,38 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ---
 
+## KYCDataRequest extended fields — Fase 1.5 ✅
+
+### Estado actual
+
+`/workflow/run` ya no inventa silenciosamente los siguientes campos:
+
+| Campo antes hardcoded | Estado actual |
+|---|---|
+| `jurisdiction="AR"` | viene del request (`KYCDataRequest.jurisdiction`, default `"AR"`, no vacío) |
+| `preferred_currency="USD"` | viene del request (default `"USD"`, no vacío) |
+| `investment_objective=BALANCED` | viene del request como string validado contra el enum (default `"balanced"`) |
+| `prefers_simple_products=False` | viene del request (default `false`) |
+| `annual_income_usd` derivado de `liquid_net_worth * 0.05` | viene del request si se manda; si no, **fallback histórico documentado** |
+| `ESGProfile()` vacío | construido desde `esg_strictness_level` + `esg_exclusions` + `esg_preferences` del request; default = perfil vacío equivalente |
+
+Todos los defaults son backward-compatible: payloads existentes siguen 200.
+
+### Limitaciones aceptadas
+
+- **ESG sigue básico.** El dominio `kyc.models.ESGProfile` no soporta `esg_min_score` global, así que el campo no se expone en la API. La granularidad fina queda en `ESGPreference.minimum_threshold` por preferencia.
+- **`annual_income_usd` con fallback.** Para no romper payloads sin ingresos declarados, el endpoint mantiene `annual_income = max(liquid_net_worth * 0.05, 1.0)` cuando el campo es `null`. Para auditoría productiva conviene exigir el valor explícito (eliminar fallback con un flag de config en una tarea posterior).
+- **`investment_experience` mapping legacy.** El mapeo `_EXPERIENCE_MAP` cae a `InvestorExperience.MODERATE` si recibe un alias desconocido — el validador Pydantic ya rechaza valores fuera de la lista, así que en práctica el fallback nunca se ejecuta vía API. Queda como defensa en profundidad.
+
+### Próximos pasos opcionales
+
+1. Hacer `annual_income_usd` obligatorio cuando un nuevo flag (`STRICT_KYC=true`) esté activo, para entornos productivos.
+2. Soporte de `esg_min_score` global si el dominio se expande (cambio en `ESGProfile`).
+3. Validación cruzada `investment_objective` vs `risk_tolerance_score` / `risk_capacity_score` (ej. avisar si `investment_objective="aggressive_growth"` con `risk_tolerance_score=2`).
+4. Mover los enums duplicados (`_VALID_INVESTMENT_OBJECTIVES`, `_VALID_ESG_STRICTNESS`, `_VALID_ESG_EXCLUSION_TYPES`) a un módulo compartido cuando crezca la API surface.
+
+---
+
 ## Advisor auth scaffold — Fase 1 (development-only)
 
 ### Estado actual
