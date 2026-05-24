@@ -112,7 +112,7 @@ Las siguientes funcionalidades no están implementadas en M1 y representan área
 | `OpenAIProfileClient` en producción | Los prompts de la IA real deben validarse periódicamente. Las respuestas de OpenAI son no determinísticas: el mismo KYC puede producir perfiles distintos en distintas llamadas. Requiere logging de todas las respuestas de OpenAI para auditoría. | M2/M3 |
 | `MockMarketDataProvider` con datos de fixture | Los datos de mercado en producción deben tener SLA de frescura, auditoría de fuente y control de calidad automatizado. | M2 |
 | Universo CSV de demo (`sample_instrument_universe.csv`) | Los retornos esperados de los instrumentos del universo CSV son derivados de YTM/cupón estáticos, no de precios de mercado actualizados. No aptos para producción. | M2 |
-| `GROWTH` no tiene advisor override persistido/firmado | GROWTH se marca con `PortfolioVariantMetadata` cuando excede el RiskBudget (implementado). Falta: endpoint/UI donde el asesor firme el override explícitamente y quede en el audit trail. | M2+ (DD-010) |
+| `GROWTH` sin firma digital ni integración con AuditTrail | GROWTH se marca con `PortfolioVariantMetadata` cuando excede el RiskBudget (**implementado**). `POST /advisor/override-approval` persiste la decisión del asesor como `advisor_override_approval_NNNNNN` (**Fase 1 ✅**). Pendiente: integrar el record en el `AuditTrail` del workflow principal; firma digital del asesor; RBAC explícito. | M2+ |
 | `ESGPreference` con `prefer_tag`/`avoid_tag` | Las preferencias cualitativas no se evalúan en M1. Los instrumentos afectados reciben `ESG_DATA_INCOMPLETE`. | M2 |
 | Sin persistencia de sesión | El `AuditTrail` se genera en memoria. En producción debe persistirse antes del cierre de sesión. | M2 |
 | Sin firma del asesor | `AdvisoryProfile.advisor_comment` es texto libre sin firma digital ni identificación verificada. | M3 |
@@ -165,9 +165,21 @@ Esta metadata se almacena en `PortfolioCandidateSet.metadata` y se muestra en el
 - `BALANCED` es siempre la recomendación base dentro del perfil aprobado.
 - El exceso de riesgo en `GROWTH` es auditable: queda en el `PortfolioCandidateSet`, en el reporte Markdown y (en el futuro) en el audit trail con firma del asesor.
 
-**Pendiente de compliance:**
+**Estado Fase 1 — advisor override persistido:**
 
-La firma explícita del asesor aceptando la variante `GROWTH` fuera del budget no está todavía implementada como acción persistida. El reporte expone la metadata visualmente, pero no existe un endpoint o UI donde el asesor confirme con trazabilidad que acepta presentar la variante `GROWTH` al cliente. Eso queda para la capa de workflow/UI futura. Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/TODO_DESIGN_NOTES.md`.
+`POST /advisor/override-approval` (Fase 1) permite al asesor registrar explícitamente la decisión de `approve` o `reject` sobre la variante GROWTH fuera del budget, con:
+- `rationale` obligatorio (≥ 1 carácter).
+- `reason_codes` y `exceeded_constraints` declarados por el asesor.
+- Identidad del asesor (`advisor_id`, `advisor_display_name`) resuelta desde el Bearer token.
+- Persistencia como record SQLite `advisor_override_approval_NNNNNN` con `created_at_utc`.
+
+**Pendiente de compliance (post-Fase 1):**
+
+- La decisión de override no está todavía integrada en el `AuditTrail` del workflow principal — solo vive como record SQLite independiente. Para auditoría completa: propagar a `AuditTrail` con evento `advisor_override_approval`.
+- No hay firma digital del asesor (el `rationale` es texto libre sin firma criptográfica ni identificación verificada por IdP).
+- El endpoint no valida todavía que la variante `candidate_variant` exista realmente en el `ai_filtered_portfolio_NNNNNN` apuntado por `related_record_id`, ni que `requires_advisor_override=True`. La validación cruzada queda para Fase 2.
+- No hay RBAC: cualquier token demo (advisor o compliance) puede registrar el override. Fase 2: restringir a `roles=["advisor"]`.
+- Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/TODO_DESIGN_NOTES.md`.
 
 ---
 
@@ -188,9 +200,10 @@ La separación entre IA y motor determinístico es un principio de diseño centr
 ### Lo que este endpoint NO hace (límites de diseño)
 
 - **No aprueba el perfil del cliente.** El `profile` se selecciona directamente como parámetro de demo. En producción debe surgir del proceso de perfilamiento y aprobación del asesor.
-- **No persiste el resultado.** Los portfolios generados no quedan en el audit trail. Esto es una limitación de la versión MVP documentada en `TODO_DESIGN_NOTES.md`.
-- **No genera un reporte para el cliente.** El endpoint devuelve JSON; la generación de un reporte Markdown o PDF para presentación al cliente está pendiente.
+- ~~**No persiste el resultado.**~~ — ✅ **Cerrado en Fase 0.** Cada respuesta de `/ai/filtered-portfolio-demo` se persiste en SQLite como record `ai_filtered_portfolio_NNNNNN` (payload completo + metadata) y el reporte Markdown como `report_NNNNNN`. Ambos IDs se exponen en la response (`record_id`, `report_record_id`). Aplica para los cuatro `status` posibles (`completed` y las tres variantes `blocked`).
+- **No genera un reporte comercial para el cliente.** El campo `report_markdown` es un reporte técnico para revisión del asesor (generado por `AIFilteredPortfolioReportGenerator`, 10 secciones fijas). No es un documento de presentación al cliente. No hay PDF ni firma digital en esta fase.
 - **No valida que el asesor haya revisado las preferencias extraídas por la IA.** Las preferencias estructuradas por OpenAI se aplican directamente al filtro sin un paso de revisión intermedio del asesor. En producción, el asesor debe poder ver y corregir las preferencias antes de que se apliquen.
+- **Las decisiones del asesor sobre el portfolio son actos separados.** Los tres endpoints de Fase 1 (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) permiten al asesor registrar formalmente sus decisiones sobre el resultado de `/ai/filtered-portfolio-demo`, enlazándolas por `related_record_id`. No están integrados en un flujo transaccional único todavía.
 
 ### Datos proxy y sus limitaciones
 

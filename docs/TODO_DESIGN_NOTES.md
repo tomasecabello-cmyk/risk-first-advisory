@@ -115,7 +115,7 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 
 ## Estado actual
 
-**Implementado parcialmente (M2-prep).**
+**Cerrado en Fase 1.**
 
 - `PortfolioVariantMetadata` agregado en `portfolio_layer/generation.py`.
 - `PortfolioCandidateSet` incluye campo `metadata: dict[PortfolioVariant, PortfolioVariantMetadata]`.
@@ -124,11 +124,17 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 - `GROWTH` **no** relaja `max_single_asset` por ahora (evita romper pre-checks de factibilidad).
 - Cuando `GROWTH` excede el budget original, queda marcado con `risk_budget_exceeded=True`, `requires_advisor_override=True` y `RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`.
 - El reporte Markdown muestra la metadata por variante bajo `**Variant Metadata:**`.
+- ~~El override del asesor todavía no es una acción persistida/firmada.~~ → **✅ Cerrado en Fase 1.** `POST /advisor/override-approval` persiste la decisión del asesor con rationale, reason_codes y exceeded_constraints como record `advisor_override_approval_NNNNNN` en SQLite. Requiere Bearer token.
+- ~~No existe un endpoint o UI donde el asesor seleccione la variante final.~~ → **✅ Cerrado en Fase 1.** `POST /advisor/portfolio-selection` registra la selección final (`DEFENSIVE`/`BALANCED`/`GROWTH`) con `override_approval_record_id` opcional. Si GROWTH se selecciona sin override link, se emite warning (persistido en payload). Requiere Bearer token.
 
-## Pendiente
+## Pendiente (Fase 2)
 
-- El override del asesor todavía no es una acción persistida/firmada. El reporte lo expone visualmente, pero no existe un endpoint o UI donde el asesor confirme explícitamente que acepta la variante GROWTH fuera del budget.
-- Eso queda para la capa de workflow/UI futura (firma de override, trazabilidad en audit trail).
+- **Validación cruzada de records existentes:** `/advisor/override-approval` no verifica que el `candidate_variant` exista en el `ai_filtered_portfolio_NNNNNN` apuntado por `related_record_id`, ni que `requires_advisor_override=True`. `/advisor/portfolio-selection` no verifica que `selected_variant` sea candidato real ni que el override aprobado sea coherente con la selección.
+- **Conciliación dominio ↔ API:** `human_layer.override_approval.AdvisorOverrideApproval` tiene un contrato más estricto (enums, comment ≥ 20 chars, validación contra `PortfolioVariantMetadata` viva) que los schemas API de Fase 1 (rationale ≥ 1 char, sin live metadata). Cuando el override se dispare desde dentro de un workflow corriendo (no como "registro post-mortem"), unificar.
+- **Endpoints de retrieval:** `GET /advisor/profile-approval/{record_id}`, `GET /advisor/override-approval/{record_id}`, `GET /advisor/portfolio-selection/{record_id}` + listing por `client_id`.
+- **Integración con AuditTrail:** las acciones del asesor (`profile-approval`, `override-approval`, `portfolio-selection`) aún no quedan como eventos en el `AuditTrail` del workflow principal. Solo se persisten como records SQLite independientes.
+- **RBAC por rol:** actualmente cualquier token demo (advisor o compliance) puede registrar cualquier decisión. Fase 2: restringir endpoints de decisión a `roles=["advisor"]`; compliance solo retrieval.
+- **Firma digital:** `rationale` es texto libre sin firma criptográfica ni identificación verificada del asesor. Para piloto productivo: JWT con identidad del IdP propagada al record.
 
 ---
 

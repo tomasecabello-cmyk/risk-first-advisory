@@ -8,11 +8,11 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **2145 tests, todos verdes** (unit + integration)
+- **2256 tests, todos verdes** (unit + integration)
 - MVP local visual completo — frontend estático en `frontend/index.html`
 - Backend FastAPI con 18 endpoints expuestos
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
-- **Fase 1 en curso:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). El frontend estático ya expone un card **"Advisor Decisions Demo — Phase 1"** que invoca los cuatro endpoints (`/auth/me` + las tres acciones formales). Sin auth global todavía; el resto de endpoints se irán protegiendo uno por uno.
+- **Fase 1 cerrada — local advisor pilot scaffold:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos con registro auditable en SQLite: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). El frontend estático expone un card **"Advisor Decisions Demo — Phase 1"** que invoca los cuatro endpoints (`/auth/me` + las tres acciones formales). Auth scaffold es development-only (tokens hard-coded); no hay auth global todavía ni RBAC por rol.
 - **Fase 1.5 — KYC fields auditables:** `KYCDataRequest` del `/workflow/run` acepta ahora `jurisdiction`, `preferred_currency`, `investment_objective`, `prefers_simple_products`, `annual_income_usd` y campos ESG (`esg_strictness_level`, `esg_exclusions`, `esg_preferences`). Antes el helper `_build_kyc_data` hardcodeaba estos campos silenciosamente; ahora se reciben y validan. Todos llevan defaults backward-compatible para no romper payloads existentes.
 - **Fase 1.6 — Supuestos críticos en config versionable:** los parámetros de `RiskBudgetBuilder` (`PROFILE_BASE_PARAMS`) y los retornos alcanzables de `GoalFeasibilityEngine` (`DEFAULT_ACHIEVABLE_RETURNS`) ya no son literales en Python — se cargan desde `config/risk_profiles.yaml` y `config/achievable_returns.yaml` vía `config_layer/risk_assumptions.py`. Los valores numéricos quedan idénticos; lo que cambia es que ahora viven en archivos auditables versionables en git. Siguen siendo supuestos demo, NO un CMA productivo.
 - **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
@@ -20,7 +20,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
 - Sin Bloomberg (datos de mercado reales para producción son out-of-scope del MVP)
 - Sin PostgreSQL (SQLite local para persistencia de sesión)
-- Sin autenticación (desarrollo local únicamente)
+- **Auth development-only (Fase 1):** Bearer token con mapa hard-coded de tokens demo (`dev-advisor-token`, `dev-compliance-token`). Sin JWT, sin IdP, sin rotación, sin RBAC real. Exclusivamente desarrollo local — ver sección "Auth scaffold (Fase 1)"
 
 ---
 
@@ -40,7 +40,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 | Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes |
 | Persistencia | `persistence_layer` | SQLite + repositorios in-memory |
 | Config | `config_layer` | Loader auditable de `config/risk_profiles.yaml` y `config/achievable_returns.yaml` (supuestos de RiskBudget y retornos alcanzables externalizados) |
-| API | `api_layer` | FastAPI: 14 endpoints — ejecución, recuperación, demo IA y demo portfolio |
+| API | `api_layer` | FastAPI: 19 endpoints — auth, decisiones del asesor, ejecución, recuperación, demo IA y demo portfolio |
 
 ---
 
@@ -815,11 +815,11 @@ Estos archivos están en `.gitignore`. Los record IDs son secuenciales por prefi
 |---|---|---|
 | ~~Reportes AI filtered portfolio~~ | ✅ Cerrado en Fase 0. `POST /ai/filtered-portfolio-demo` devuelve `report_markdown` generado por `AIFilteredPortfolioReportGenerator`. | — |
 | ~~Persistencia del flujo filtrado~~ | ✅ Cerrado en Fase 0. La respuesta se persiste en SQLite como record `ai_filtered_portfolio` (con `record_id`) y el reporte como `markdown_report` (con `report_record_id`). | — |
-| Firma de override del asesor | Endpoint/UI donde el asesor confirme explícitamente la aceptación de GROWTH fuera del budget, con registro en audit trail (ver DD-010) | Alta |
-| Selección de variante por asesor | Endpoint para que el asesor seleccione la variante (DEFENSIVE/BALANCED/GROWTH) a presentar al cliente, con registro en audit trail | Alta |
+| ~~Firma de override del asesor~~ | ✅ Cerrado en Fase 1. `POST /advisor/override-approval` registra `approve`/`reject` sobre una variante (típicamente GROWTH) con rationale obligatorio, reason_codes y exceeded_constraints. Persiste como `advisor_override_approval_NNNNNN` en SQLite. Auth requerida. | — |
+| ~~Selección de variante por asesor~~ | ✅ Cerrado en Fase 1. `POST /advisor/portfolio-selection` registra la variante final (`DEFENSIVE`/`BALANCED`/`GROWTH`) a presentar al cliente, con `related_record_id`, `override_approval_record_id` opcionales y rationale obligatorio. Warning si GROWTH se selecciona sin override link (persistido en payload). Persiste como `advisor_portfolio_selection_NNNNNN`. Auth requerida. | — |
 | Expandir universo de instrumentos | Reemplazar el CSV de 20 instrumentos de muestra por un universo real de ONs, ETFs y bonos soberanos con datos actualizados | Media |
 | Provider de datos externo | Conectar `InstrumentMarketDataAdapter` a una fuente de datos de producción (Bloomberg, Refinitiv, proveedor local) en lugar de derivar retornos desde ytm/coupon del CSV | Media |
-| Autenticación y seguridad | Auth JWT o API key para todos los endpoints; control de acceso por rol (asesor vs. cliente) antes de cualquier exposición en red | Alta (pre-producción) |
+| Auth para producción | Reemplazar el Bearer token hard-coded (Fase 1 dev-only) por JWT firmado por IdP (OIDC/SAML) con RBAC por rol, rotación, TTL y multi-tenant (`firm_id`). Proteger todos los endpoints antes de cualquier exposición en red. | Alta (pre-producción) |
 | Reporte profesional | Formato de reporte para presentación al cliente y al asesor; PDF generado desde Markdown o template HTML | Media |
 | PostgreSQL y multi-sesión | Migrar SQLite a PostgreSQL para soporte multi-usuario y persistencia entre reinicios del servidor | Media |
 | MiFID II / CNBV compliance completo | Cuestionario de idoneidad regulatoria explícito, firma digital del asesor, modelo de conocimiento y experiencia detallado | Baja (M3) |

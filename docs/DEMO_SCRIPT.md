@@ -293,7 +293,7 @@ El sistema garantiza trazabilidad en cada punto: qué datos ingresaron, qué dec
 | ~~Sin persistencia del flujo filtrado~~ | ✅ **Cerrado en Fase 0.** Cada respuesta de `/ai/filtered-portfolio-demo` se persiste en SQLite con `record_id` (payload completo) y `report_record_id` (Markdown report). | Cerrado |
 | Sin reporte comercial para el cliente | El `report_markdown` es para revisión del asesor; no es un documento de presentación al cliente. No hay PDF ni firma digital. | Pendiente |
 | Sin datos de Bloomberg / proveedor real | Los datos de mercado de producción no están conectados | Out of scope MVP |
-| Sin autenticación | El frontend y la API son acceso libre (solo para desarrollo local) | Pendiente (pre-producción) |
+| Auth development-only (Fase 1) | Bearer token hard-coded (`dev-advisor-token`, `dev-compliance-token`). Los tres endpoints `/advisor/*` y `/auth/me` requieren token. El resto sigue sin auth. No es producción. | Fase 1 scaffold ✅ — auth productiva pendiente |
 
 ---
 
@@ -305,21 +305,25 @@ El sistema garantiza trazabilidad en cada punto: qué datos ingresaron, qué dec
 
 3. **Carga de universo real** — reemplazar el CSV de demo por un universo actualizado de ONs, bonos soberanos y ETFs con datos de mercado reales.
 
-4. **Auth básica** — API key o JWT para todos los endpoints antes de cualquier exposición en red no local.
+4. **Auth para producción** — reemplazar el Bearer token hard-coded de Fase 1 (dev-only) por JWT firmado por IdP con RBAC por rol, TTL y multi-tenant. Proteger todos los endpoints antes de cualquier exposición en red no local.
 
-5. **Firma/approval del advisor override** — endpoint o UI donde el asesor confirme explícitamente la aceptación de GROWTH fuera del budget, con registro en audit trail.
+5. ~~**Firma/approval del advisor override**~~ — ✅ Cerrado en Fase 1. `POST /advisor/override-approval` persiste la aprobación del asesor con rationale, reason_codes y exceeded_constraints como `advisor_override_approval_NNNNNN` en SQLite.
 
-6. **Selección de variante** — endpoint donde el asesor seleccione qué variante (DEFENSIVE/BALANCED/GROWTH) presentar al cliente, con registro en audit trail.
+6. ~~**Selección de variante**~~ — ✅ Cerrado en Fase 1. `POST /advisor/portfolio-selection` registra la variante final (DEFENSIVE/BALANCED/GROWTH) con rationale y enlaces a records de portfolio y override, como `advisor_portfolio_selection_NNNNNN` en SQLite.
 
 ---
 
 ## Referencia rápida
 
-| Demo | Endpoint | Requiere OpenAI |
-|---|---|---|
-| Health check | `GET /health` | No |
-| AI Profile Demo | `POST /ai/profile-demo` | Sí |
-| AI Profile Follow-up | `POST /ai/profile-follow-up` | Sí |
-| AI Universe Filter | `POST /ai/filter-universe-demo` | Sí |
-| AI Filtered Portfolio | `POST /ai/filtered-portfolio-demo` | Sí |
-| Smoke check offline | `python scripts/run_mvp_smoke_check.py` | No |
+| Demo | Endpoint | Requiere OpenAI | Requiere Bearer token |
+|---|---|---|---|
+| Health check | `GET /health` | No | No |
+| AI Profile Demo | `POST /ai/profile-demo` | Sí | No |
+| AI Profile Follow-up | `POST /ai/profile-follow-up` | Sí | No |
+| AI Universe Filter | `POST /ai/filter-universe-demo` | Sí | No |
+| AI Filtered Portfolio | `POST /ai/filtered-portfolio-demo` | Sí | No |
+| **Advisor auth check** | `GET /auth/me` | No | **Sí** |
+| **Advisor profile approval** | `POST /advisor/profile-approval` | No | **Sí** |
+| **Advisor override approval** | `POST /advisor/override-approval` | No | **Sí** |
+| **Advisor portfolio selection** | `POST /advisor/portfolio-selection` | No | **Sí** |
+| Smoke check offline | `python scripts/run_mvp_smoke_check.py` | No | No |
