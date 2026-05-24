@@ -960,7 +960,226 @@
     </div>
   </div>
 
-  <!-- ── 7. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <!-- ── 7. ADVISOR DECISIONS DEMO ─────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Advisor Decisions Demo — Phase 1</h2>
+      <span class="pill pill-blue" style="font-size:10px;">advisor actions · dev auth</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;">
+        <strong>Development-only advisor authentication.</strong>
+        <ul>
+          <li>Uses hard-coded demo Bearer tokens (<code>dev-advisor-token</code>, <code>dev-compliance-token</code>). NOT a productive identity provider.</li>
+          <li>Records formal advisor acts: profile approval, override approval, final portfolio selection.</li>
+          <li>The backend does NOT yet validate that <code>related_record_id</code> / <code>override_approval_record_id</code> point to real, consistent records.</li>
+          <li>Does NOT replace a digital signature, role-based access control, or any compliance sign-off.</li>
+          <li>Endpoints: <code>GET /auth/me</code>, <code>POST /advisor/profile-approval</code>, <code>POST /advisor/override-approval</code>, <code>POST /advisor/portfolio-selection</code>.</li>
+        </ul>
+      </div>
+
+      <!-- ── Section 1: Advisor token + auth check ─────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">1. Advisor token</div>
+        <div class="form-grid cols-3">
+          <div class="field full-span">
+            <label>advisor_token <span class="hint">sent as <code>Authorization: Bearer &lt;token&gt;</code> to all advisor endpoints below</span></label>
+            <input type="text" id="adv-token" value="dev-advisor-token" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-auth" onclick="checkAdvisorAuth()">Check Advisor Auth</button>
+          <button class="btn-secondary" onclick="clearAdvisorAuthResult()">Clear</button>
+        </div>
+        <div id="adv-auth-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 2: Profile Approval ───────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">2. Profile approval — POST /advisor/profile-approval</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-prof-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>proposed_profile</label>
+            <select id="adv-prof-proposed">
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado" selected>moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>decision</label>
+            <select id="adv-prof-decision">
+              <option value="approve" selected>approve</option>
+              <option value="modify">modify</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>approved_profile <span class="hint">required for <code>modify</code>; must be <code>null</code> for <code>reject</code></span></label>
+            <select id="adv-prof-approved">
+              <option value="">(none / inherit from proposed for approve)</option>
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado">moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-prof-source" value="manual" />
+          </div>
+          <div class="field">
+            <label>related_record_id <span class="hint">optional</span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-prof-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
+                onclick="fillLastAIFPRecordId('adv-prof-related', 'adv-prof-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-prof-related-msg" style="font-size:11px;color:#718096;"></span>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-prof-rationale" rows="2" style="font-size:13px;line-height:1.6;"
+          >Advisor reviewed the AI profile proposal and confirms suitability for this client.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-prof" onclick="submitProfileApproval()">Submit Profile Approval</button>
+          <button class="btn-secondary" onclick="clearProfileApprovalResult()">Clear</button>
+        </div>
+        <div id="adv-prof-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 3: Override Approval ──────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">3. Override approval — POST /advisor/override-approval</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-ovr-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>candidate_variant</label>
+            <select id="adv-ovr-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED">BALANCED</option>
+              <option value="GROWTH" selected>GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>decision</label>
+            <select id="adv-ovr-decision">
+              <option value="approve" selected>approve</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-ovr-source" value="manual" />
+          </div>
+          <div class="field full-span">
+            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-ovr-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
+                onclick="fillLastAIFPRecordId('adv-ovr-related', 'adv-ovr-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-ovr-related-msg" style="font-size:11px;color:#718096;"></span>
+          </div>
+          <div class="field">
+            <label>reason_codes <span class="hint">one per line</span></label>
+            <textarea id="adv-ovr-reasons" rows="2" style="font-size:12px;font-family:'Menlo','Consolas',monospace;"
+            >PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET</textarea>
+          </div>
+          <div class="field">
+            <label>exceeded_constraints <span class="hint">one per line</span></label>
+            <textarea id="adv-ovr-exceeded" rows="2" style="font-size:12px;font-family:'Menlo','Consolas',monospace;"
+            >max_volatility</textarea>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-ovr-rationale" rows="2" style="font-size:13px;line-height:1.6;"
+          >Advisor reviewed the GROWTH variant and accepts the risk budget override for discussion with the client.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-ovr" onclick="submitOverrideApproval()">Submit Override Approval</button>
+          <button class="btn-secondary" onclick="clearOverrideApprovalResult()">Clear</button>
+        </div>
+        <div id="adv-ovr-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 4: Portfolio Selection ────────────────── -->
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">4. Portfolio selection — POST /advisor/portfolio-selection</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-sel-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>selected_variant</label>
+            <select id="adv-sel-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED" selected>BALANCED</option>
+              <option value="GROWTH">GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-sel-source" value="manual" />
+          </div>
+          <div class="field full-span">
+            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-sel-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
+                onclick="fillLastAIFPRecordId('adv-sel-related', 'adv-sel-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-sel-related-msg" style="font-size:11px;color:#718096;"></span>
+          </div>
+          <div class="field full-span">
+            <label>override_approval_record_id <span class="hint">optional — recommended when selecting <code>GROWTH</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-sel-override" placeholder="advisor_override_approval_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
+                onclick="fillLastOverrideRecordId('adv-sel-override', 'adv-sel-override-msg')">
+                Use last override
+              </button>
+            </div>
+            <span id="adv-sel-override-msg" style="font-size:11px;color:#718096;"></span>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-sel-rationale" rows="2" style="font-size:13px;line-height:1.6;"
+          >Advisor selected BALANCED as the final client-facing portfolio proposal.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-sel" onclick="submitPortfolioSelection()">Submit Portfolio Selection</button>
+          <button class="btn-secondary" onclick="clearPortfolioSelectionResult()">Clear</button>
+        </div>
+        <div id="adv-sel-result" style="margin-top:12px;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── 8. PERSISTED WORKFLOWS ────────────────────────────── -->
   <div class="card">
     <div class="card-header">
       <h2>Persisted Workflows — GET /workflow</h2>
@@ -2422,6 +2641,10 @@
         return;
       }
 
+      // Capture record_id so advisor helper buttons can chain off it.
+      if (data && typeof data.record_id === "string") {
+        lastAIFilteredPortfolioRecordId = data.record_id;
+      }
       out.innerHTML = renderAIFilteredPortfolioResult(data);
 
     } catch (err) {
@@ -2946,6 +3169,386 @@
         </div>
       </div>
     `;
+  }
+
+  // ── 8. advisor decisions demo (Phase 1) ─────────────────────
+  //
+  // Wires four small flows on top of the auth scaffold:
+  //   - Section 1: GET  /auth/me
+  //   - Section 2: POST /advisor/profile-approval
+  //   - Section 3: POST /advisor/override-approval
+  //   - Section 4: POST /advisor/portfolio-selection
+  //
+  // The advisor token lives in a single shared input (#adv-token) and is
+  // applied to all four flows via getAdvisorAuthHeaders(). Demo tokens are
+  // intentionally not validated client-side — the backend returns 401 on
+  // unknown tokens with a generic detail, and we surface a generic UI
+  // message that does NOT echo the token.
+
+  // Chained-state globals: set after a successful submission so that the
+  // "Use last ..." helper buttons can populate downstream forms.
+  let lastAIFilteredPortfolioRecordId   = null;
+  let lastProfileApprovalRecordId       = null;
+  let lastOverrideApprovalRecordId      = null;
+  let lastPortfolioSelectionRecordId    = null;
+
+  // ── Shared helpers ───────────────────────────────────────────
+
+  function getAdvisorToken() {
+    const inp = el("adv-token");
+    if (!inp) return "";
+    return inp.value.trim();
+  }
+
+  function getAdvisorAuthHeaders() {
+    const token = getAdvisorToken();
+    if (!token) return null;
+    return {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type":  "application/json",
+    };
+  }
+
+  // Convert one-textarea-per-line input into a list[str] for the backend.
+  // Drops empty lines so a trailing newline doesn't produce ["", ...].
+  function linesToStringList(textareaId) {
+    const raw = (el(textareaId)?.value ?? "").trim();
+    if (!raw) return [];
+    return raw.split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  function nullIfBlank(value) {
+    if (value === null || value === undefined) return null;
+    const v = String(value).trim();
+    return v.length === 0 ? null : v;
+  }
+
+  // Render a generic key/value summary box for any advisor response.
+  // `fields` is an array of {label, value, mono?} entries.
+  function renderAdvisorResultBox(title, status, fields, raw) {
+    const rows = fields.map(f => `
+      <div class="summary-item">
+        <label>${escapeHTML(f.label)}</label>
+        <div class="value${f.mono ? " mono" : ""}" style="${f.mono ? "font-size:11px;" : ""}">
+          ${f.html ? f.value : escapeHTML(String(f.value ?? "—"))}
+        </div>
+      </div>
+    `).join("");
+
+    return `
+      <div class="result-box">
+        <div class="result-summary">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+            <strong style="font-size:14px;">${escapeHTML(title)}</strong>
+            ${statusPill(status)}
+          </div>
+          <div class="summary-grid">${rows}</div>
+        </div>
+        <details style="padding:10px 20px;">
+          <summary style="font-size:12px;">Full JSON response</summary>
+          <pre class="json-block">${escapeHTML(formatJSON(raw))}</pre>
+        </details>
+      </div>
+    `;
+  }
+
+  // Centralized error renderer for the four advisor endpoints. Never echoes
+  // the token. 401 always shows the same generic message regardless of why.
+  function renderAdvisorError(status, data) {
+    if (status === 401) {
+      return `<div class="msg msg-error">
+        <strong>Invalid or missing advisor token.</strong><br>
+        <span style="font-size:12px;">Check the value in the "Advisor token" field above.</span>
+      </div>`;
+    }
+    if (status === 422) {
+      return `<div class="msg msg-error">
+        <strong>HTTP 422 — Validation error.</strong>
+        <pre class="json-block" style="margin-top:6px;font-size:11px;">${escapeHTML(formatJSON(data ?? {}))}</pre>
+      </div>`;
+    }
+    if (status === 500) {
+      const detail = (data && data.detail) ? String(data.detail) : "Internal server error.";
+      return `<div class="msg msg-error">
+        <strong>HTTP 500.</strong> ${escapeHTML(detail)}
+      </div>`;
+    }
+    return `<div class="msg msg-error">
+      <strong>HTTP ${status}</strong>
+      ${data ? `<pre class="json-block" style="margin-top:6px;font-size:11px;">${escapeHTML(formatJSON(data))}</pre>` : ""}
+    </div>`;
+  }
+
+  // ── Helper buttons: fill from chained-state globals ──────────
+
+  function fillLastAIFPRecordId(inputId, msgId) {
+    const msg = el(msgId);
+    if (!lastAIFilteredPortfolioRecordId) {
+      if (msg) {
+        msg.style.color = "#991b1b";
+        msg.textContent = "✕ No AI Filtered Portfolio record yet. Run the demo above first.";
+      }
+      return;
+    }
+    el(inputId).value = lastAIFilteredPortfolioRecordId;
+    if (msg) {
+      msg.style.color = "#166534";
+      msg.textContent = `✓ filled with ${lastAIFilteredPortfolioRecordId}`;
+    }
+  }
+
+  function fillLastOverrideRecordId(inputId, msgId) {
+    const msg = el(msgId);
+    if (!lastOverrideApprovalRecordId) {
+      if (msg) {
+        msg.style.color = "#991b1b";
+        msg.textContent = "✕ No override approval record yet. Submit section 3 first.";
+      }
+      return;
+    }
+    el(inputId).value = lastOverrideApprovalRecordId;
+    if (msg) {
+      msg.style.color = "#166534";
+      msg.textContent = `✓ filled with ${lastOverrideApprovalRecordId}`;
+    }
+  }
+
+  // ── Section 1: Advisor auth check ────────────────────────────
+
+  async function checkAdvisorAuth() {
+    const out = el("adv-auth-result");
+    const headers = getAdvisorAuthHeaders();
+    if (!headers) {
+      out.innerHTML = `<div class="msg msg-error">
+        <strong>Advisor token is empty.</strong> Provide a value above.
+      </div>`;
+      return;
+    }
+    out.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>Checking advisor identity…</div>`;
+    try {
+      const r = await fetch(`${API}/auth/me`, { headers });
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        out.innerHTML = renderAdvisorError(r.status, data);
+        return;
+      }
+
+      const rolesHtml = (Array.isArray(data.roles) && data.roles.length)
+        ? `<div class="list-chips">${data.roles.map(role => `<span class="chip">${escapeHTML(role)}</span>`).join("")}</div>`
+        : `<span style="color:#a0aec0;font-size:12px;">none</span>`;
+
+      out.innerHTML = renderAdvisorResultBox(
+        "Advisor identity",
+        "ok",
+        [
+          { label: "advisor_id",    value: data.advisor_id,    mono: true },
+          { label: "display_name",  value: data.display_name },
+          { label: "firm_id",       value: data.firm_id ?? "—" },
+          { label: "roles",         value: rolesHtml, html: true },
+        ],
+        data,
+      );
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  function clearAdvisorAuthResult() {
+    el("adv-auth-result").innerHTML = "";
+  }
+
+  // ── Section 2: Profile approval ──────────────────────────────
+
+  async function submitProfileApproval() {
+    const out = el("adv-prof-result");
+    const headers = getAdvisorAuthHeaders();
+    if (!headers) {
+      out.innerHTML = `<div class="msg msg-error">
+        <strong>Advisor token is empty.</strong> Provide a value above.
+      </div>`;
+      return;
+    }
+
+    const approvedRaw = (el("adv-prof-approved")?.value ?? "").trim();
+    const body = {
+      client_id:         (el("adv-prof-client_id").value || "").trim(),
+      proposed_profile:  el("adv-prof-proposed").value,
+      decision:          el("adv-prof-decision").value,
+      approved_profile:  approvedRaw.length ? approvedRaw : null,
+      rationale:         (el("adv-prof-rationale").value || "").trim(),
+      source:            (el("adv-prof-source").value || "").trim() || "manual",
+      related_record_id: nullIfBlank(el("adv-prof-related").value),
+    };
+
+    out.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>Submitting profile approval…</div>`;
+    try {
+      const r = await fetch(`${API}/advisor/profile-approval`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        out.innerHTML = renderAdvisorError(r.status, data);
+        return;
+      }
+
+      lastProfileApprovalRecordId = data.record_id ?? null;
+
+      out.innerHTML = renderAdvisorResultBox(
+        "Profile approval — recorded",
+        data.status ?? "recorded",
+        [
+          { label: "record_id",        value: data.record_id,        mono: true },
+          { label: "advisor_id",       value: data.advisor_id,       mono: true },
+          { label: "decision",         value: data.decision },
+          { label: "proposed_profile", value: data.proposed_profile },
+          { label: "approved_profile", value: data.approved_profile ?? "—" },
+          { label: "created_at_utc",   value: data.created_at_utc,   mono: true },
+        ],
+        data,
+      );
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  function clearProfileApprovalResult() {
+    el("adv-prof-result").innerHTML = "";
+  }
+
+  // ── Section 3: Override approval ─────────────────────────────
+
+  async function submitOverrideApproval() {
+    const out = el("adv-ovr-result");
+    const headers = getAdvisorAuthHeaders();
+    if (!headers) {
+      out.innerHTML = `<div class="msg msg-error">
+        <strong>Advisor token is empty.</strong> Provide a value above.
+      </div>`;
+      return;
+    }
+
+    const body = {
+      client_id:            (el("adv-ovr-client_id").value || "").trim(),
+      related_record_id:    nullIfBlank(el("adv-ovr-related").value),
+      candidate_variant:    el("adv-ovr-variant").value,
+      decision:             el("adv-ovr-decision").value,
+      reason_codes:         linesToStringList("adv-ovr-reasons"),
+      exceeded_constraints: linesToStringList("adv-ovr-exceeded"),
+      rationale:            (el("adv-ovr-rationale").value || "").trim(),
+      source:               (el("adv-ovr-source").value || "").trim() || "manual",
+    };
+
+    out.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>Submitting override approval…</div>`;
+    try {
+      const r = await fetch(`${API}/advisor/override-approval`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        out.innerHTML = renderAdvisorError(r.status, data);
+        return;
+      }
+
+      lastOverrideApprovalRecordId = data.record_id ?? null;
+
+      const reasonsHtml    = chips(data.reason_codes, "chip chip-err");
+      const exceededHtml   = chips(data.exceeded_constraints, "chip chip-warn");
+
+      out.innerHTML = renderAdvisorResultBox(
+        "Override approval — recorded",
+        data.status ?? "recorded",
+        [
+          { label: "record_id",            value: data.record_id,        mono: true },
+          { label: "advisor_id",           value: data.advisor_id,       mono: true },
+          { label: "candidate_variant",    value: data.candidate_variant },
+          { label: "decision",             value: data.decision },
+          { label: "reason_codes",         value: reasonsHtml,           html: true },
+          { label: "exceeded_constraints", value: exceededHtml,          html: true },
+          { label: "created_at_utc",       value: data.created_at_utc,   mono: true },
+        ],
+        data,
+      );
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  function clearOverrideApprovalResult() {
+    el("adv-ovr-result").innerHTML = "";
+  }
+
+  // ── Section 4: Portfolio selection ───────────────────────────
+
+  async function submitPortfolioSelection() {
+    const out = el("adv-sel-result");
+    const headers = getAdvisorAuthHeaders();
+    if (!headers) {
+      out.innerHTML = `<div class="msg msg-error">
+        <strong>Advisor token is empty.</strong> Provide a value above.
+      </div>`;
+      return;
+    }
+
+    const body = {
+      client_id:                   (el("adv-sel-client_id").value || "").trim(),
+      related_record_id:           nullIfBlank(el("adv-sel-related").value),
+      selected_variant:            el("adv-sel-variant").value,
+      rationale:                   (el("adv-sel-rationale").value || "").trim(),
+      override_approval_record_id: nullIfBlank(el("adv-sel-override").value),
+      source:                      (el("adv-sel-source").value || "").trim() || "manual",
+    };
+
+    out.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>Submitting portfolio selection…</div>`;
+    try {
+      const r = await fetch(`${API}/advisor/portfolio-selection`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      let data;
+      try { data = await r.json(); } catch (_) { data = null; }
+
+      if (!r.ok) {
+        out.innerHTML = renderAdvisorError(r.status, data);
+        return;
+      }
+
+      lastPortfolioSelectionRecordId = data.record_id ?? null;
+
+      const warningsHtml = (Array.isArray(data.warnings) && data.warnings.length)
+        ? `<div class="list-chips">${data.warnings.map(w => `<span class="chip chip-warn">${escapeHTML(w)}</span>`).join("")}</div>`
+        : `<span style="color:#a0aec0;font-size:12px;">none</span>`;
+
+      out.innerHTML = renderAdvisorResultBox(
+        "Portfolio selection — recorded",
+        data.status ?? "recorded",
+        [
+          { label: "record_id",         value: data.record_id,        mono: true },
+          { label: "advisor_id",        value: data.advisor_id,       mono: true },
+          { label: "selected_variant",  value: data.selected_variant },
+          { label: "warnings",          value: warningsHtml,          html: true },
+          { label: "created_at_utc",    value: data.created_at_utc,   mono: true },
+          { label: "status",            value: data.status },
+        ],
+        data,
+      );
+    } catch (err) {
+      out.innerHTML = apiError(err);
+    }
+  }
+
+  function clearPortfolioSelectionResult() {
+    el("adv-sel-result").innerHTML = "";
   }
 
 </script>

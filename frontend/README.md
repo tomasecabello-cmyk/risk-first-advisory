@@ -297,6 +297,104 @@ Con esta entrada y perfil `moderado`, la IA extrae preferencias de ONs hard doll
 
 ---
 
+### Advisor Decisions Demo — Phase 1
+
+Card nuevo que permite probar desde el navegador los tres actos formales del asesor y el endpoint de diagnóstico de autenticación. Está pensada para acompañar la demo del flujo completo (AI Filtered Portfolio → advisor reviews → final selection) sin tener que usar `curl` o Swagger UI.
+
+> ⚠ **Auth de desarrollo únicamente.** Usa tokens hard-coded del scaffold `api_layer/auth.py`. No es un identity provider productivo. No reemplaza firma digital ni compliance.
+
+#### Endpoints consumidos
+
+| Sección | Método | Ruta |
+|---|---|---|
+| 1. Advisor token | `GET` | `/auth/me` |
+| 2. Profile approval | `POST` | `/advisor/profile-approval` |
+| 3. Override approval | `POST` | `/advisor/override-approval` |
+| 4. Portfolio selection | `POST` | `/advisor/portfolio-selection` |
+
+#### Tokens demo
+
+Un único input (`advisor_token`) en la parte superior del card se reusa para todas las secciones. Por defecto trae `dev-advisor-token`. Otros tokens reconocidos por el backend:
+
+| Token | `advisor_id` | `roles` |
+|---|---|---|
+| `dev-advisor-token` | `ADV-001` | `["advisor"]` |
+| `dev-compliance-token` | `CMP-001` | `["compliance"]` |
+
+#### Sección 1 — Advisor token
+
+Botón **"Check Advisor Auth"** llama `GET /auth/me` y muestra:
+- `advisor_id`
+- `display_name`
+- `firm_id`
+- `roles` como chips
+
+Errores:
+- 401 → `"Invalid or missing advisor token."` (mensaje genérico — nunca se ecoa el token).
+- Network error → "API not reachable. Start uvicorn first."
+
+#### Sección 2 — Profile approval
+
+Form con:
+- `client_id` (default `CLI-PREF-PORT-001`)
+- `proposed_profile` (select con los 5 perfiles válidos)
+- `decision` (select: `approve` / `modify` / `reject`)
+- `approved_profile` (select opcional con los 5 perfiles + "(none)")
+- `source` (default `manual`)
+- `related_record_id` opcional + botón **"Use last AIFP"** que copia el `record_id` de la última corrida del AI Filtered Portfolio Demo
+- `rationale` (textarea, default sugerido en inglés)
+
+Botón **"Submit Profile Approval"** llama `POST /advisor/profile-approval` y muestra `record_id`, `advisor_id`, `decision`, `proposed_profile`, `approved_profile`, `created_at_utc`.
+
+#### Sección 3 — Override approval
+
+Form con:
+- `client_id`
+- `candidate_variant` (select: `DEFENSIVE` / `BALANCED` / `GROWTH`, default `GROWTH`)
+- `decision` (select: `approve` / `reject`, default `approve`)
+- `source` (default `manual`)
+- `related_record_id` opcional + botón **"Use last AIFP"**
+- `reason_codes` (textarea, una línea por reason code, default `PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`)
+- `exceeded_constraints` (textarea, una línea por constraint, default `max_volatility`)
+- `rationale` (textarea)
+
+Botón **"Submit Override Approval"** llama `POST /advisor/override-approval` y muestra `record_id`, `advisor_id`, `candidate_variant`, `decision`, `reason_codes` (chips), `exceeded_constraints` (chips), `created_at_utc`.
+
+Al recibir 200, el `record_id` se guarda en una variable global para que la sección 4 pueda enlazarlo.
+
+#### Sección 4 — Portfolio selection
+
+Form con:
+- `client_id`
+- `selected_variant` (select: `DEFENSIVE` / `BALANCED` / `GROWTH`, default `BALANCED`)
+- `source` (default `manual`)
+- `related_record_id` opcional + botón **"Use last AIFP"**
+- `override_approval_record_id` opcional + botón **"Use last override"** (copia del último override aprobado en la sección 3)
+- `rationale` (textarea)
+
+Botón **"Submit Portfolio Selection"** llama `POST /advisor/portfolio-selection` y muestra `record_id`, `advisor_id`, `selected_variant`, `warnings` (chips amarillos si hay), `created_at_utc`, `status`.
+
+Si `selected_variant=GROWTH` y `override_approval_record_id` queda vacío, el backend devuelve el warning `"GROWTH selected without linked override approval record."` y el frontend lo muestra como chip amarillo.
+
+#### Helpers de chaining
+
+Tres variables JavaScript globales mantienen los últimos `record_id` exitosos:
+- `lastAIFilteredPortfolioRecordId` — actualizado por el card del AI Filtered Portfolio Demo.
+- `lastOverrideApprovalRecordId` — actualizado por la sección 3.
+- `lastProfileApprovalRecordId` y `lastPortfolioSelectionRecordId` — guardados pero todavía sin botón consumidor (reservados para integraciones futuras).
+
+Los botones helper muestran un mensaje verde `✓ filled with <record_id>` o rojo `✕ No ... record yet. ...` debajo del input.
+
+#### Errores
+
+- 401 → `"Invalid or missing advisor token."` (idéntico para todos los casos, sin echo del token).
+- 422 → caja con el JSON de validación de Pydantic (paths + mensajes).
+- 500 → detalle del backend (`"Advisor ... persistence failed."` u otro).
+- Otro → `"HTTP NNN"` + JSON crudo.
+- Network → `"API not reachable. Start uvicorn first."`
+
+---
+
 ### Persisted Workflows
 Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestra tabla con `record_id`, `client_id`, `status` y `created_at_utc`.
 
@@ -304,10 +402,10 @@ Lista los workflows guardados en SQLite. Permite filtrar por `client_id`. Muestr
 
 ## Limitaciones
 
-- **Sin autenticación.** Este frontend es solo para desarrollo local.
+- **Auth scaffold development-only.** Los tokens en `Advisor Decisions Demo` están hard-coded en `api_layer/auth.py`. No es un identity provider productivo, no rota, no firma JWT.
 - **Sin producción.** No usar contra un backend expuesto en red pública.
-- **Frontend estático de demo.** No persiste estado entre recargas.
+- **Frontend estático de demo.** No persiste estado entre recargas (los `lastXxxRecordId` se pierden al refrescar).
 - **CORS.** Si el navegador bloquea requests desde `file://`, usar `python -m http.server 5500 -d frontend`.
 - **AI Profile Demo, AI Universe Filter Demo y AI Filtered Portfolio Demo requieren OPENAI_API_KEY.** Sin la key, los endpoints responden HTTP 400. La sección Live Portfolio Demo descarga datos reales de Yahoo Finance (requiere internet).
-- **SQLite local.** Los IDs de workflow (`workflow_000001`, etc.) son secuenciales por sesión de backend. Se resetean si el servidor se reinicia sin persistencia previa.
-- **No cubre todos los endpoints.** Solo consume `/health`, `/workflow/run`, `/live/portfolio-demo`, `/ai/profile-demo`, `/ai/profile-follow-up`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo` y `GET /workflow`. Los endpoints `/universe/filter-demo`, `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.
+- **SQLite local.** Los IDs son secuenciales por sesión de backend. Se resetean si el servidor se reinicia sin persistencia previa.
+- **No cubre todos los endpoints.** Solo consume `/health`, `/auth/me`, `/workflow/run`, `/live/portfolio-demo`, `/ai/profile-demo`, `/ai/profile-follow-up`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`, `/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection` y `GET /workflow`. Los endpoints `/universe/filter-demo`, `/reports`, `/audit` y los GET por ID están disponibles en el backend pero no en este frontend. Usar `curl` o Swagger UI para esos.

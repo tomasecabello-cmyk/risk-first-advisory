@@ -216,7 +216,36 @@ En la card de GROWTH:
 
 ---
 
-### Paso 7 — Smoke check offline *(~15 segundos)*
+### Paso 7 — Actos formales del asesor *(~90 segundos)*
+
+**Sección:** Advisor Decisions Demo — Phase 1 (debajo del AI Filtered Portfolio Demo)
+
+> ⚠ **Auth scaffold development-only.** Los tokens son hard-coded (`dev-advisor-token`, `dev-compliance-token`). No es identity provider productivo. No reemplaza firma digital ni compliance.
+
+1. **Verificar auth.** Botón **"Check Advisor Auth"** con el token por defecto `dev-advisor-token` → muestra `advisor_id=ADV-001`, `display_name=Demo Advisor`, `roles=[advisor]`.
+
+2. **Profile approval.** Form con valores por defecto:
+   - `client_id=CLI-PREF-PORT-001`
+   - `proposed_profile=moderado`, `decision=approve`
+   - Botón **"Submit Profile Approval"** → muestra `record_id=advisor_profile_approval_NNNNNN`, decisión, perfil aprobado y `created_at_utc`.
+
+3. **Override approval** (típico para GROWTH).
+   - Botón **"Use last AIFP"** en `related_record_id` → copia el `record_id` del paso 5 (AI Filtered Portfolio).
+   - `candidate_variant=GROWTH`, `decision=approve`, `reason_codes=PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`, `exceeded_constraints=max_volatility`.
+   - Botón **"Submit Override Approval"** → muestra `record_id=advisor_override_approval_NNNNNN`. Este ID se guarda en JS global.
+
+4. **Portfolio selection.**
+   - Botón **"Use last AIFP"** en `related_record_id`.
+   - Botón **"Use last override"** en `override_approval_record_id` → trae el override aprobado en el paso anterior.
+   - `selected_variant=BALANCED` (recomendación base) o `GROWTH` (alternativa con override).
+   - Botón **"Submit Portfolio Selection"** → muestra `record_id=advisor_portfolio_selection_NNNNNN`, `warnings=[]` (no warnings si GROWTH viene con override link), `status=recorded`.
+   - Si se selecciona `GROWTH` SIN override link, la response devuelve el chip de warning amarillo `"GROWTH selected without linked override approval record."` — útil para mostrar al asesor que ese paso queda pendiente de auditoría.
+
+**Punto clave:** ningún acto del asesor pasa por la IA. Cada decisión (aprobación de perfil, aprobación de override, selección final) queda en SQLite con `record_id` propio, `advisor_id` resuelto desde el Bearer token, `rationale` obligatorio y `created_at_utc` para audit posterior.
+
+---
+
+### Paso 8 — Smoke check offline *(~15 segundos)*
 
 **En la terminal (sin detener el backend):**
 
