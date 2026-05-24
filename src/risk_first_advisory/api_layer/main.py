@@ -170,6 +170,26 @@ _LIVE_CURRENCY_MAP: dict[str, str] = {t: "USD" for t in _LIVE_TICKERS}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Scripted demo metadata para /workflow/run
+#
+# /workflow/run NO llama a OpenAI ni interactúa con un asesor humano. Corre el
+# pipeline productivo (governance → suitability → ESG → DQ → optimizer) sobre
+# un perfil scripted ("moderado", aprobado automáticamente). Estos campos se
+# exponen en la respuesta para que ningún consumidor confunda el endpoint con
+# un flujo de IA real o de aprobación real del asesor.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_WORKFLOW_RUN_EXECUTION_MODE: str = "scripted_demo"
+_WORKFLOW_RUN_AI_SOURCE: str = "mock_scripted"
+_WORKFLOW_RUN_ADVISOR_SOURCE: str = "scripted_auto_approve"
+_WORKFLOW_RUN_IS_PRODUCTION_READY: bool = False
+_WORKFLOW_RUN_WARNING: str = (
+    "This endpoint uses MockAIClient and ScriptedAdvisorInterface. "
+    "It is intended for deterministic demo/testing only."
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Scripts por defecto para /workflow/run
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1507,18 +1527,28 @@ def workflow_run(req: WorkflowRunRequest) -> WorkflowRunResponse:
     pf = result.portfolio_feasibility_result
     cs = result.candidate_set
 
+    # Append the scripted-demo warning to the workflow's own warnings list so
+    # clients that only consume `warnings` still see the mock indicator.
+    warnings_out: list[str] = list(result.warnings)
+    warnings_out.append(_WORKFLOW_RUN_WARNING)
+
     return WorkflowRunResponse(
         status=result.status.value,
         client_id=result.client_id,
         approved_profile_name=result.approved_profile_name,
         has_portfolios=result.has_portfolios,
         reason_codes=list(result.reason_codes),
-        warnings=list(result.warnings),
+        warnings=warnings_out,
         final_optimizer_tickers=list(result.final_optimizer_tickers),
         portfolio_feasibility_status=pf.status.value if pf is not None else None,
         candidate_count=cs.count if cs is not None else 0,
         records=records,
         report_path=report_path_str,
+        execution_mode=_WORKFLOW_RUN_EXECUTION_MODE,
+        ai_source=_WORKFLOW_RUN_AI_SOURCE,
+        advisor_source=_WORKFLOW_RUN_ADVISOR_SOURCE,
+        is_production_ready=_WORKFLOW_RUN_IS_PRODUCTION_READY,
+        warning=_WORKFLOW_RUN_WARNING,
     )
 
 

@@ -71,7 +71,7 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | Sección | Método | Ruta | Descripción |
 |---|---|---|---|
 | API Health | `GET` | `/health` | Verifica que el backend responde |
-| Run Workflow | `POST` | `/workflow/run` | Ejecuta el workflow con el formulario |
+| Scripted Workflow Demo | `POST` | `/workflow/run` | **Scripted deterministic demo.** Usa MockAIClient + ScriptedAdvisorInterface. No llama OpenAI ni involucra a un asesor real. Sirve para validar pipeline, persistencia, audit y reporte. |
 | Live Portfolio Demo | `POST` | `/live/portfolio-demo` | Portfolios reales con datos de yfinance |
 | AI Profile Demo | `POST` | `/ai/profile-demo` | Análisis KYC con OpenAI (requiere API key) |
 | AI Profile Follow-up | `POST` | `/ai/profile-follow-up` | Segunda ronda de análisis con respuestas del cliente |
@@ -87,11 +87,16 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 ### API Health
 Botón "Check API" — llama `GET /health` y muestra la respuesta. Útil para verificar que el backend está corriendo antes de ejecutar el workflow.
 
-### Run Workflow
+### Scripted Workflow Demo
+
+> **Endpoint scripted determinístico.** Usa `MockAIClient` (perfil preprogramado `moderado`, sin contradicciones, sin follow-up) y `ScriptedAdvisorInterface` (aprobación automática). **No llama OpenAI** y **no involucra a un asesor humano real**. Pensado para validar el pipeline determinístico — governance → suitability → ESG → data quality → optimizer — junto con persistencia en SQLite, audit trail y reporte Markdown. No usar como flujo productivo de asesoría real. Los demos de IA real son `/ai/profile-demo`, `/ai/profile-follow-up`, `/ai/filter-universe-demo` y `/ai/filtered-portfolio-demo`.
+
 Formulario con todos los campos de `KYCData` y `FinancialGoal`. Valores por defecto razonables para un perfil moderado. Campos opcionales pueden dejarse en blanco.
 
 Al ejecutar:
 - Muestra un resumen estructurado: status, perfil aprobado, portfolios generados, tickers, reason codes, warnings, IDs persistidos.
+- La respuesta JSON incluye los campos `execution_mode="scripted_demo"`, `ai_source="mock_scripted"`, `advisor_source="scripted_auto_approve"`, `is_production_ready=false` y `warning` declarando explícitamente la naturaleza scripted del endpoint.
+- La lista `warnings` siempre incluye el aviso scripted además de los warnings naturales del workflow.
 - Muestra el JSON completo de la respuesta en un bloque colapsable.
 
 ### Live Portfolio Demo

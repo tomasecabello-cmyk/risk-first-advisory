@@ -316,7 +316,7 @@ python scripts/run_ai_filtered_portfolio_demo.py --preferences "Solo quiero inve
 |---|---|---|
 | `GET` | `/health` | Estado del backend |
 | `POST` | `/demo/run` | Ejecuta workflow demo con fixtures |
-| `POST` | `/workflow/run` | Ejecuta workflow con payload JSON |
+| `POST` | `/workflow/run` | **Scripted deterministic demo.** Ejecuta el pipeline (governance → suitability → ESG → DQ → optimizer) con `MockAIClient` y `ScriptedAdvisorInterface`. No llama OpenAI ni involucra a un asesor real. Sirve para validar persistencia, audit y reporte. La respuesta incluye `execution_mode="scripted_demo"` y `is_production_ready=false`. |
 | `GET` | `/workflow/{record_id}` | Recupera un workflow por ID |
 | `GET` | `/reports/{record_id}` | Recupera un reporte por ID |
 | `GET` | `/audit/{record_id}` | Recupera un audit trail por ID |
@@ -345,6 +345,8 @@ curl.exe -s -X POST http://127.0.0.1:8000/ai/filtered-portfolio-demo `
 ```
 
 #### POST /workflow/run
+
+> **Scripted demo, not real AI flow.** Este endpoint usa `MockAIClient` (perfil preprogramado `moderado`) y `ScriptedAdvisorInterface` (aprobación automática). No llama OpenAI ni representa la aprobación de un asesor real. La respuesta incluye los campos `execution_mode="scripted_demo"`, `ai_source="mock_scripted"`, `advisor_source="scripted_auto_approve"`, `is_production_ready=false` y un `warning` declarando la naturaleza scripted. Para el flujo de IA real, ver `/ai/profile-demo`, `/ai/profile-follow-up`, `/ai/filter-universe-demo` y `/ai/filtered-portfolio-demo`.
 
 ```powershell
 curl.exe -s -X POST http://127.0.0.1:8000/workflow/run `

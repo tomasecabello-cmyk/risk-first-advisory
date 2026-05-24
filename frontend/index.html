@@ -506,9 +506,21 @@
   <!-- ── 2. RUN WORKFLOW ────────────────────────────────────── -->
   <div class="card">
     <div class="card-header">
-      <h2>Run Workflow — POST /workflow/run</h2>
+      <h2>Scripted Workflow Demo — POST /workflow/run</h2>
+      <span class="pill pill-orange" style="font-size:10px;">scripted · no AI · no advisor</span>
     </div>
     <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;">
+        <strong>This endpoint is a scripted deterministic demo. It does NOT use OpenAI and does NOT involve a real advisor.</strong>
+        <ul>
+          <li>Uses <code>MockAIClient</code> — the preliminary profile is preprogrammed (always <code>moderado</code>, no contradictions, no follow-up).</li>
+          <li>Uses <code>ScriptedAdvisorInterface</code> — advisor approval is auto-approved, no human in the loop.</li>
+          <li>Does <strong>not</strong> call OpenAI. <code>OPENAI_API_KEY</code> is not required.</li>
+          <li>Useful for validating the deterministic pipeline: governance → suitability → ESG → data quality → optimizer, plus SQLite persistence, audit trail and Markdown report.</li>
+          <li><strong>Do not use as a productive advisory flow.</strong> Real AI lives in <code>/ai/profile-demo</code>, <code>/ai/profile-follow-up</code>, <code>/ai/filter-universe-demo</code> and <code>/ai/filtered-portfolio-demo</code>.</li>
+        </ul>
+      </div>
 
       <form id="workflow-form" onsubmit="runWorkflow(event)">
 

@@ -465,3 +465,74 @@ class TestWorkflowRunAge:
         # _VALID_PAYLOAD no incluye 'age' — debe seguir funcionando.
         response = client.post("/workflow/run", json=_VALID_PAYLOAD)
         assert response.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: scripted-demo disclosure metadata
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestWorkflowRunScriptedDemoMetadata:
+    """
+    /workflow/run usa MockAIClient + ScriptedAdvisorInterface por defecto.
+    La respuesta DEBE declarar explícitamente esa naturaleza scripted para
+    que ningún consumidor (frontend, integración externa, asesor) lo
+    confunda con un flujo de IA real o de aprobación real del asesor.
+    """
+
+    def test_execution_mode_is_scripted_demo(self, workflow_response: dict):
+        assert workflow_response["execution_mode"] == "scripted_demo"
+
+    def test_ai_source_is_mock_scripted(self, workflow_response: dict):
+        assert workflow_response["ai_source"] == "mock_scripted"
+
+    def test_advisor_source_is_scripted_auto_approve(self, workflow_response: dict):
+        assert workflow_response["advisor_source"] == "scripted_auto_approve"
+
+    def test_is_production_ready_is_false(self, workflow_response: dict):
+        # Tipo bool explícito (no truthy): el contrato distingue false de None/0/"".
+        assert workflow_response["is_production_ready"] is False
+
+    def test_warning_field_is_non_empty_string(self, workflow_response: dict):
+        warning = workflow_response["warning"]
+        assert isinstance(warning, str)
+        assert warning.strip()
+
+    def test_warning_mentions_mock_and_scripted(self, workflow_response: dict):
+        warning = workflow_response["warning"]
+        assert "MockAIClient" in warning
+        assert "ScriptedAdvisorInterface" in warning
+
+    def test_warning_also_appended_to_warnings_list(self, workflow_response: dict):
+        """
+        El mismo aviso del campo `warning` debe estar también en `warnings`,
+        para que clientes que solo leen la lista vean el indicador scripted.
+        """
+        assert workflow_response["warning"] in workflow_response["warnings"]
+
+    def test_warnings_list_has_at_least_the_scripted_warning(
+        self, workflow_response: dict
+    ):
+        assert len(workflow_response["warnings"]) >= 1
+
+    def test_metadata_fields_are_stable_across_calls(self, client: TestClient):
+        """
+        La metadata scripted-demo no depende del payload: dos llamadas
+        distintas devuelven los mismos valores para los 5 campos.
+        """
+        r1 = client.post("/workflow/run", json=_VALID_PAYLOAD).json()
+        payload2 = {
+            **_VALID_PAYLOAD,
+            "client_id": "test_client_02",
+            "kyc_data": {**_VALID_PAYLOAD["kyc_data"], "risk_tolerance_score": 3},
+        }
+        r2 = client.post("/workflow/run", json=payload2).json()
+
+        for key in (
+            "execution_mode",
+            "ai_source",
+            "advisor_source",
+            "is_production_ready",
+            "warning",
+        ):
+            assert r1[key] == r2[key], f"campo {key!r} cambió entre llamadas"

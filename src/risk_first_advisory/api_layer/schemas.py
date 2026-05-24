@@ -144,6 +144,15 @@ class WorkflowRunResponse(BaseModel):
     candidate_count: int
     records: PersistenceRecordIds
     report_path: str
+    # ── Scripted-demo disclosure ──────────────────────────────────────────────
+    # /workflow/run runs a deterministic scripted pipeline (MockAIClient +
+    # ScriptedAdvisorInterface). These fields make that explicit so consumers
+    # cannot mistake it for a productive AI/advisor flow.
+    execution_mode: str
+    ai_source: str
+    advisor_source: str
+    is_production_ready: bool
+    warning: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
