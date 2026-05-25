@@ -36,6 +36,10 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisorCreateRequest,
     AdvisorIdentityResponse,
     AdvisorListResponse,
+    AdvisoryCaseCreateRequest,
+    AdvisoryCaseListResponse,
+    AdvisoryCaseResponse,
+    AdvisoryCaseStatusUpdateRequest,
     AdvisorOverrideApprovalRequest,
     AdvisorOverrideApprovalResponse,
     AdvisorPortfolioSelectionRequest,
@@ -104,8 +108,12 @@ from risk_first_advisory.persistence_layer.repositories import (
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.entity_repository import (
+    ALLOWED_CASE_STATUSES,
+    CaseTransitionError,
     EntityConflictError,
+    EntityNotFoundError,
     SQLiteAdvisorRepository,
+    SQLiteAdvisoryCaseRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
     SQLiteFirmRepository,
@@ -2461,4 +2469,208 @@ def list_advisor_clients(
         data = SQLiteClientRepository(store).list_by_advisor(advisor_id)
     return ClientListResponse(
         clients=[ClientResponse(**d) for d in data], count=len(data)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — AdvisoryCase endpoints
+#
+# RBAC:
+#   POST /cases                          → advisor, admin
+#   PATCH /cases/{case_id}/status        → advisor, admin
+#   GET  /cases                          → any valid token
+#   GET  /cases/{case_id}                → any valid token
+#   GET  /clients/{client_id}/cases      → any valid token
+#   GET  /advisors/{advisor_id}/cases    → any valid token
+#   GET  /firms/{firm_id}/cases          → any valid token
+#
+# Business validations on POST /cases:
+#   - firm_id must exist (422 if not).
+#   - client_id must exist (422 if not).
+#   - lead_advisor_id must exist (422 if not).
+#   - client.firm_id must match req.firm_id (422 cross-firm mismatch).
+#   - advisor.firm_id must match req.firm_id (422 cross-firm mismatch).
+#   - status must be in ALLOWED_CASE_STATUSES (validated by Pydantic, 422).
+#   - Duplicate case_id → 409.
+#
+# PATCH /cases/{case_id}/status:
+#   - Invalid status value → 422 (Pydantic).
+#   - Invalid transition → 409 Conflict.
+#   - Case not found → 404.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/cases", response_model=AdvisoryCaseResponse, status_code=201)
+def create_case(
+    req: AdvisoryCaseCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> AdvisoryCaseResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        firm_repo = SQLiteFirmRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        client_repo = SQLiteClientRepository(store)
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+
+        # ── 1. firm must exist ────────────────────────────────────────────
+        firm_data = firm_repo.get(req.firm_id.strip())
+        if firm_data is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Firm not found: {req.firm_id!r}",
+            )
+
+        # ── 2. client must exist ──────────────────────────────────────────
+        client_data = client_repo.get(req.client_id.strip())
+        if client_data is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Client not found: {req.client_id!r}",
+            )
+
+        # ── 3. lead advisor must exist ────────────────────────────────────
+        advisor_data = adv_repo.get(req.lead_advisor_id.strip())
+        if advisor_data is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Advisor not found: {req.lead_advisor_id!r}",
+            )
+
+        # ── 4. client must belong to the same firm ────────────────────────
+        if client_data["firm_id"] != req.firm_id.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Client {req.client_id!r} belongs to firm "
+                    f"{client_data['firm_id']!r}, not {req.firm_id!r}."
+                ),
+            )
+
+        # ── 5. advisor must belong to the same firm ───────────────────────
+        if advisor_data["firm_id"] != req.firm_id.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Advisor {req.lead_advisor_id!r} belongs to firm "
+                    f"{advisor_data['firm_id']!r}, not {req.firm_id!r}."
+                ),
+            )
+
+        # ── 6. persist ────────────────────────────────────────────────────
+        try:
+            data = case_repo.create(
+                case_id=req.case_id.strip() if req.case_id else None,
+                firm_id=req.firm_id.strip(),
+                client_id=req.client_id.strip(),
+                lead_advisor_id=req.lead_advisor_id.strip(),
+                title=req.title.strip(),
+                status=req.status,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return AdvisoryCaseResponse(**data)
+
+
+@app.get("/cases", response_model=AdvisoryCaseListResponse)
+def list_cases(
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisoryCaseListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAdvisoryCaseRepository(store).list_all()
+    return AdvisoryCaseListResponse(
+        cases=[AdvisoryCaseResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/cases/{case_id}", response_model=AdvisoryCaseResponse)
+def get_case(
+    case_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisoryCaseResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAdvisoryCaseRepository(store).get(case_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"Case not found: {case_id!r}"
+        )
+    return AdvisoryCaseResponse(**data)
+
+
+@app.patch("/cases/{case_id}/status", response_model=AdvisoryCaseResponse)
+def patch_case_status(
+    case_id: str,
+    req: AdvisoryCaseStatusUpdateRequest,
+    _: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> AdvisoryCaseResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        repo = SQLiteAdvisoryCaseRepository(store)
+        try:
+            data = repo.update_status(case_id, req.status)
+        except EntityNotFoundError:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        except CaseTransitionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AdvisoryCaseResponse(**data)
+
+
+@app.get("/clients/{client_id}/cases", response_model=AdvisoryCaseListResponse)
+def list_client_cases(
+    client_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisoryCaseListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        client_data = SQLiteClientRepository(store).get(client_id)
+        if client_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Client not found: {client_id!r}"
+            )
+        data = SQLiteAdvisoryCaseRepository(store).list_by_client(client_id)
+    return AdvisoryCaseListResponse(
+        cases=[AdvisoryCaseResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/advisors/{advisor_id}/cases", response_model=AdvisoryCaseListResponse)
+def list_advisor_cases(
+    advisor_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisoryCaseListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        adv_data = SQLiteAdvisorRepository(store).get(advisor_id)
+        if adv_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Advisor not found: {advisor_id!r}"
+            )
+        data = SQLiteAdvisoryCaseRepository(store).list_by_advisor(advisor_id)
+    return AdvisoryCaseListResponse(
+        cases=[AdvisoryCaseResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/firms/{firm_id}/cases", response_model=AdvisoryCaseListResponse)
+def list_firm_cases(
+    firm_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisoryCaseListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        firm_data = SQLiteFirmRepository(store).get(firm_id)
+        if firm_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Firm not found: {firm_id!r}"
+            )
+        data = SQLiteAdvisoryCaseRepository(store).list_by_firm(firm_id)
+    return AdvisoryCaseListResponse(
+        cases=[AdvisoryCaseResponse(**d) for d in data], count=len(data)
     )

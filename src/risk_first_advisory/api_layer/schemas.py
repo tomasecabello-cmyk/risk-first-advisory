@@ -1018,3 +1018,75 @@ class ClientResponse(BaseModel):
 class ClientListResponse(BaseModel):
     clients: list[ClientResponse]
     count:   int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AdvisoryCase — Fase 2 Commit 5
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_CASE_STATUSES: frozenset[str] = frozenset(
+    {"DRAFT", "IN_PROGRESS", "PORTFOLIO_SELECTED", "CLOSED"}
+)
+
+
+class AdvisoryCaseCreateRequest(BaseModel):
+    case_id:          str | None = None
+    firm_id:          str        = Field(min_length=1)
+    client_id:        str        = Field(min_length=1)
+    lead_advisor_id:  str        = Field(min_length=1)
+    title:            str        = Field(min_length=1)
+    status:           str        = "DRAFT"
+
+    @field_validator("case_id", mode="before")
+    @classmethod
+    def _case_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("case_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("title")
+    @classmethod
+    def _title_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("title no puede ser solo espacios.")
+        return v
+
+    @field_validator("status")
+    @classmethod
+    def _status_must_be_valid(cls, v: str) -> str:
+        if v not in _ALLOWED_CASE_STATUSES:
+            valid = sorted(_ALLOWED_CASE_STATUSES)
+            raise ValueError(f"status debe ser uno de {valid}.")
+        return v
+
+
+class AdvisoryCaseResponse(BaseModel):
+    case_id:                        str
+    firm_id:                        str
+    client_id:                      str
+    lead_advisor_id:                str
+    status:                         str
+    title:                          str
+    current_kyc_submission_id:      str | None
+    current_approved_profile_id:    str | None
+    current_portfolio_selection_id: str | None
+    created_at_utc:                 str
+    closed_at_utc:                  str | None
+
+
+class AdvisoryCaseListResponse(BaseModel):
+    cases: list[AdvisoryCaseResponse]
+    count: int
+
+
+class AdvisoryCaseStatusUpdateRequest(BaseModel):
+    status: str
+    reason: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _status_must_be_valid(cls, v: str) -> str:
+        if v not in _ALLOWED_CASE_STATUSES:
+            valid = sorted(_ALLOWED_CASE_STATUSES)
+            raise ValueError(f"status debe ser uno de {valid}.")
+        return v

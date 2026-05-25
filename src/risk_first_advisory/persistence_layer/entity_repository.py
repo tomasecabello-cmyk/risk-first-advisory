@@ -491,3 +491,238 @@ class SQLiteClientRepository:
             "is_active": bool(row["is_active"]),
             "created_at_utc": row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AdvisoryCase constants
+# ─────────────────────────────────────────────────────────────────────────────
+
+ALLOWED_CASE_STATUSES: frozenset[str] = frozenset(
+    {"DRAFT", "IN_PROGRESS", "PORTFOLIO_SELECTED", "CLOSED"}
+)
+
+# Each status maps to the set of statuses it can legally transition to.
+# CLOSED has no outgoing transitions (terminal state).
+_CASE_VALID_TRANSITIONS: dict[str, frozenset[str]] = {
+    "DRAFT":              frozenset({"IN_PROGRESS"}),
+    "IN_PROGRESS":        frozenset({"PORTFOLIO_SELECTED"}),
+    "PORTFOLIO_SELECTED": frozenset({"CLOSED"}),
+    "CLOSED":             frozenset(),
+}
+
+
+class CaseTransitionError(Exception):
+    """Raised when a requested status transition is not permitted."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLiteAdvisoryCaseRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteAdvisoryCaseRepository:
+    """
+    Persists and retrieves AdvisoryCase entities from the `advisory_cases` table.
+
+    Schema (from 0001_phase2_core_schema.sql):
+        advisory_cases(
+            case_id TEXT PK,
+            firm_id TEXT FK→firms,
+            client_id TEXT FK→clients,
+            lead_advisor_id TEXT FK→advisors,
+            status TEXT,
+            title TEXT,
+            current_kyc_submission_id TEXT,
+            current_approved_profile_id TEXT,
+            current_portfolio_selection_id TEXT,
+            created_at_utc TEXT,
+            closed_at_utc TEXT
+        )
+
+    The three `current_*` fields start as NULL and are updated by later
+    workflow steps (not yet implemented in Fase 2 Commit 5).
+
+    Cross-entity validations (client ∈ firm, advisor ∈ firm) are the
+    caller's responsibility — the repository only enforces DB-level FKs.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str | None = None,
+        firm_id: str,
+        client_id: str,
+        lead_advisor_id: str,
+        title: str,
+        status: str = "DRAFT",
+    ) -> dict[str, Any]:
+        """
+        Inserts a new advisory case. closed_at_utc is always None on creation.
+
+        Raises:
+            EntityConflictError: on PK collision or FK violation.
+        """
+        if case_id is None:
+            case_id = self._store._next_id("case_")
+        now = _now_utc()
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO advisory_cases
+                        (case_id, firm_id, client_id, lead_advisor_id,
+                         status, title,
+                         current_kyc_submission_id, current_approved_profile_id,
+                         current_portfolio_selection_id,
+                         created_at_utc, closed_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL)
+                    """,
+                    (case_id, firm_id, client_id, lead_advisor_id, status, title, now),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+        return {
+            "case_id": case_id,
+            "firm_id": firm_id,
+            "client_id": client_id,
+            "lead_advisor_id": lead_advisor_id,
+            "status": status,
+            "title": title,
+            "current_kyc_submission_id": None,
+            "current_approved_profile_id": None,
+            "current_portfolio_selection_id": None,
+            "created_at_utc": now,
+            "closed_at_utc": None,
+        }
+
+    def get(self, case_id: str) -> dict[str, Any] | None:
+        """Returns the case dict, or None if not found."""
+        row = self._store._conn.execute(
+            """
+            SELECT case_id, firm_id, client_id, lead_advisor_id,
+                   status, title,
+                   current_kyc_submission_id, current_approved_profile_id,
+                   current_portfolio_selection_id,
+                   created_at_utc, closed_at_utc
+            FROM advisory_cases WHERE case_id = ?
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_all(self) -> list[dict[str, Any]]:
+        """Returns all cases in insertion order."""
+        rows = self._store._conn.execute(
+            """
+            SELECT case_id, firm_id, client_id, lead_advisor_id,
+                   status, title,
+                   current_kyc_submission_id, current_approved_profile_id,
+                   current_portfolio_selection_id,
+                   created_at_utc, closed_at_utc
+            FROM advisory_cases ORDER BY rowid ASC
+            """
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_by_client(self, client_id: str) -> list[dict[str, Any]]:
+        """Returns all cases for the given client, in insertion order."""
+        rows = self._store._conn.execute(
+            """
+            SELECT case_id, firm_id, client_id, lead_advisor_id,
+                   status, title,
+                   current_kyc_submission_id, current_approved_profile_id,
+                   current_portfolio_selection_id,
+                   created_at_utc, closed_at_utc
+            FROM advisory_cases WHERE client_id = ? ORDER BY rowid ASC
+            """,
+            (client_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_by_advisor(self, lead_advisor_id: str) -> list[dict[str, Any]]:
+        """Returns all cases whose lead advisor is the given advisor."""
+        rows = self._store._conn.execute(
+            """
+            SELECT case_id, firm_id, client_id, lead_advisor_id,
+                   status, title,
+                   current_kyc_submission_id, current_approved_profile_id,
+                   current_portfolio_selection_id,
+                   created_at_utc, closed_at_utc
+            FROM advisory_cases WHERE lead_advisor_id = ? ORDER BY rowid ASC
+            """,
+            (lead_advisor_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_by_firm(self, firm_id: str) -> list[dict[str, Any]]:
+        """Returns all cases belonging to the given firm."""
+        rows = self._store._conn.execute(
+            """
+            SELECT case_id, firm_id, client_id, lead_advisor_id,
+                   status, title,
+                   current_kyc_submission_id, current_approved_profile_id,
+                   current_portfolio_selection_id,
+                   created_at_utc, closed_at_utc
+            FROM advisory_cases WHERE firm_id = ? ORDER BY rowid ASC
+            """,
+            (firm_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def update_status(self, case_id: str, new_status: str) -> dict[str, Any]:
+        """
+        Transitions the case to new_status.
+
+        - Sets closed_at_utc to now when transitioning to CLOSED.
+        - Validates the transition against _CASE_VALID_TRANSITIONS.
+
+        Raises:
+            EntityNotFoundError:  if the case does not exist.
+            CaseTransitionError:  if the transition is not permitted.
+        """
+        current = self.get(case_id)
+        if current is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+
+        current_status = current["status"]
+        allowed_next = _CASE_VALID_TRANSITIONS.get(current_status, frozenset())
+        if new_status not in allowed_next:
+            allowed_str = (
+                ", ".join(sorted(allowed_next)) if allowed_next else "none (terminal state)"
+            )
+            raise CaseTransitionError(
+                f"Cannot transition from {current_status!r} to {new_status!r}. "
+                f"Allowed next: {allowed_str}."
+            )
+
+        closed_at = _now_utc() if new_status == "CLOSED" else current["closed_at_utc"]
+        with self._store._conn:
+            self._store._conn.execute(
+                "UPDATE advisory_cases SET status = ?, closed_at_utc = ? WHERE case_id = ?",
+                (new_status, closed_at, case_id),
+            )
+        updated = dict(current)
+        updated["status"] = new_status
+        updated["closed_at_utc"] = closed_at
+        return updated
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "case_id": row["case_id"],
+            "firm_id": row["firm_id"],
+            "client_id": row["client_id"],
+            "lead_advisor_id": row["lead_advisor_id"],
+            "status": row["status"],
+            "title": row["title"],
+            "current_kyc_submission_id": row["current_kyc_submission_id"],
+            "current_approved_profile_id": row["current_approved_profile_id"],
+            "current_portfolio_selection_id": row["current_portfolio_selection_id"],
+            "created_at_utc": row["created_at_utc"],
+            "closed_at_utc": row["closed_at_utc"],
+        }
