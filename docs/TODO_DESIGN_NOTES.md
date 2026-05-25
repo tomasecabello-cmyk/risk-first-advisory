@@ -507,3 +507,98 @@ Tercer commit de Fase 2 — solo los roles `advisor` y `admin` pueden ejecutar a
 - **JWT / firma criptográfica** — sigue siendo opaque string lookup.
 - **Multi-tenant por `firm_id`** — `require_roles` no filtra por `firm_id`. Un advisor de la firma A podría leer registros de la firma B si no hay filtro adicional. Eso llega con `ClientRepository` + `AdvisoryCase`.
 - **Roles compuestos** — un advisor con `roles=["advisor", "admin"]` pasa `require_roles("advisor")` y `require_roles("admin")` igual. No hay jerarquía implícita; cada endpoint declara sus roles explícitamente.
+
+---
+
+## Fase 2 — Entidades core: Firm, Advisor, Client ✅ (Commit 4)
+
+### Estado actual
+
+Cuarto commit de Fase 2 — repositorios SQLite, schemas Pydantic y endpoints CRUD para las tres entidades core.
+
+#### Archivos creados / modificados
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — nuevo. Implementa:
+  - `EntityNotFoundError` / `EntityConflictError` — excepciones propias (no dependen de `RepositoryError`).
+  - `SQLiteEntityStore` — connection manager análogo a `SQLitePersistenceStore`. Activa `PRAGMA foreign_keys=ON` y `journal_mode=WAL`. Llama a `_bootstrap_counters()` (idempotente `CREATE TABLE IF NOT EXISTS counters`) para que el `counters` compartido exista aunque `SQLitePersistenceStore.init_schema()` no se haya llamado todavía.
+  - `_next_id(prefix)` — mismo patrón que en `SQLitePersistenceStore` (`INSERT OR IGNORE` + `UPDATE` + `SELECT next_val - 1`). Genera `firm_000001`, `advisor_000001`, `client_000001`.
+  - `SQLiteFirmRepository` — CRUD sobre tabla `firms`. `create()` lanza `EntityConflictError("firm_id already exists: ...")` en PK collision.
+  - `SQLiteAdvisorRepository` — CRUD sobre tabla `advisors`. `roles` se serializa como JSON array en `roles_json TEXT`. FK violations (firm_id no existe) propagan el mensaje SQLite raw.
+  - `SQLiteClientRepository` — CRUD sobre tabla `clients`. Nota: la validación cross-firm (advisor pertenece a la misma firma que el client) NO es responsabilidad del repositorio — la hace el endpoint.
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `FirmCreateRequest` / `FirmResponse` / `FirmListResponse`
+  - `AdvisorCreateRequest` / `AdvisorResponse` / `AdvisorListResponse`
+  - `ClientCreateRequest` / `ClientResponse` / `ClientListResponse`
+  - `_ALLOWED_ENTITY_ROLES: frozenset` — whitelist de roles válidos para advisors.
+  - Validators: `firm_id` / `advisor_id` / `client_id` no pueden ser strings vacíos o whitespace si se proveen; `country`, `email`, `jurisdiction`, `preferred_currency` no pueden ser whitespace-only; `roles` valida contra `_ALLOWED_ENTITY_ROLES`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — 12 endpoints nuevos:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /firms` | admin | Crea firma; 409 en PK collision |
+  | `GET /firms` | any token | Lista todas las firmas |
+  | `GET /firms/{firm_id}` | any token | Detalle de firma; 404 si no existe |
+  | `POST /advisors` | admin | Crea advisor; 422 en FK violation; 409 en PK |
+  | `GET /advisors` | any token | Lista todos los advisors |
+  | `GET /advisors/{advisor_id}` | any token | Detalle; 404 |
+  | `GET /firms/{firm_id}/advisors` | any token | Advisors de la firma; 404 si firma no existe |
+  | `POST /clients` | admin, advisor | Crea client con validación cross-firm; 422/409 |
+  | `GET /clients` | any token | Lista todos los clients |
+  | `GET /clients/{client_id}` | any token | Detalle; 404 |
+  | `GET /firms/{firm_id}/clients` | any token | Clients de la firma; 404 si firma no existe |
+  | `GET /advisors/{advisor_id}/clients` | any token | Clients del advisor; 404 si advisor no existe |
+
+- **`tests/integration/test_api_entities.py`** — 54 tests nuevos organizados en 6 clases:
+  - `TestCreateFirm` (10 tests): 201 + shape + auto-id + explicit-id + echo + 409 + 401 + 403×3.
+  - `TestListGetFirm` (6 tests): empty list + populated + 401 + get-200 + 404 + 401.
+  - `TestCreateAdvisor` (9 tests): 201 + shape + auto-id + echo + FK-422 + 409 + 401 + 403×2.
+  - `TestListGetAdvisor` (7 tests): empty + populated + get-200 + 404 + firm-filter + firm-404 + 401.
+  - `TestCreateClient` (11 tests): admin-201 + advisor-201 + shape + defaults + auto-id + cross-firm-422 + advisor-404-422 + dup-409 + 401 + 403×2.
+  - `TestListGetClient` (9 tests): empty + populated + get-200 + 404 + firm-filter + firm-404 + advisor-filter + advisor-404 + 401.
+  - `TestNoRegression` (2 tests): `/health` y `/auth/me` no rotos.
+
+**Total tests tras este commit:** 2413 (todos pasando). Δ = +54.
+
+#### Setup de tests
+
+Los tests usan dos autouse fixtures:
+- `_setup_entity_test_env` — aísla tokens (mismo patrón que otros archivos de integración) y activa los 4 tokens de test (admin, advisor, compliance, viewer) con `firm_id: null`.
+- `entity_db` — crea la DB temporal, corre `migrate.run(db_path, _MIGRATIONS_DIR)` para crear las tablas de entidades, y redirige `DEFAULT_DB_PATH`. El módulo `migrate` se importa vía `importlib.util.spec_from_file_location` (mismo patrón que `test_migrations.py`).
+
+#### Decisiones de diseño
+
+1. **`SQLiteEntityStore` separado de `SQLitePersistenceStore`** — evita acoplar la capa legacy (records/counters) con la capa de entidades. Ambos stores pueden coexistir en el mismo archivo SQLite; el `counters` se comparte sin conflicto.
+2. **`_bootstrap_counters()` en `__init__`** — garantiza que `counters` existe aunque nadie haya llamado a `SQLitePersistenceStore.init_schema()`. Idempotente (`CREATE TABLE IF NOT EXISTS`).
+3. **Validación cross-firm en el endpoint, no en el repositorio** — el repositorio solo conoce su propia tabla. La lógica de negocio ("el advisor debe pertenecer a la misma firma que el client") es responsabilidad de la capa API. Esto mantiene el repositorio simple y reutilizable.
+4. **PK collision → 409, FK violation → 422** — se distinguen inspeccionando el mensaje SQLite: `"UNIQUE constraint"` → 409; cualquier otro `IntegrityError` → 422. Para `firms` se usa el mensaje propio `"firm_id already exists"` (más legible); para `advisors` y `clients` se reutiliza el mensaje SQLite directamente.
+5. **`status_code=201` en los tres POST de creación** — más correcto semánticamente que 200. Los tests verifican 201.
+6. **GET endpoints usan `get_current_advisor_required` (cualquier token válido)** — no se aplica RBAC por rol a la lectura; todos los roles autenticados pueden ver entidades. Si se necesita RBAC de lectura en el futuro, se puede añadir sin romper contratos existentes.
+7. **`migrate.run(verbose=False)` en tests** — suprime el output de progreso de las migraciones para no contaminar los logs de pytest.
+
+### Tabla de RBAC actualizada (todos los endpoints protegidos)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /firms` | ❌ 403 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /firms`, `GET /firms/{id}` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `POST /advisors` | ❌ 403 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /advisors`, `GET /advisors/{id}`, `GET /firms/{id}/advisors` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `POST /clients` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /clients`, `GET /clients/{id}`, `GET /firms/{id}/clients`, `GET /advisors/{id}/clients` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `POST /advisor/profile-approval` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `POST /advisor/override-approval` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `POST /advisor/portfolio-selection` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /auth/me` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `GET /health` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 |
+
+### Pendiente / próximos commits de Fase 2
+
+1. ~~Tokens de advisor configurables (YAML/env, no hard-coded).~~ ✅ Commit 2.
+2. ~~RBAC enforcement en endpoints `/advisor/*` existentes.~~ ✅ Commit 3.
+3. ~~Repositorios `FirmRepository` / `AdvisorRepository` / `ClientRepository` + endpoints CRUD.~~ ✅ Commit 4.
+4. `AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.
+5. AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.
+6. AIRequestLog wrapper alrededor de `OpenAIProfileClient` + redaction de PII.
+7. Auto-migrate en startup de FastAPI (opcional, behind feature flag).

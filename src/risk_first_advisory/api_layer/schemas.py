@@ -869,3 +869,152 @@ class AIFilteredPortfolioResponse(BaseModel):
     # tests that monkeypatch the persistence helper).
     record_id:            str | None  = None
     report_record_id:     str | None  = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 entities — Firm, Advisor, Client
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Roles permitidos para entidades Advisor. Mismo conjunto que ALLOWED_ROLES
+# en config_layer/advisor_tokens.py — duplicado para evitar dependencia circular.
+_ALLOWED_ENTITY_ROLES: frozenset[str] = frozenset(
+    {"advisor", "compliance", "admin", "viewer"}
+)
+
+
+# ── Firm ─────────────────────────────────────────────────────────────────────
+
+
+class FirmCreateRequest(BaseModel):
+    firm_id:      str | None = None
+    display_name: str        = Field(min_length=1)
+    country:      str        = Field(min_length=1)
+    is_active:    bool       = True
+
+    @field_validator("firm_id", mode="before")
+    @classmethod
+    def _firm_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("firm_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("country")
+    @classmethod
+    def _country_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("country no puede ser solo espacios.")
+        return v
+
+
+class FirmResponse(BaseModel):
+    firm_id:        str
+    display_name:   str
+    country:        str
+    is_active:      bool
+    created_at_utc: str
+
+
+class FirmListResponse(BaseModel):
+    firms: list[FirmResponse]
+    count: int
+
+
+# ── Advisor ──────────────────────────────────────────────────────────────────
+
+
+class AdvisorCreateRequest(BaseModel):
+    advisor_id:   str | None = None
+    firm_id:      str        = Field(min_length=1)
+    display_name: str        = Field(min_length=1)
+    email:        str        = Field(min_length=1)
+    roles:        list[str]  = Field(min_length=1)
+    is_active:    bool       = True
+
+    @field_validator("advisor_id", mode="before")
+    @classmethod
+    def _advisor_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("advisor_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def _email_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email no puede ser solo espacios.")
+        return v
+
+    @field_validator("roles")
+    @classmethod
+    def _validate_roles(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("roles debe tener al menos un elemento.")
+        for r in v:
+            if not isinstance(r, str) or not r.strip():
+                raise ValueError("cada rol debe ser un string no vacío.")
+            if r not in _ALLOWED_ENTITY_ROLES:
+                raise ValueError(
+                    f"rol {r!r} no permitido. "
+                    f"Roles válidos: {sorted(_ALLOWED_ENTITY_ROLES)}."
+                )
+        return v
+
+
+class AdvisorResponse(BaseModel):
+    advisor_id:     str
+    firm_id:        str
+    display_name:   str
+    email:          str
+    roles:          list[str]
+    is_active:      bool
+    created_at_utc: str
+
+
+class AdvisorListResponse(BaseModel):
+    advisors: list[AdvisorResponse]
+    count:    int
+
+
+# ── Client ───────────────────────────────────────────────────────────────────
+
+
+class ClientCreateRequest(BaseModel):
+    client_id:          str | None = None
+    firm_id:            str        = Field(min_length=1)
+    primary_advisor_id: str        = Field(min_length=1)
+    display_name:       str        = Field(min_length=1)
+    external_ref:       str | None = None
+    jurisdiction:       str        = Field(default="AR", min_length=1)
+    preferred_currency: str        = Field(default="USD", min_length=1)
+    is_active:          bool       = True
+
+    @field_validator("client_id", mode="before")
+    @classmethod
+    def _client_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("client_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("jurisdiction", "preferred_currency")
+    @classmethod
+    def _not_whitespace_only(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("no puede ser solo espacios.")
+        return v
+
+
+class ClientResponse(BaseModel):
+    client_id:          str
+    firm_id:            str
+    primary_advisor_id: str
+    display_name:       str
+    external_ref:       str | None
+    jurisdiction:       str
+    preferred_currency: str
+    is_active:          bool
+    created_at_utc:     str
+
+
+class ClientListResponse(BaseModel):
+    clients: list[ClientResponse]
+    count:   int

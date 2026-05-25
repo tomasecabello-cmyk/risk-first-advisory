@@ -33,13 +33,16 @@ from risk_first_advisory.api_layer.auth import (
     require_roles,
 )
 from risk_first_advisory.api_layer.schemas import (
+    AdvisorCreateRequest,
     AdvisorIdentityResponse,
+    AdvisorListResponse,
     AdvisorOverrideApprovalRequest,
     AdvisorOverrideApprovalResponse,
     AdvisorPortfolioSelectionRequest,
     AdvisorPortfolioSelectionResponse,
     AdvisorProfileApprovalRequest,
     AdvisorProfileApprovalResponse,
+    AdvisorResponse,
     AIContradictionResponse,
     AIFilteredPortfolioRequest,
     AIFilteredPortfolioResponse,
@@ -51,9 +54,15 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileRequest,
     AIProfileResponse,
     AIUniverseFilterResponse,
+    ClientCreateRequest,
+    ClientListResponse,
+    ClientResponse,
     DemoRunResponse,
     FilteredSnapshotResponse,
     FinancialGoalRequest,
+    FirmCreateRequest,
+    FirmListResponse,
+    FirmResponse,
     HealthResponse,
     InstrumentExclusionResponse,
     InstrumentResponse,
@@ -93,6 +102,13 @@ from risk_first_advisory.persistence_layer.repositories import (
     RecordNotFoundError,
     RepositoryError,
     StoredRecord,
+)
+from risk_first_advisory.persistence_layer.entity_repository import (
+    EntityConflictError,
+    SQLiteAdvisorRepository,
+    SQLiteClientRepository,
+    SQLiteEntityStore,
+    SQLiteFirmRepository,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
     SQLiteAdvisorOverrideApprovalRepository,
@@ -2186,3 +2202,263 @@ def list_audit(
         raise HTTPException(status_code=500, detail="Persistence error")
     items = [_stored_record_to_response(r) for r in records]
     return RecordListResponse(records=items, count=len(items))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — Entity endpoints: Firm, Advisor, Client
+#
+# RBAC:
+#   POST /firms             → admin only
+#   GET  /firms             → any valid token
+#   GET  /firms/{firm_id}   → any valid token
+#
+#   POST /advisors                       → admin only
+#   GET  /advisors                       → any valid token
+#   GET  /advisors/{advisor_id}          → any valid token
+#   GET  /firms/{firm_id}/advisors       → any valid token
+#
+#   POST /clients                        → admin or advisor
+#   GET  /clients                        → any valid token
+#   GET  /clients/{client_id}            → any valid token
+#   GET  /firms/{firm_id}/clients        → any valid token
+#   GET  /advisors/{advisor_id}/clients  → any valid token
+#
+# FK violations (firm_id / primary_advisor_id not found) → HTTP 422.
+# PK collision (duplicate ID on explicit create) → HTTP 409.
+# Cross-firm validation (advisor.firm_id ≠ req.firm_id) → HTTP 422.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── Firms ─────────────────────────────────────────────────────────────────────
+
+
+@app.post("/firms", response_model=FirmResponse, status_code=201)
+def create_firm(
+    req: FirmCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("admin")),
+) -> FirmResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        repo = SQLiteFirmRepository(store)
+        try:
+            data = repo.create(
+                firm_id=req.firm_id.strip() if req.firm_id else None,
+                display_name=req.display_name.strip(),
+                country=req.country.strip(),
+                is_active=req.is_active,
+            )
+        except EntityConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return FirmResponse(**data)
+
+
+@app.get("/firms", response_model=FirmListResponse)
+def list_firms(
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> FirmListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteFirmRepository(store).list_all()
+    return FirmListResponse(firms=[FirmResponse(**d) for d in data], count=len(data))
+
+
+@app.get("/firms/{firm_id}", response_model=FirmResponse)
+def get_firm(
+    firm_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> FirmResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteFirmRepository(store).get(firm_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Firm not found: {firm_id!r}")
+    return FirmResponse(**data)
+
+
+# ── Advisors ──────────────────────────────────────────────────────────────────
+
+
+@app.post("/advisors", response_model=AdvisorResponse, status_code=201)
+def create_advisor(
+    req: AdvisorCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("admin")),
+) -> AdvisorResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        repo = SQLiteAdvisorRepository(store)
+        try:
+            data = repo.create(
+                advisor_id=req.advisor_id.strip() if req.advisor_id else None,
+                firm_id=req.firm_id.strip(),
+                display_name=req.display_name.strip(),
+                email=req.email.strip(),
+                roles=req.roles,
+                is_active=req.is_active,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            # PK collision → "UNIQUE constraint failed" → 409
+            # FK violation → "FOREIGN KEY constraint failed" → 422
+            status = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status, detail=detail) from exc
+    return AdvisorResponse(**data)
+
+
+@app.get("/advisors", response_model=AdvisorListResponse)
+def list_advisors(
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAdvisorRepository(store).list_all()
+    return AdvisorListResponse(
+        advisors=[AdvisorResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/advisors/{advisor_id}", response_model=AdvisorResponse)
+def get_advisor(
+    advisor_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAdvisorRepository(store).get(advisor_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"Advisor not found: {advisor_id!r}"
+        )
+    return AdvisorResponse(**data)
+
+
+@app.get("/firms/{firm_id}/advisors", response_model=AdvisorListResponse)
+def list_firm_advisors(
+    firm_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> AdvisorListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        firm_data = SQLiteFirmRepository(store).get(firm_id)
+        if firm_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Firm not found: {firm_id!r}"
+            )
+        data = SQLiteAdvisorRepository(store).list_by_firm(firm_id)
+    return AdvisorListResponse(
+        advisors=[AdvisorResponse(**d) for d in data], count=len(data)
+    )
+
+
+# ── Clients ───────────────────────────────────────────────────────────────────
+
+
+@app.post("/clients", response_model=ClientResponse, status_code=201)
+def create_client(
+    req: ClientCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("admin", "advisor")),
+) -> ClientResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        adv_repo = SQLiteAdvisorRepository(store)
+        client_repo = SQLiteClientRepository(store)
+
+        # Cross-firm validation: primary_advisor must belong to the same firm.
+        advisor_data = adv_repo.get(req.primary_advisor_id.strip())
+        if advisor_data is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Advisor not found: {req.primary_advisor_id!r}",
+            )
+        if advisor_data["firm_id"] != req.firm_id.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Advisor {req.primary_advisor_id!r} belongs to firm "
+                    f"{advisor_data['firm_id']!r}, not {req.firm_id!r}."
+                ),
+            )
+
+        try:
+            data = client_repo.create(
+                client_id=req.client_id.strip() if req.client_id else None,
+                firm_id=req.firm_id.strip(),
+                primary_advisor_id=req.primary_advisor_id.strip(),
+                display_name=req.display_name.strip(),
+                external_ref=req.external_ref.strip() if req.external_ref else None,
+                jurisdiction=req.jurisdiction.strip(),
+                preferred_currency=req.preferred_currency.strip(),
+                is_active=req.is_active,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            # PK collision → "UNIQUE constraint failed" → 409
+            # FK violation → "FOREIGN KEY constraint failed" → 422
+            status = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status, detail=detail) from exc
+    return ClientResponse(**data)
+
+
+@app.get("/clients", response_model=ClientListResponse)
+def list_clients(
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> ClientListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteClientRepository(store).list_all()
+    return ClientListResponse(
+        clients=[ClientResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/clients/{client_id}", response_model=ClientResponse)
+def get_client(
+    client_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> ClientResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteClientRepository(store).get(client_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {client_id!r}"
+        )
+    return ClientResponse(**data)
+
+
+@app.get("/firms/{firm_id}/clients", response_model=ClientListResponse)
+def list_firm_clients(
+    firm_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> ClientListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        firm_data = SQLiteFirmRepository(store).get(firm_id)
+        if firm_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Firm not found: {firm_id!r}"
+            )
+        data = SQLiteClientRepository(store).list_by_firm(firm_id)
+    return ClientListResponse(
+        clients=[ClientResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get("/advisors/{advisor_id}/clients", response_model=ClientListResponse)
+def list_advisor_clients(
+    advisor_id: str,
+    _: AdvisorIdentity = Depends(get_current_advisor_required),
+) -> ClientListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        adv_data = SQLiteAdvisorRepository(store).get(advisor_id)
+        if adv_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Advisor not found: {advisor_id!r}"
+            )
+        data = SQLiteClientRepository(store).list_by_advisor(advisor_id)
+    return ClientListResponse(
+        clients=[ClientResponse(**d) for d in data], count=len(data)
+    )
