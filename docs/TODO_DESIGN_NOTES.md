@@ -311,3 +311,66 @@ El endpoint actual devuelve portfolios candidatos sin ninguna acción de aprobac
 - Un paso de revisión donde el asesor valida las preferencias extraídas por la IA antes de que se apliquen al filtro.
 - Un paso de aprobación del portfolio seleccionado (DEFENSIVE, BALANCED o GROWTH) con registro en audit trail.
 - Si GROWTH requiere override, firma explícita del asesor con justificación documentada.
+
+---
+
+## Fase 2 — Infraestructura de migrations y schema base ✅ (sin wiring de API)
+
+### Estado actual
+
+Primer commit de Fase 2 — solo infraestructura de DB, **sin endpoints ni repositorios todavía**.
+
+- **`scripts/migrate.py`** — runner SQLite stdlib. Descubre `.sql` bajo `migrations/`, los aplica en orden lexicográfico, cada uno dentro de su propia transacción manual (`BEGIN` + statements + `INSERT INTO schema_migrations` + `COMMIT`/`ROLLBACK`). Idempotente vía la tabla `schema_migrations(version PK)`. Activa `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`. Acepta `--db-path` y `--migrations-dir`.
+- **`scripts/backup_db.py`** — usa `VACUUM INTO` para producir copia compacta en `data/backups/YYYYMMDD_HHMMSS/`. Online-safe (respeta WAL).
+- **`migrations/0001_phase2_core_schema.sql`** — crea las 6 tablas core de Fase 2: `firms`, `advisors`, `clients`, `advisory_cases`, `audit_events`, `ai_request_logs`, con todos los índices declarados en el diseño. **No toca** `records` / `counters` (de `SQLitePersistenceStore`).
+- **`tests/unit/test_migrations.py`** — 25 tests cubriendo: aplicación sobre DB vacía, idempotencia (3 corridas), preservación de records legacy preexistentes, coexistencia con `SQLitePersistenceStore.init_schema()` en ambos órdenes, FK enforcement (3 escenarios), UNIQUE(case_id, sequence) en audit_events, presencia de los 10 índices declarados, `--db-path` por función y por CLI, edge cases (dir vacío / inexistente), atomicidad ante migration inválida.
+
+### Garantías que esto da
+
+| Garantía | Cómo se sostiene |
+|---|---|
+| **Aditiva** — no modifica records/counters existentes | Test `test_migration_preserves_preexisting_legacy_records` inserta un record vía `SQLitePersistenceStore`, corre la migración, verifica que el record sigue presente con payload idéntico. |
+| **Idempotente** — re-ejecutar es seguro | Versión registrada en `schema_migrations`. Test `test_idempotent_run_does_not_duplicate_schema_migrations_rows` corre 3 veces y verifica COUNT = 1. |
+| **Atómica por archivo** — fallo a mitad ⇒ ROLLBACK total | `_apply_migration` envuelve en transacción manual con `isolation_level=None`. Test `test_invalid_migration_does_not_partially_apply` confirma que una tabla intermedia no sobrevive el ROLLBACK. |
+| **Orden estable** | `sorted(migrations_dir.glob("*.sql"))` por nombre. Convención `NNNN_descripcion.sql`. |
+| **FK enforcement disponible** | El runner activa `PRAGMA foreign_keys=ON`; SQLitePersistenceStore también lo hace. Apps nuevas deben replicar el PRAGMA per-connection (es la semántica SQLite, no un bug del runner). |
+
+### Lo que NO está en este commit (queda para los siguientes)
+
+- Ningún endpoint nuevo. `main.py` intacto.
+- Ningún repositorio nuevo. La capa `persistence_layer` no ganó archivos.
+- Ningún modelo de dominio nuevo (`Firm`, `Advisor`, `Client`, `AdvisoryCase` no existen como Python).
+- El auth scaffold no se tocó.
+- El frontend no se tocó.
+- `data/demo_api.db` no se migra automáticamente al arrancar la API — hay que correr `python scripts/migrate.py` manualmente. La integración API-side queda para una tarea posterior (probablemente un evento de startup de FastAPI).
+
+### Decisiones de diseño documentadas
+
+1. **`schema_migrations` no es la migración 0000.** Es metadata creada con `CREATE TABLE IF NOT EXISTS` antes de aplicar cualquier `.sql`. Esto evita el huevo-y-la-gallina de "necesito una tabla para registrar que tengo tablas".
+2. **No se usa `executescript()` para las migraciones.** Su semántica de transacción es opaca (commit implícito al inicio y al final). El runner splittea SQL por `;` (estrictamente: tras stripear comentarios `--`), ejecuta cada statement con `conn.execute()` dentro de una transacción manual. Limitación documentada: NO maneja `;` dentro de string literals — nuestras migraciones no los contienen.
+3. **Index explícito sobre `(case_id, sequence)` además del implícito de `UNIQUE(case_id, sequence)`.** Costo mínimo, intención explícita.
+4. **`booleans → INTEGER 0/1`.** Convención SQLite estándar (no `BOOLEAN`, que en SQLite es alias de NUMERIC).
+5. **Timestamps como `TEXT` ISO-8601 UTC con sufijo `Z`.** Alineado con `SQLitePersistenceStore._now_utc`. No se usa `INTEGER unix epoch` para mantener la legibilidad humana en consultas ad-hoc.
+
+### Pendiente / próximos commits de Fase 2
+
+1. Tokens de advisor configurables (YAML/env, no hard-coded).
+2. RBAC enforcement en endpoints `/advisor/*` existentes.
+3. Repositorios `FirmRepository` / `AdvisorRepository` / `ClientRepository` + endpoints CRUD.
+4. `AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.
+5. AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.
+6. AIRequestLog wrapper alrededor de `OpenAIProfileClient` + redaction de PII.
+7. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+
+### Cómo migrar la DB de desarrollo actual
+
+```powershell
+# Backup primero
+python scripts/backup_db.py --db-path data/demo_api.db
+# Aplicar
+python scripts/migrate.py --db-path data/demo_api.db
+# Re-ejecutar para verificar idempotencia
+python scripts/migrate.py --db-path data/demo_api.db
+```
+
+Si la DB tiene records existentes de Fase 0/1 (workflows, reports, advisor_*_approval), todos sobreviven.
