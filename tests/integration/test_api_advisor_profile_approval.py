@@ -23,16 +23,37 @@ import pytest
 from fastapi.testclient import TestClient
 
 import risk_first_advisory.api_layer.main as _main_module
+import risk_first_advisory.config_layer.advisor_tokens as _advisor_tokens_module
 
 
 _URL = "/advisor/profile-approval"
 _ADVISOR_TOKEN = "Bearer dev-advisor-token"
 _COMPLIANCE_TOKEN = "Bearer dev-compliance-token"
+_RBAC_403_DETAIL = "Advisor role is not authorized for this action."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _isolate_advisor_tokens_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Aísla cada test del entorno local:
+        - Elimina ADVISOR_TOKENS_FILE si está set.
+        - Apunta DEFAULT_ADVISOR_TOKENS_PATH a una ruta inexistente.
+
+    Garantiza que los tests del fallback usen el fallback dev-only y NO se
+    contaminen si el dev tiene `config/advisor_tokens.yaml` localmente.
+    Tests de RBAC con YAML custom re-setean el env var después de este fixture.
+    """
+    monkeypatch.delenv(_advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        _advisor_tokens_module,
+        "DEFAULT_ADVISOR_TOKENS_PATH",
+        tmp_path / "absent_default.yaml",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -110,15 +131,15 @@ class TestAdvisorProfileApprovalAuth:
         )
         assert resp.status_code == 401
 
-    def test_compliance_token_is_accepted(self, client: TestClient) -> None:
-        """Sin RBAC todavía: cualquier identidad demo puede registrar."""
+    def test_compliance_token_returns_403(self, client: TestClient) -> None:
+        """RBAC: compliance no puede ejecutar actos formales del asesor."""
         resp = client.post(
             _URL,
             json=_valid_approve_body(client_id="CLI-CMP-OK"),
             headers={"Authorization": _COMPLIANCE_TOKEN},
         )
-        assert resp.status_code == 200
-        assert resp.json()["advisor_id"] == "CMP-001"
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == _RBAC_403_DETAIL
 
     def test_auth_failure_does_not_persist(
         self, client: TestClient, _redirect_db_to_tmp: Path
@@ -566,3 +587,93 @@ class TestExistingEndpointsUnaffected:
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RBAC — roles y roles insuficientes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAdvisorProfileApprovalRBAC:
+    """
+    Verifica la frontera RBAC de /advisor/profile-approval:
+        - compliance → 403 (ya cubierto en TestAdvisorProfileApprovalAuth,
+          aquí se reitera para tener cobertura de detalle y leak).
+        - viewer (vía YAML custom) → 403.
+        - admin (vía YAML custom) → 200.
+        - sin token → 401, no 403.
+    """
+
+    def test_viewer_token_returns_403(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        client: TestClient,
+    ) -> None:
+        viewer_yaml = tmp_path / "viewer_tokens.yaml"
+        viewer_yaml.write_text(
+            "tokens:\n"
+            "  dev-viewer-token:\n"
+            "    advisor_id: VWR-001\n"
+            "    display_name: Dev Viewer\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - viewer\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(viewer_yaml)
+        )
+        resp = client.post(
+            _URL,
+            json=_valid_approve_body(client_id="CLI-VWR-PA"),
+            headers={"Authorization": "Bearer dev-viewer-token"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == _RBAC_403_DETAIL
+
+    def test_admin_token_returns_200(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        client: TestClient,
+    ) -> None:
+        admin_yaml = tmp_path / "admin_tokens.yaml"
+        admin_yaml.write_text(
+            "tokens:\n"
+            "  dev-admin-token:\n"
+            "    advisor_id: ADM-001\n"
+            "    display_name: Dev Admin\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - admin\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(admin_yaml)
+        )
+        resp = client.post(
+            _URL,
+            json=_valid_approve_body(client_id="CLI-ADM-PA"),
+            headers={"Authorization": "Bearer dev-admin-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["advisor_id"] == "ADM-001"
+
+    def test_403_does_not_echo_token(
+        self, client: TestClient
+    ) -> None:
+        resp = client.post(
+            _URL,
+            json=_valid_approve_body(client_id="CLI-LEAK-PA"),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert resp.status_code == 403
+        assert "dev-compliance-token" not in resp.text
+        for hv in resp.headers.values():
+            assert "dev-compliance-token" not in hv
+
+    def test_no_token_returns_401_not_403(self, client: TestClient) -> None:
+        """authn precede a authz: sin token → 401, no 403."""
+        resp = client.post(_URL, json=_valid_approve_body())
+        assert resp.status_code == 401

@@ -133,7 +133,7 @@ El cliente puede elegir moverse hacia una alternativa más agresiva, pero esa de
 - **Conciliación dominio ↔ API:** `human_layer.override_approval.AdvisorOverrideApproval` tiene un contrato más estricto (enums, comment ≥ 20 chars, validación contra `PortfolioVariantMetadata` viva) que los schemas API de Fase 1 (rationale ≥ 1 char, sin live metadata). Cuando el override se dispare desde dentro de un workflow corriendo (no como "registro post-mortem"), unificar.
 - **Endpoints de retrieval:** `GET /advisor/profile-approval/{record_id}`, `GET /advisor/override-approval/{record_id}`, `GET /advisor/portfolio-selection/{record_id}` + listing por `client_id`.
 - **Integración con AuditTrail:** las acciones del asesor (`profile-approval`, `override-approval`, `portfolio-selection`) aún no quedan como eventos en el `AuditTrail` del workflow principal. Solo se persisten como records SQLite independientes.
-- **RBAC por rol:** actualmente cualquier token demo (advisor o compliance) puede registrar cualquier decisión. Fase 2: restringir endpoints de decisión a `roles=["advisor"]`; compliance solo retrieval.
+- ~~**RBAC por rol:** actualmente cualquier token demo (advisor o compliance) puede registrar cualquier decisión. Fase 2: restringir endpoints de decisión a `roles=["advisor"]`; compliance solo retrieval.~~ → **✅ Cerrado.** `require_roles("advisor", "admin")` aplicado a los tres `/advisor/*`. Compliance/viewer → 403 genérico. Ver sección "Fase 2 — RBAC enforcement".
 - **Firma digital:** `rationale` es texto libre sin firma criptográfica ni identificación verificada del asesor. Para piloto productivo: JWT con identidad del IdP propagada al record.
 
 ---
@@ -354,8 +354,8 @@ Primer commit de Fase 2 — solo infraestructura de DB, **sin endpoints ni repos
 
 ### Pendiente / próximos commits de Fase 2
 
-1. Tokens de advisor configurables (YAML/env, no hard-coded).
-2. RBAC enforcement en endpoints `/advisor/*` existentes.
+1. ~~Tokens de advisor configurables (YAML/env, no hard-coded).~~ ✅ Commit 2.
+2. ~~RBAC enforcement en endpoints `/advisor/*` existentes.~~ ✅ Commit 3.
 3. Repositorios `FirmRepository` / `AdvisorRepository` / `ClientRepository` + endpoints CRUD.
 4. `AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.
 5. AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.
@@ -443,7 +443,67 @@ get_default_advisor_tokens()
 ### Lo que NO está en este commit
 
 - **JWT / firma criptográfica de tokens** — sigue siendo opaque string ↔ identity lookup. La rotación, expiración y firma quedan para Fase 2.5 (siguiente paso del diseño Opus).
-- **RBAC enforcement** — `AdvisorIdentity.roles` ya viene del loader, pero ningún endpoint chequea roles todavía. Próximo commit: helper `require_roles(["advisor"])` aplicado a los `/advisor/*`.
+- ~~**RBAC enforcement**~~ ✅ `require_roles("advisor", "admin")` aplicado a los tres `/advisor/*` en Commit 3. Ver sección "Fase 2 — RBAC enforcement".
 - **Multi-tenant real** — `firm_id` viaja en la identity, pero ningún endpoint filtra recursos por `firm_id`. Llega con las entidades de Fase 2 (Client/AdvisoryCase).
 - **Persistencia de tokens en la nueva tabla `advisors`** — el loader sigue siendo file-backed. Cuando exista `AdvisorRepository`, los tokens van a salir de DB; el loader YAML pasará a ser una forma de seed inicial.
 - **Auto-creación de `config/advisor_tokens.yaml` desde `.example`** — el operador lo hace manualmente. Un script de bootstrap puede llegar después.
+
+---
+
+## Fase 2 — RBAC enforcement en endpoints `/advisor/*` ✅ (Commit 3)
+
+### Estado actual
+
+Tercer commit de Fase 2 — solo los roles `advisor` y `admin` pueden ejecutar actos formales del asesor. Compliance y viewer reciben 403.
+
+- **`src/risk_first_advisory/api_layer/auth.py`** — cambios:
+  - `_raise_401() -> None` → `_raise_401() -> NoReturn` (anotación correcta; habilita narrowing de tipo).
+  - `_RBAC_ERROR_DETAIL: str` — constante genérica `"Advisor role is not authorized for this action."`. Nunca revela qué roles se requerían ni cuáles tiene el caller.
+  - `require_roles(*allowed_roles: str)` — factory de dependencias FastAPI. Recibe uno o más roles permitidos; devuelve un callable que: (1) extrae y valida el Bearer token → 401 si falta/inválido, (2) resuelve identidad vía `_lookup_advisor`, (3) comprueba que `any(r in allowed for r in identity.roles)` → 403 si ningún rol coincide. `require_roles()` sin argumentos levanta `ValueError` en tiempo de definición del endpoint.
+  - `get_current_advisor_required` — sin cambios de contrato; sigue siendo la dependencia de `/auth/me` (que acepta cualquier token válido sin filtrar por rol).
+
+- **`src/risk_first_advisory/api_layer/main.py`** — tres endpoints actualizados:
+  - `POST /advisor/profile-approval`: `Depends(get_current_advisor_required)` → `Depends(require_roles("advisor", "admin"))`
+  - `POST /advisor/override-approval`: ídem
+  - `POST /advisor/portfolio-selection`: ídem
+
+- **`tests/integration/test_api_auth.py`** — `TestAdvisorRBACEnforcement` añadida (21 tests): compliance → 403 en los tres endpoints, 403 genérico, no echo de token, 401 sin token, viewer (YAML custom) → 403, admin (YAML custom) → 200 en los tres endpoints.
+
+- **`tests/integration/test_api_advisor_profile_approval.py`**:
+  - Añadido autouse fixture `_isolate_advisor_tokens_env` (mismo patrón que `test_api_auth.py`).
+  - `test_compliance_token_is_accepted` → `test_compliance_token_returns_403` (403 + detalle genérico).
+  - `TestAdvisorProfileApprovalRBAC` añadida (4 tests: viewer → 403, admin → 200, no echo, 401 ≠ 403).
+
+- **`tests/integration/test_api_advisor_override_approval.py`**: mismo patrón.
+
+- **`tests/integration/test_api_advisor_portfolio_selection.py`**: mismo patrón.
+
+**Total tests tras este commit:** 2359 (todos pasando).
+
+### Tabla de RBAC
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /advisor/profile-approval` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `POST /advisor/override-approval` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `POST /advisor/portfolio-selection` | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /auth/me` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `GET /health` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 |
+| `/ai/*`, `/universe/*` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 |
+
+### Decisiones de diseño
+
+1. **Factory function, no decorator** — `require_roles("advisor", "admin")` retorna un callable que FastAPI inspecciona vía `Depends()`. La alternativa (un decorator `@require_roles`) no se integra limpiamente con el sistema de inyección de dependencias de FastAPI.
+2. **frozenset interno para `allowed`** — evita recalcular la intersección por request; la cobertura `any(r in allowed ...)` es O(k) con k = roles del usuario (típicamente 1–3), no O(roles * allowed).
+3. **Mismo 403 detail siempre** — `"Advisor role is not authorized for this action."` no varía según el rol del caller ni según los roles requeridos. Evita information leakage de la estructura de permisos.
+4. **authn precede a authz** — token ausente/inválido → 401 (con `WWW-Authenticate: Bearer`). Solo si el token es válido se evalúa la lógica de roles → 403 si insuficiente. No existe un camino que devuelva 403 sin haber resuelto una identidad válida.
+5. **`require_roles()` sin args → ValueError en startup** — se detecta como error de programación en tiempo de definición del endpoint (cuando FastAPI registra la ruta), no en el primer request que lo llama.
+6. **Isolation fixture autouse en los tres archivos de test** — garantiza que los tests no se contaminen con `config/advisor_tokens.yaml` local del dev. El mismo patrón que `test_api_auth.py` desde Commit 2.
+7. **`_raise_401` → `NoReturn`** — corrección de anotación (la función siempre levanta `HTTPException`; `-> None` era incorrecto). Con `NoReturn`, mypy entiende el narrowing `if token is None: _raise_401()` y no requiere `# type: ignore`.
+
+### Lo que NO está en este commit
+
+- **Retrieval endpoints con RBAC** — `GET /advisor/*/...` no existen todavía. Cuando se implementen: compliance → solo lectura, advisor/admin → lectura + escritura.
+- **JWT / firma criptográfica** — sigue siendo opaque string lookup.
+- **Multi-tenant por `firm_id`** — `require_roles` no filtra por `firm_id`. Un advisor de la firma A podría leer registros de la firma B si no hay filtro adicional. Eso llega con `ClientRepository` + `AdvisoryCase`.
+- **Roles compuestos** — un advisor con `roles=["advisor", "admin"]` pasa `require_roles("advisor")` y `require_roles("admin")` igual. No hay jerarquía implícita; cada endpoint declara sus roles explícitamente.

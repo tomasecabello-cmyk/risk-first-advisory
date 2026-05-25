@@ -30,6 +30,7 @@ from risk_first_advisory.ai_layer.mock_ai_client import MockAIClient
 from risk_first_advisory.api_layer.auth import (
     AdvisorIdentity,
     get_current_advisor_required,
+    require_roles,
 )
 from risk_first_advisory.api_layer.schemas import (
     AdvisorIdentityResponse,
@@ -902,11 +903,11 @@ def auth_me(
 # /advisor/profile-approval — primer acto formal del asesor (Fase 1).
 #
 # Registra la decisión del asesor sobre un perfil propuesto (por la IA o por
-# el sistema). Auth: get_current_advisor_required → 401 sin token válido.
+# el sistema).
 #
-# Por ahora cualquier identidad demo (advisor o compliance) puede registrar
-# una decisión. RBAC más estricto (solo rol "advisor") queda para tareas
-# posteriores de Fase 1.
+# Auth: require_roles("advisor", "admin")
+#   → 401 sin token / token inválido.
+#   → 403 si el token es válido pero el rol es compliance o viewer.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -916,7 +917,7 @@ def auth_me(
 )
 def advisor_profile_approval(
     req: AdvisorProfileApprovalRequest,
-    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
 ) -> AdvisorProfileApprovalResponse:
     # La validación cruzada (decision/approved_profile) se hace en
     # AdvisorProfileApprovalRequest.model_validator → 422 automático
@@ -981,7 +982,9 @@ def advisor_profile_approval(
 # RiskBudget aprobado (típicamente GROWTH con
 # reason_codes=["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"]).
 #
-# Auth: get_current_advisor_required → 401 sin token válido.
+# Auth: require_roles("advisor", "admin")
+#   → 401 sin token / token inválido.
+#   → 403 si el token es válido pero el rol es compliance o viewer.
 # Nota: no se valida todavía contra existencia real del candidate ni del
 # record relacionado; el asesor declara reason_codes/exceeded_constraints
 # explícitamente. Esa conciliación queda para una tarea posterior.
@@ -997,7 +1000,7 @@ def advisor_profile_approval(
 )
 def advisor_override_approval(
     req: AdvisorOverrideApprovalRequest,
-    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
 ) -> AdvisorOverrideApprovalResponse:
     # ── 1. Persistir ──────────────────────────────────────────────────────
     persist_payload: dict = {
@@ -1058,7 +1061,9 @@ def advisor_override_approval(
 #   - y, si la variante elegida es GROWTH, a un advisor override approval
 #     (override_approval_record_id).
 #
-# Auth: get_current_advisor_required → 401 sin token válido.
+# Auth: require_roles("advisor", "admin")
+#   → 401 sin token / token inválido.
+#   → 403 si el token es válido pero el rol es compliance o viewer.
 # Política Fase 1: NO se valida contra existencia real de los records
 # enlazados; el endpoint solo registra la decisión declarada. Validación
 # cruzada queda para una tarea de integración futura.
@@ -1081,7 +1086,7 @@ _GROWTH_WITHOUT_OVERRIDE_WARNING: str = (
 )
 def advisor_portfolio_selection(
     req: AdvisorPortfolioSelectionRequest,
-    advisor: AdvisorIdentity = Depends(get_current_advisor_required),
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
 ) -> AdvisorPortfolioSelectionResponse:
     # ── 1. Calcular warnings ──────────────────────────────────────────────
     warnings: list[str] = []

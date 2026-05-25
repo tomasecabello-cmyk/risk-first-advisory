@@ -463,6 +463,290 @@ class TestAuthMeMalformedConfigFile:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RBAC — compliance y viewer NO pueden ejecutar actos formales del asesor
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAdvisorRBACEnforcement:
+    """
+    Verifica que los tres endpoints /advisor/* aplican RBAC:
+        - compliance / viewer  → 403 Forbidden
+        - sin token            → 401 Unauthorized (no 403)
+        - advisor              → ya cubierto en archivos específicos de endpoint
+
+    Nota: los tests de persistencia y validación de payload viven en los
+    archivos test_api_advisor_*.py. Aquí solo verificamos la frontera RBAC.
+    """
+
+    _RBAC_403_DETAIL = "Advisor role is not authorized for this action."
+    _AUTH_401_DETAIL = "Invalid or missing advisor authentication token."
+
+    @pytest.fixture
+    def _db_client(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> TestClient:
+        """Cliente con DB redirigida a tmp_path — necesario para los /advisor/* posts."""
+        monkeypatch.setattr(_main_module, "DEFAULT_DB_PATH", tmp_path / "rbac_check.db")
+        return TestClient(_main_module.app, raise_server_exceptions=False)
+
+    # ── Cuerpos mínimos válidos por endpoint ──────────────────────────────────
+
+    @staticmethod
+    def _profile_body() -> dict:
+        return {
+            "client_id": "CLI-RBAC-001",
+            "proposed_profile": "moderado",
+            "decision": "approve",
+            "rationale": "RBAC enforcement test.",
+        }
+
+    @staticmethod
+    def _override_body() -> dict:
+        return {
+            "client_id": "CLI-RBAC-001",
+            "candidate_variant": "GROWTH",
+            "decision": "approve",
+            "reason_codes": ["PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET"],
+            "exceeded_constraints": ["max_volatility"],
+            "rationale": "RBAC enforcement test.",
+        }
+
+    @staticmethod
+    def _portfolio_body() -> dict:
+        return {
+            "client_id": "CLI-RBAC-001",
+            "selected_variant": "BALANCED",
+            "rationale": "RBAC enforcement test.",
+        }
+
+    # ── compliance → 403 en los tres endpoints ────────────────────────────────
+
+    def test_compliance_cannot_post_profile_approval(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/profile-approval",
+            json=self._profile_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert resp.status_code == 403
+
+    def test_compliance_cannot_post_override_approval(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/override-approval",
+            json=self._override_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert resp.status_code == 403
+
+    def test_compliance_cannot_post_portfolio_selection(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/portfolio-selection",
+            json=self._portfolio_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert resp.status_code == 403
+
+    # ── 403 detail genérico — no filtra roles ni token ────────────────────────
+
+    def test_403_detail_is_generic_rbac_message(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/profile-approval",
+            json=self._profile_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert resp.json()["detail"] == self._RBAC_403_DETAIL
+
+    def test_403_does_not_echo_token_in_body(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/profile-approval",
+            json=self._profile_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert "dev-compliance-token" not in resp.text
+        for hv in resp.headers.values():
+            assert "dev-compliance-token" not in hv
+
+    def test_403_does_not_echo_token_on_override(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/override-approval",
+            json=self._override_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert "dev-compliance-token" not in resp.text
+
+    def test_403_does_not_echo_token_on_portfolio_selection(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/portfolio-selection",
+            json=self._portfolio_body(),
+            headers={"Authorization": "Bearer dev-compliance-token"},
+        )
+        assert "dev-compliance-token" not in resp.text
+
+    # ── sin token → 401, no 403 ───────────────────────────────────────────────
+
+    def test_no_token_returns_401_not_403_on_profile(
+        self, _db_client: TestClient
+    ) -> None:
+        """authn precede a authz: sin token → 401, no 403."""
+        resp = _db_client.post("/advisor/profile-approval", json=self._profile_body())
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == self._AUTH_401_DETAIL
+
+    def test_no_token_returns_401_not_403_on_override(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/override-approval", json=self._override_body()
+        )
+        assert resp.status_code == 401
+
+    def test_no_token_returns_401_not_403_on_portfolio(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post(
+            "/advisor/portfolio-selection", json=self._portfolio_body()
+        )
+        assert resp.status_code == 401
+
+    # ── 401 sin token incluye WWW-Authenticate ────────────────────────────────
+
+    def test_401_includes_www_authenticate_on_advisor_endpoints(
+        self, _db_client: TestClient
+    ) -> None:
+        resp = _db_client.post("/advisor/profile-approval", json=self._profile_body())
+        assert resp.headers.get("www-authenticate", "").lower().startswith("bearer")
+
+    # ── viewer token via custom YAML → 403 ───────────────────────────────────
+
+    def test_viewer_role_returns_403(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        _db_client: TestClient,
+    ) -> None:
+        viewer_yaml = tmp_path / "viewer_tokens.yaml"
+        viewer_yaml.write_text(
+            "tokens:\n"
+            "  dev-viewer-token:\n"
+            "    advisor_id: VWR-001\n"
+            "    display_name: Dev Viewer\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - viewer\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(viewer_yaml)
+        )
+        resp = _db_client.post(
+            "/advisor/profile-approval",
+            json=self._profile_body(),
+            headers={"Authorization": "Bearer dev-viewer-token"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == self._RBAC_403_DETAIL
+
+    # ── admin token via custom YAML → 200 ────────────────────────────────────
+
+    def test_admin_role_can_post_profile_approval(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        _db_client: TestClient,
+    ) -> None:
+        admin_yaml = tmp_path / "admin_tokens.yaml"
+        admin_yaml.write_text(
+            "tokens:\n"
+            "  dev-admin-token:\n"
+            "    advisor_id: ADM-001\n"
+            "    display_name: Dev Admin\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - admin\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(admin_yaml)
+        )
+        resp = _db_client.post(
+            "/advisor/profile-approval",
+            json=self._profile_body(),
+            headers={"Authorization": "Bearer dev-admin-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["advisor_id"] == "ADM-001"
+
+    def test_admin_role_can_post_override_approval(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        _db_client: TestClient,
+    ) -> None:
+        admin_yaml = tmp_path / "admin_tokens2.yaml"
+        admin_yaml.write_text(
+            "tokens:\n"
+            "  dev-admin-token:\n"
+            "    advisor_id: ADM-001\n"
+            "    display_name: Dev Admin\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - admin\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(admin_yaml)
+        )
+        resp = _db_client.post(
+            "/advisor/override-approval",
+            json=self._override_body(),
+            headers={"Authorization": "Bearer dev-admin-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["advisor_id"] == "ADM-001"
+
+    def test_admin_role_can_post_portfolio_selection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        _db_client: TestClient,
+    ) -> None:
+        admin_yaml = tmp_path / "admin_tokens3.yaml"
+        admin_yaml.write_text(
+            "tokens:\n"
+            "  dev-admin-token:\n"
+            "    advisor_id: ADM-001\n"
+            "    display_name: Dev Admin\n"
+            "    firm_id: null\n"
+            "    roles:\n"
+            "      - admin\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            _advisor_tokens_module.ADVISOR_TOKENS_ENV_VAR, str(admin_yaml)
+        )
+        resp = _db_client.post(
+            "/advisor/portfolio-selection",
+            json=self._portfolio_body(),
+            headers={"Authorization": "Bearer dev-admin-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["advisor_id"] == "ADM-001"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 

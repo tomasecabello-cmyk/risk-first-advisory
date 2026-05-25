@@ -43,7 +43,7 @@ Error policy:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import Header, HTTPException, status
 
@@ -101,13 +101,17 @@ class AdvisorIdentity:
 # Generic error message — never leaks token shape or value.
 _AUTH_ERROR_DETAIL: str = "Invalid or missing advisor authentication token."
 
+# RBAC error message — same string regardless of which role(s) were required.
+# Never reveals the caller's roles, the allowed set, or the token.
+_RBAC_ERROR_DETAIL: str = "Advisor role is not authorized for this action."
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers internos
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _raise_401() -> None:
+def _raise_401() -> NoReturn:
     """
     Levanta HTTP 401 con detalle genérico y cabecera WWW-Authenticate
     según RFC 6750. Centralizado para garantizar que ningún caller
@@ -222,5 +226,59 @@ def get_current_advisor_required(
     token = _extract_bearer_token(authorization)
     if token is None:
         _raise_401()
-    # type-check: _raise_401 levanta excepción; aquí token es str.
+    # _raise_401 es NoReturn → token es str aquí.
     return _lookup_advisor(token)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RBAC — require_roles factory
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def require_roles(*allowed_roles: str):
+    """
+    Factory de dependencias FastAPI para RBAC a nivel de rol.
+
+    Uso:
+        @app.post("/advisor/some-act")
+        def my_endpoint(
+            advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+        ) -> ...:
+            ...
+
+    Comportamiento:
+        - Token ausente o malformado  → HTTP 401 (igual que
+          get_current_advisor_required).
+        - Token válido, pero ningún rol del advisor está en `allowed_roles`
+          → HTTP 403, detalle genérico, sin eco del token ni de los roles.
+        - Token válido + rol permitido → devuelve AdvisorIdentity.
+
+    Precondición de arranque:
+        require_roles() sin argumentos es un error de programación —
+        levanta ValueError en tiempo de definición del endpoint, no en runtime.
+
+    Política de información:
+        El error 403 siempre usa `_RBAC_ERROR_DETAIL`: misma cadena sin
+        importar qué roles faltan, para no filtrar la estructura de permisos.
+    """
+    if not allowed_roles:
+        raise ValueError(
+            "require_roles() debe recibir al menos un rol. "
+            "Usar get_current_advisor_required() si no hay restricción de rol."
+        )
+    allowed: frozenset[str] = frozenset(allowed_roles)
+
+    def _check(authorization: str | None = Header(default=None)) -> AdvisorIdentity:
+        token = _extract_bearer_token(authorization)
+        if token is None:
+            _raise_401()
+        # _raise_401 es NoReturn → token es str aquí.
+        identity = _lookup_advisor(token)
+        if not any(r in allowed for r in identity.roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=_RBAC_ERROR_DETAIL,
+            )
+        return identity
+
+    return _check
