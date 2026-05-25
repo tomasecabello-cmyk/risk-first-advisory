@@ -213,11 +213,41 @@ El frontend muestra un banner de advertencia amarillo con los constraints excedi
 
 ---
 
-## Auth scaffold (Fase 1)
+## Auth scaffold (Fase 1, refinado en Fase 2)
 
-> ⚠ **DEVELOPMENT-ONLY.** El módulo `api_layer/auth.py` implementa una resolución de identidad por Bearer token usando un mapa hard-coded de tokens demo. No es apto para producción. No carga `.env`. No firma JWT. No rotaciones. No es multi-tenant.
+> ⚠ **DEVELOPMENT-ONLY.** El módulo `api_layer/auth.py` implementa una resolución de identidad por Bearer token. Sigue sin ser apto para producción: no firma JWT, no rota, no es multi-tenant, no carga `.env`. La novedad de Fase 2 es que los tokens YA NO viven hardcoded en `auth.py` — se resuelven desde un loader YAML configurable + fallback dev-only.
 
-### Tokens demo
+### Resolución de tokens (Fase 2)
+
+`config_layer/advisor_tokens.get_default_advisor_tokens()` aplica este orden:
+
+1. **ENV var `ADVISOR_TOKENS_FILE`** (si está set y no vacío) → carga ese YAML.
+2. **`config/advisor_tokens.yaml`** (si existe) → carga ese archivo.
+3. **Fallback hardcoded dev-only** → los dos tokens demo de la tabla de abajo. Siempre disponible para tests y demos.
+
+Cuando se usa (1) o (2), el archivo **reemplaza completamente** al fallback — los `dev-*` tokens dejan de resolver. No hay merge. Schema inválido en el archivo configurado → la request termina en 500 (fail-loud), no en 401 silente.
+
+### Archivos
+
+| Archivo | En git | Para qué |
+|---|---|---|
+| `config/advisor_tokens.yaml.example` | ✅ commiteado | Plantilla con los dos tokens demo. Documenta schema y política. |
+| `config/advisor_tokens.yaml` | ❌ **gitignored** | Donde el operador pone los tokens reales del entorno. |
+
+### Schema (validado por el loader, fail-loud)
+
+```yaml
+tokens:
+  <opaque-token-string>:
+    advisor_id:   <str no vacío>
+    display_name: <str no vacío>
+    firm_id:      <str no vacío | null>
+    roles:        [<role>, ...]   # no vacía
+```
+
+Roles permitidos: `advisor`, `compliance`, `admin`, `viewer`. Cualquier otro valor → `ValueError`. Campos desconocidos por entrada → `ValueError`. `bool` donde se espera `str` → `ValueError`.
+
+### Tokens demo (fallback)
 
 | Token (header `Authorization: Bearer <token>`) | `advisor_id` | `roles` |
 |---|---|---|

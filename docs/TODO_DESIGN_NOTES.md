@@ -374,3 +374,76 @@ python scripts/migrate.py --db-path data/demo_api.db
 ```
 
 Si la DB tiene records existentes de Fase 0/1 (workflows, reports, advisor_*_approval), todos sobreviven.
+
+---
+
+## Fase 2 — Advisor tokens configurables ✅ (sin JWT, sin RBAC)
+
+### Estado actual
+
+Segundo commit de Fase 2 — los advisor tokens dejan de vivir hardcoded en `api_layer/auth.py` y pasan a resolverse desde un loader auditable + fallback dev-only.
+
+- **`config/advisor_tokens.yaml.example`** — plantilla commiteada con los dos tokens demo (`dev-advisor-token` / `dev-compliance-token`). Documenta el schema y la política de uso.
+- **`config/advisor_tokens.yaml`** — **gitignored**. Es donde el operador pone los tokens reales del entorno (dev local, staging, etc.). Si no existe, el sistema cae al fallback.
+- **`src/risk_first_advisory/config_layer/advisor_tokens.py`** — loader nuevo. Expone:
+  - `load_advisor_tokens(path: Path | str | None = None)` — loader puro de UN archivo. Sin fallback. `path=None` usa `DEFAULT_ADVISOR_TOKENS_PATH`.
+  - `get_default_advisor_tokens()` — orquesta la cadena de fallback:
+    1. ENV var `ADVISOR_TOKENS_FILE` (si está set y no vacío después de strip).
+    2. `config/advisor_tokens.yaml` (si existe).
+    3. Fallback dev-only hardcoded (mismos tokens que antes vivían en `auth.py`).
+  - Validación estricta: top-level `tokens` dict, campos requeridos por entrada, roles ∈ `{advisor, compliance, admin, viewer}`, rechaza bool donde se espera str, rechaza campos desconocidos (fail-loud).
+- **`src/risk_first_advisory/api_layer/auth.py`** — `_DEMO_TOKENS` removido. `_lookup_advisor(token)` ahora consulta `get_default_advisor_tokens()` en cada llamada y arma `AdvisorIdentity` desde el dict. `AdvisorIdentity` y los `Depends(...)` no cambian de contrato.
+- **`tests/unit/test_advisor_tokens_config.py`** — 43 tests cubriendo: load explicit, default path, fallback dev-only, env var override, env var con archivo malformado, schema rejection top-level y por entry, todos los roles permitidos, defensa contra mutación del fallback, el `.example` parsea y matchea el fallback.
+- **`tests/integration/test_api_auth.py`** — 37 tests (30 originales sin cambios + 7 nuevos). El autouse fixture nuevo aísla cada test del entorno local (elimina env var, redirige `DEFAULT_ADVISOR_TOKENS_PATH` a una ruta inexistente). El bloque nuevo `TestAuthMeCustomTokenFile` valida el reemplazo completo del fallback cuando el env var apunta a un archivo custom; `TestAuthMeMalformedConfigFile` valida que una config rota produzca 500 (no 401 silente).
+
+### Resolución de orden visual
+
+```
+get_default_advisor_tokens()
+    │
+    ├── env var ADVISOR_TOKENS_FILE set & non-empty?
+    │     ├── YES → load_advisor_tokens(env_path)  ← schema-validated
+    │     │           ├── ok → return tokens (fallback NO se mergea)
+    │     │           ├── ValueError → propaga (FastAPI → 500)
+    │     │           └── FileNotFoundError → propaga (FastAPI → 500)
+    │     └── NO  → siguiente paso
+    │
+    ├── config/advisor_tokens.yaml existe?
+    │     ├── YES → load_advisor_tokens(default_path)  ← schema-validated
+    │     │           └── (mismo manejo de errores)
+    │     └── NO  → siguiente paso
+    │
+    └── fallback dev-only hardcoded
+          └── return copy de _DEV_ONLY_FALLBACK_TOKENS
+```
+
+### Garantías
+
+| Garantía | Cómo se sostiene |
+|---|---|
+| **Backward compatible**: los demos y tests siguen funcionando con `dev-advisor-token` / `dev-compliance-token` | Fallback dev-only vive en el loader y se usa cuando no hay env var ni archivo. Los 30 tests de integración originales pasan sin tocarlos. |
+| **Reemplazo completo** (no merge) entre file y fallback | `get_default_advisor_tokens` retorna AS-IS lo que devuelve el loader. Tests `test_dev_advisor_token_does_not_resolve_when_env_set` y `test_dev_compliance_token_does_not_resolve_when_env_set` lo confirman. |
+| **No cache**: cambios de env entre requests aplican inmediatamente | Cada `/auth/me` (o cualquier endpoint con `Depends(get_current_advisor_*)`) re-resuelve. Costo despreciable a escala piloto (1–3 advisors). |
+| **Fail-loud** ante config rota | YAML inválido / FileNotFound del env-var-path / schema rejection → ValueError o FileNotFoundError propagan hasta FastAPI → 500. Tests `TestAuthMeMalformedConfigFile` lo verifican. |
+| **No filtra tokens en errores** | `_validate_token_entry` NO incluye el valor del token en los mensajes (sólo el contexto del archivo + campo problemático). `_lookup_advisor` usa el mensaje genérico de auth.py. |
+| **Defensa contra mutación del fallback** | El fallback retorna copia profunda por llamada. Test `test_mutating_returned_dict_does_not_affect_next_call` lo verifica. |
+
+### Decisiones de diseño
+
+1. **Loader devuelve dicts simples, no `AdvisorIdentity`** — evita el ciclo de imports `config_layer ↔ api_layer`. El builder a `AdvisorIdentity` vive en `auth.py` (`_identity_from_entry`).
+2. **No hay cache** — la simplicidad gana sobre la perf en este punto. Si una sola lectura de YAML por request se vuelve perceptible (1000s req/s), se agrega `functools.lru_cache` después.
+3. **Política de campos desconocidos: fail-loud** — un typo como `advisor-id` (con guión) sería silenciosamente ignorado si aceptáramos extras. Mejor romper al arrancar que servir un identity malformado.
+4. **Rechazar `bool` donde se espera `str`** — `isinstance(True, int)` es `True` en Python; sin guard explícito, `advisor_id: true` parsearía. El loader replica el mismo patrón `_assert_not_bool` que ya usa `risk_assumptions.py`.
+5. **`firm_id` admite `null` o string no vacío** — mantiene compatibilidad con el fallback dev-only (que tiene `firm_id=None`) sin abrir la puerta a strings vacíos por accidente.
+6. **Roles whitelist en `ALLOWED_ROLES = {advisor, compliance, admin, viewer}`** — fija el vocabulario de Fase 2. Cualquier role nuevo requiere agregarse explícitamente al frozenset, lo que aparece en el diff y obliga a discutirlo.
+7. **Env var `ADVISOR_TOKENS_FILE`** (no `ADVISOR_TOKENS_PATH`) — alineado con otras convenciones tipo `OPENAI_API_KEY` / `LOG_FILE`. Vacío o whitespace = "no set" para evitar trampas con `export X=""` en shell scripts.
+8. **Autouse fixture en `test_api_auth.py`** — los integration tests se aíslan del entorno local. Esto vale más que la elegancia de "tests no necesitan fixture": sin ese fixture, un dev con `config/advisor_tokens.yaml` local rompería los 30 tests originales.
+9. **`config/advisor_tokens.yaml` está en `.gitignore`** — solo el `.example` se commitea. Análogo a `.env.example`.
+
+### Lo que NO está en este commit
+
+- **JWT / firma criptográfica de tokens** — sigue siendo opaque string ↔ identity lookup. La rotación, expiración y firma quedan para Fase 2.5 (siguiente paso del diseño Opus).
+- **RBAC enforcement** — `AdvisorIdentity.roles` ya viene del loader, pero ningún endpoint chequea roles todavía. Próximo commit: helper `require_roles(["advisor"])` aplicado a los `/advisor/*`.
+- **Multi-tenant real** — `firm_id` viaja en la identity, pero ningún endpoint filtra recursos por `firm_id`. Llega con las entidades de Fase 2 (Client/AdvisoryCase).
+- **Persistencia de tokens en la nueva tabla `advisors`** — el loader sigue siendo file-backed. Cuando exista `AdvisorRepository`, los tokens van a salir de DB; el loader YAML pasará a ser una forma de seed inicial.
+- **Auto-creación de `config/advisor_tokens.yaml` desde `.example`** — el operador lo hace manualmente. Un script de bootstrap puede llegar después.

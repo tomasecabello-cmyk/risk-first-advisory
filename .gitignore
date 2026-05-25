@@ -13,3 +13,6 @@ dist/
 .claude/
 reports/
 data/
+
+# Real advisor tokens config (Phase 2). Only the .example template is committed.
+config/advisor_tokens.yaml

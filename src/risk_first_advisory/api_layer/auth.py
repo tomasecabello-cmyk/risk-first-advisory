@@ -1,5 +1,5 @@
 """
-Advisor authentication scaffold — Phase 1.
+Advisor authentication scaffold — Fase 1, ajustado en Fase 2.
 
 DEVELOPMENT-ONLY. This module implements a minimal Bearer-token check used to
 resolve the advisor identity behind a request. It is a scaffold for the Phase-1
@@ -12,31 +12,44 @@ Out of scope here:
     - Per-firm tenancy enforcement
     - Rate limiting / brute force protection
 
-Design:
-    - `AdvisorIdentity` is the small dataclass that downstream endpoints will
-      consume via FastAPI `Depends(...)`.
-    - `get_current_advisor_optional` returns `AdvisorIdentity | None`:
+Diseño:
+    - `AdvisorIdentity` es el dataclass que los endpoints downstream consumen
+      vía FastAPI `Depends(...)`.
+    - `get_current_advisor_optional` devuelve `AdvisorIdentity | None`:
         * no Authorization header  → None
         * invalid token / malformed → HTTP 401
         * valid token              → AdvisorIdentity
-      Use this when an endpoint *may* benefit from advisor identity but must
-      still work for anonymous demo callers.
-    - `get_current_advisor_required` returns `AdvisorIdentity` and ALWAYS
-      raises HTTP 401 on missing/invalid auth. Use this in approval / override
-      endpoints where an advisor identity is mandatory.
+      Para endpoints que pueden seguir funcionando anónimos pero aprovechan
+      la identidad cuando exista.
+    - `get_current_advisor_required` devuelve `AdvisorIdentity` y SIEMPRE
+      levanta HTTP 401 ante missing/invalid auth.
+
+Cambio de Fase 2:
+    - El mapa de tokens ya NO vive hardcoded en este archivo.
+    - `_lookup_advisor` consulta `config_layer.advisor_tokens.get_default_advisor_tokens()`
+      que resuelve, en orden:
+        1. ENV var `ADVISOR_TOKENS_FILE`
+        2. `config/advisor_tokens.yaml`
+        3. Fallback dev-only (mismos tokens que antes: dev-advisor-token /
+           dev-compliance-token) — para que tests y demos no necesiten archivo.
+    - El contrato externo NO cambia: los endpoints siguen recibiendo
+      `AdvisorIdentity` con la misma forma.
 
 Error policy:
-    - Never echo the offending token in error messages or logs.
-    - Always use the same generic message so an attacker cannot distinguish
-      "unknown token" from "malformed header".
+    - Nunca echo del token ofensor en mensajes ni logs.
+    - Mismo mensaje genérico para todos los caminos de error.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any
 
 from fastapi import Header, HTTPException, status
+
+from risk_first_advisory.config_layer.advisor_tokens import (
+    get_default_advisor_tokens,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,30 +83,19 @@ class AdvisorIdentity:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Development-only token mapping. Replace before production.
+# Token lookup — delegated to config_layer.advisor_tokens
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# This map is intentionally hard-coded for Phase 1. Real tokens must come from
-# an external identity provider (JWT signed by IdP, OIDC session, etc.). Until
-# that exists, these demo tokens let us iterate on approval endpoints locally.
+# El mapa de tokens se resuelve dinámicamente en cada lookup vía
+# `get_default_advisor_tokens()`. Esto deja que tests monkeypatcheen el env
+# var `ADVISOR_TOKENS_FILE` sin tener que invalidar caches manualmente.
 #
-# DO NOT commit real tokens here. DO NOT load secrets from .env in this phase.
+# El costo en perf es despreciable a esta escala (1–3 advisors, pocos
+# requests/segundo); a cambio se gana simplicidad y testabilidad.
+#
+# NO commitear tokens reales — el archivo `config/advisor_tokens.yaml` está
+# gitignored. El fallback dev-only es para tests/demos exclusivamente.
 # ─────────────────────────────────────────────────────────────────────────────
-
-_DEMO_TOKENS: Mapping[str, AdvisorIdentity] = {
-    "dev-advisor-token": AdvisorIdentity(
-        advisor_id="ADV-001",
-        display_name="Demo Advisor",
-        firm_id=None,
-        roles=["advisor"],
-    ),
-    "dev-compliance-token": AdvisorIdentity(
-        advisor_id="CMP-001",
-        display_name="Demo Compliance",
-        firm_id=None,
-        roles=["compliance"],
-    ),
-}
 
 
 # Generic error message — never leaks token shape or value.
@@ -155,15 +157,34 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
     return token
 
 
+def _identity_from_entry(entry: dict[str, Any]) -> AdvisorIdentity:
+    """
+    Construye un `AdvisorIdentity` desde el dict que devuelve el loader.
+    El loader ya validó schema; este builder solo arma el dataclass.
+    """
+    return AdvisorIdentity(
+        advisor_id=entry["advisor_id"],
+        display_name=entry["display_name"],
+        firm_id=entry.get("firm_id"),
+        roles=list(entry["roles"]),
+    )
+
+
 def _lookup_advisor(token: str) -> AdvisorIdentity:
     """
     Resuelve el token al `AdvisorIdentity` correspondiente. 401 si el token
     no está registrado. No loguea ni incluye el token en el error.
+
+    El lookup va a `get_default_advisor_tokens()` que aplica la cadena de
+    resolución env-var → file → fallback. Cualquier error de schema en el
+    archivo configurado se propaga (FastAPI lo convierte en 500), porque
+    una config rota debe fallar loud y no silenciar como 401.
     """
-    identity = _DEMO_TOKENS.get(token)
-    if identity is None:
+    tokens = get_default_advisor_tokens()
+    entry = tokens.get(token)
+    if entry is None:
         _raise_401()
-    return identity
+    return _identity_from_entry(entry)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
