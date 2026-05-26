@@ -603,15 +603,17 @@ Los tests usan dos autouse fixtures:
 6. ~~AIRequestLog wrapper alrededor de los endpoints `/ai/*` + redaction de PII.~~ ✅ Commit 7.
 7. ~~KYCSubmission case-scoped (POST/GET `/cases/{case_id}/kyc`) + auto-event `kyc_submitted` + transición DRAFT → IN_PROGRESS.~~ ✅ Commit 8.
 8. ~~AIProfileAnalysis case-scoped (POST/GET `/cases/{case_id}/ai/profile-analysis`) sobre la última KYC; vincula `ai_request_log_id`; auto-event `ai_profile_analyzed`.~~ ✅ Commit 9.
-9. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
-10. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
-11. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc`, `/cases/{id}/ai/profile-analysis` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
-12. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
-13. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions` y `ai_profile_analyses`.
-14. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422). Requiere wiring de `analyze_follow_up` + previous_analysis selection.
-15. Case-scoped profile approval (formaliza `current_approved_profile_id`).
-16. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
-17. UI Case Workbench (frontend para flujo end-to-end por case).
+9. ~~CaseAdvisorProfileApproval case-scoped (POST/GET `/cases/{case_id}/profile-approval`); vincula `ai_profile_analysis_id` + `kyc_submission_id` + `advisor_id`; mantiene `is_current` + `current_approved_profile_id`; auto-events `advisor_profile_approved` / `_modified` / `_rejected`.~~ ✅ Commit 10.
+10. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+11. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
+12. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc`, `/cases/{id}/ai/profile-analysis`, `/cases/{id}/profile-approval` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+13. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
+14. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions`, `ai_profile_analyses` y `advisor_profile_approvals`.
+15. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422).
+16. Case-scoped universe filter + portfolio proposal (formaliza `current_portfolio_selection_id`).
+17. Case-scoped override-approval (advisor override sobre GROWTH variants).
+18. Deprecar / migrar el endpoint legacy `/advisor/profile-approval` (client-scoped, sin case linkage). Hoy coexiste con el case-scoped sin conflictos.
+19. UI Case Workbench (frontend para flujo end-to-end por case).
 
 ---
 
@@ -971,3 +973,95 @@ Noveno commit de Fase 2 — segundo paso del workflow real conectado al `Advisor
 - **No hay UI Case Workbench** (item 17).
 - **Latency_ms se mide solo de la llamada IA, no del round-trip total del endpoint** (consistente con AIRequestLog en Commit 7). El tiempo de validación previa + persistence posterior no se incluye.
 - **Cross-firm scoping**: el endpoint no valida que el `kyc_submission_id` explícito provenga de un case de la misma firma que el del token. Como el firm-level scoping general sigue pendiente, esto es coherente con el resto del sistema.
+
+---
+
+## Fase 2 — CaseAdvisorProfileApproval case-scoped ✅ (Commit 10)
+
+### Estado actual
+
+Décimo commit de Fase 2 — la decisión humana del asesor sobre el perfil ahora vive dentro del case, vinculada al análisis IA y a la KYC vigente. Tres outcomes (`approve` / `modify` / `reject`) con semántica diferenciada y `is_current` consistente.
+
+#### Archivos creados / modificados
+
+- **`migrations/0004_case_profile_approvals.sql`** — nueva migración:
+  - Tabla `advisor_profile_approvals(approval_id PK, case_id NOT NULL FK→advisory_cases, ai_profile_analysis_id NULL FK→ai_profile_analyses, kyc_submission_id NULL FK→kyc_submissions, advisor_id NULL FK→advisors, proposed_profile NOT NULL, decision NOT NULL, approved_profile NULL, rationale NOT NULL, source NOT NULL, is_current INTEGER DEFAULT 1, created_at_utc)`.
+  - 4 índices: `idx_advisor_profile_approvals_case_id`, `idx_*_ai_profile_analysis_id`, `idx_*_kyc_submission_id`, `idx_*_advisor_id`.
+  - **Sin colisión** con `records` (legacy SQLitePersistenceStore usa `records.record_type='advisor_profile_approval'`); son storages distintos: esta tabla es case-scoped, el legacy es client_id-scoped.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `SQLiteAdvisoryCaseRepository.update_current_approved_profile(case_id, approval_id | None)` — setter directo del puntero; pasar `None` lo limpia. No valida que el approval exista (responsabilidad del endpoint).
+  - `ALLOWED_PROFILE_APPROVAL_DECISIONS = {"approve", "modify", "reject"}` constant.
+  - `SQLiteAdvisorProfileApprovalCaseRepository` (nombre con sufijo `CaseRepository` para distinguir del legacy `SQLiteAdvisorProfileApprovalRepository` Phase 1):
+    - `create(*, case_id, proposed_profile, decision, rationale, source="manual", ai_profile_analysis_id=None, kyc_submission_id=None, advisor_id=None, approved_profile=None, is_current=True)` — IDs `advisor_profile_approval_NNNNNN`. Valida `decision ∈ ALLOWED_PROFILE_APPROVAL_DECISIONS`. FK violation → `EntityConflictError`.
+    - `get(approval_id)` → dict | None.
+    - `list_by_case(case_id)` → orden `created_at_utc ASC, approval_id ASC`.
+    - `mark_previous_not_current(case_id, exclude_id=None)` — bulk UPDATE `is_current=0` a todos los `is_current=1` del case excepto opcionalmente `exclude_id`. Devuelve `rowcount`.
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `CaseAdvisorProfileApprovalCreateRequest` (campos: `ai_profile_analysis_id` opt, `kyc_submission_id` opt, `proposed_profile` opt, `decision`, `approved_profile` opt, `rationale`, `source="manual"`). Reusa `_ADVISOR_VALID_PROFILES` y `_ADVISOR_VALID_DECISIONS` (Phase 1). `model_validator` aplica reglas cruzadas decision/approved_profile cuando `proposed_profile != None` (si es None, el endpoint las aplica tras la derivación).
+  - `CaseAdvisorProfileApprovalResponse` (todos los campos incluyendo `is_current: bool`).
+  - `CaseAdvisorProfileApprovalListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Constante `_PROFILE_APPROVAL_EVENT_BY_DECISION` mapeando `approve/modify/reject` → `advisor_profile_approved/_modified/_rejected`.
+  - Constante `_ADVISOR_VALID_PROFILES_SET` (duplicada de schemas para no importar nombres privados; usada solo para validar derivación de `proposed_profile` desde análisis).
+  - 2 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/profile-approval` | advisor, admin | Resuelve análisis/KYC, deriva proposed_profile si falta, valida cross-resource, persiste approval + mantiene is_current + current_approved_profile_id + AuditEvent. |
+  | `GET /cases/{case_id}/profile-approval` | admin, advisor, compliance, viewer | Lista approvals ordenados por `created_at_utc` asc. |
+
+- **`tests/integration/test_api_case_profile_approval.py`** — 50 tests en 8 clases:
+  - `TestCreateApprove` (13): 201, prefix `advisor_profile_approval_`, case_id/ai_analysis_id/kyc_submission_id correctos, advisor_id desde entity, decision=approve, proposed_profile derivado, approved_profile auto-fill, rationale persistido, is_current=true, GET cuenta 1, case.current_approved_profile_id actualizado.
+  - `TestCreateModify` (3): modify con approved_profile válido; current_approved_profile_id apunta al modify; previous approval queda is_current=false.
+  - `TestReject` (3): reject sin approved_profile (201, is_current=false); reject con approved_profile → 422; reject NO pisa current_approved_profile_id previo.
+  - `TestValidation` (13): missing case (POST/GET) → 404; CLOSED → 409; analysis_id unknown → 422; analysis de otro case → 422 ("belongs to case"); KYC de otro case → 422; proposed/approved_profile inválidos → 422; approve con approved_profile distinto → 422; modify sin approved_profile → 422; rationale whitespace → 422; decision inválida → 422; proposed_profile requerido si no hay AI analysis → 422.
+  - `TestAudit` (4): approve emite `advisor_profile_approved`; modify emite `_modified`; reject emite `_rejected`; payload contiene `approval_id` + `decision`; `verify_chain` sigue intacto.
+  - `TestRBACPost` (5): 401 / 403 (compliance, viewer) / 201 (advisor, admin).
+  - `TestRBACGet` (5): 401 / 200 para los 4 roles válidos.
+  - `TestNoRegression` (4): endpoint legacy `/advisor/profile-approval`, `/health`, `/auth/me`, `/ai/filtered-portfolio-demo` siguen funcionando.
+
+- **`tests/unit/test_migrations.py`** — actualizado:
+  - `PHASE2_TABLES += advisor_profile_approvals`.
+  - `REQUIRED_INDEXES += idx_advisor_profile_approvals_*` (×4).
+  - `TOTAL_MIGRATIONS = 4`.
+  - `test_schema_migrations_records_0001_with_metadata` valida también la fila `0004`.
+
+**Total tests tras este commit:** 2737 (todos pasando). Δ = +50 integration.
+
+#### Decisiones de diseño
+
+1. **Tabla nueva `advisor_profile_approvals` (no se reusa `records`).** El legacy `/advisor/profile-approval` (Phase 1) sigue persistiendo en `records.record_type='advisor_profile_approval'` con `client_id` scope. El nuevo es case-scoped con FKs a `advisory_cases`, `ai_profile_analyses`, `kyc_submissions`, `advisors`. Los dos storages **coexisten sin conflicto**; deprecación del legacy queda como item 18.
+2. **`is_current` mantenido por el endpoint**, no por DB triggers. `approve`/`modify` → llaman `mark_previous_not_current(case_id, exclude_id=new_approval_id)` después del insert; el nuevo queda `is_current=1`. `reject` → se inserta con `is_current=0` directamente. Razón: triggers en SQLite agregan complejidad; la consistencia se garantiza con un único path de escritura (el endpoint).
+3. **`reject` NO pisa `current_approved_profile_id` previo.** Decisión documentada: un rechazo nuevo no invalida la última decisión vigente del case. Si el advisor quiere invalidar la aprobación previa, debe emitir un nuevo `modify` o re-aprobar con `approve`. Esto preserva el invariante "current_approved_profile_id apunta siempre al último `is_current=1`".
+4. **`reject` inicial (case sin approval previo) deja `current_approved_profile_id=NULL`.** Consistente con la regla anterior: no hay aprobación vigente que reemplazar.
+5. **Derivación de `proposed_profile` desde el último análisis del case.** Si el caller no manda `proposed_profile`, el endpoint usa el último `AIProfileAnalysis.preliminary_profile`. Si no hay análisis o el `preliminary_profile` no es válido → 422 con mensaje claro. Reduce la carga sobre el caller (no tiene que copiar el perfil propuesto si confía en la IA).
+6. **`kyc_submission_id` heredado del análisis** si no se manda explícito y se eligió un análisis. Trazabilidad: cada approval queda anclada a la KYC vigente al momento del análisis.
+7. **`ai_profile_analysis_id` y `kyc_submission_id` son NULL-able** en la tabla. Permite approvals sin análisis previo (cuando el advisor decide a mano sin pasar por IA) o sin KYC linkage (cuando el case no tiene KYC todavía — caso edge documentado).
+8. **Cross-resource validation explícita**: `ai_profile_analysis_id` y `kyc_submission_id` deben pertenecer al mismo `case_id` (mensaje "belongs to case"). Mismo patrón que `POST /cases/{id}/ai/profile-analysis` con `kyc_submission_id`.
+9. **`model_validator` cruzado se ejecuta a nivel schema CUANDO `proposed_profile` viene en el request.** Cuando `proposed_profile=None`, el endpoint replica la lógica (auto-fill approve, modify requiere approved_profile, reject requiere approved_profile=None) tras la derivación. Esto evita validaciones duplicadas pero garantiza coverage en ambos paths.
+10. **Mismo mapping decision → event_type que el dominio Phase 1.** `approve` → `advisor_profile_approved`, `modify` → `advisor_profile_modified`, `reject` → `advisor_profile_rejected`. Coherente con los strings del audit chain.
+11. **AuditEvent payload incluye solo metadata.** No se duplica el `result_json` del análisis ni el `payload_json` del KYC. El advisor que audita el chain puede navegar a los recursos por sus IDs (`approval_id`, `ai_profile_analysis_id`, `kyc_submission_id`).
+12. **Soft FK lookup para `advisor_id`** (mismo patrón que `case_created`, `kyc_submitted`, `ai_profile_analyzed`). Si el `advisor.advisor_id` del token existe como entity → se usa; si no → `None`.
+13. **Reusa `_ADVISOR_VALID_PROFILES` y `_ADVISOR_VALID_DECISIONS` de schemas.py.** Mantiene el mismo conjunto válido entre legacy y case-scoped (5 perfiles, 3 decisiones). Si Phase 2 quisiera diverger, hay que duplicar (no se hace en este commit).
+14. **CLOSED case → 409** (mismo patrón que KYC y AI profile analysis). Tras cierre formal no se aceptan más decisiones.
+15. **`mark_previous_not_current` con `exclude_id` opcional** permite dos casos de uso: invalidar todas las previas excepto la recién creada (camino productivo) y "limpiar" todas las is_current=1 (uso futuro / scripts admin).
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/profile-approval` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/profile-approval` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay case-scoped universe filter ni portfolio proposal todavía** (items 16, 17).
+- **No hay case-scoped override-approval todavía.** El legacy `/advisor/override-approval` sigue siendo client-scoped (Phase 1). Item 17.
+- **El endpoint legacy `/advisor/profile-approval` (Phase 1) sigue vivo** sin migración / deprecación. Item 18. Coexiste sin conflicto: storages distintos, paths distintos, schemas distintos.
+- **Firm-level access control pendiente** (item 12).
+- **No hay UI Case Workbench** (item 19).
+- **No hay endpoint de `/cases/{id}/profile-approval/{approval_id}` (detail).** Para inspeccionar un approval específico, el caller usa GET list y filtra. Si crece la necesidad, se puede agregar sin cambios de schema.
+- **`mark_previous_not_current` no genera AuditEvent.** La invalidación implícita queda registrada vía `is_current=0` en la tabla y vía el nuevo evento `advisor_profile_approved/_modified` que indica que hubo decisión nueva. Si compliance necesita un evento explícito de "invalidación", se puede agregar.

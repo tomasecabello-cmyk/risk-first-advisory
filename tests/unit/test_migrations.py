@@ -72,11 +72,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "kyc_submissions",
     # 0003 — case-scoped AI profile analyses
     "ai_profile_analyses",
+    # 0004 — case-scoped advisor profile approvals
+    "advisor_profile_approvals",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 3
+TOTAL_MIGRATIONS: int = 4
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -98,6 +100,11 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_ai_profile_analyses_case_id",
     "idx_ai_profile_analyses_kyc_submission_id",
     "idx_ai_profile_analyses_ai_request_log_id",
+    # 0004 — advisor_profile_approvals indices
+    "idx_advisor_profile_approvals_case_id",
+    "idx_advisor_profile_approvals_ai_profile_analysis_id",
+    "idx_advisor_profile_approvals_kyc_submission_id",
+    "idx_advisor_profile_approvals_advisor_id",
 })
 
 
@@ -245,6 +252,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version3 == "0003"
     assert "ai" in description3.lower() or "profile" in description3.lower()
     assert applied_at3.endswith("Z")
+    # La cuarta fila debe ser 0004 — case_profile_approvals.
+    version4, description4, applied_at4 = rows[3]
+    assert version4 == "0004"
+    assert "approval" in description4.lower() or "profile" in description4.lower()
+    assert applied_at4.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

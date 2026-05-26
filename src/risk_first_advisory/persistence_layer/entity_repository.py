@@ -675,6 +675,34 @@ class SQLiteAdvisoryCaseRepository:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def update_current_approved_profile(
+        self, case_id: str, approval_id: str | None
+    ) -> dict[str, Any]:
+        """
+        Setea advisory_cases.current_approved_profile_id = approval_id.
+
+        Pasar None lo limpia. No valida que el approval_id exista en
+        advisor_profile_approvals — ese contrato lo cumple el endpoint.
+
+        Raises:
+            EntityNotFoundError: si el case no existe.
+        """
+        current = self.get(case_id)
+        if current is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+        with self._store._conn:
+            self._store._conn.execute(
+                """
+                UPDATE advisory_cases
+                SET current_approved_profile_id = ?
+                WHERE case_id = ?
+                """,
+                (approval_id, case_id),
+            )
+        updated = dict(current)
+        updated["current_approved_profile_id"] = approval_id
+        return updated
+
     def update_current_kyc_submission(
         self, case_id: str, kyc_submission_id: str
     ) -> dict[str, Any]:
@@ -1865,4 +1893,214 @@ class SQLiteAIProfileAnalysisRepository:
             "confidence":           float(confidence) if confidence is not None else None,
             "result":               json.loads(row["result_json"]),
             "created_at_utc":       row["created_at_utc"],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AdvisorProfileApproval — Fase 2 Commit 10 (case-scoped advisor decision)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Decisión humana del asesor sobre el perfil de riesgo de un AdvisoryCase.
+# Cada decisión queda anclada al case, opcionalmente al ai_profile_analysis
+# y a la kyc_submission vigente.
+#
+# Política is_current (mantenida por el endpoint, no por el repo):
+#   - approve / modify  → is_current=1; las approvals anteriores del mismo
+#     case se marcan is_current=0 vía mark_previous_not_current.
+#   - reject            → is_current=0 desde el insert. No pisa una approval
+#     vigente previa (current_approved_profile_id del case se mantiene).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_PROFILE_APPROVAL_DECISIONS: frozenset[str] = frozenset(
+    {"approve", "modify", "reject"}
+)
+
+
+class SQLiteAdvisorProfileApprovalCaseRepository:
+    """
+    Persiste y lee approvals case-scoped sobre `advisor_profile_approvals`
+    (migration 0004).
+
+    Esquema (resumen):
+        advisor_profile_approvals(
+            approval_id TEXT PK,
+            case_id TEXT NOT NULL FK→advisory_cases,
+            ai_profile_analysis_id TEXT NULL FK→ai_profile_analyses,
+            kyc_submission_id TEXT NULL FK→kyc_submissions,
+            advisor_id TEXT NULL FK→advisors,
+            proposed_profile TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            approved_profile TEXT NULL,
+            rationale TEXT NOT NULL,
+            source TEXT NOT NULL,
+            is_current INTEGER NOT NULL DEFAULT 1,
+            created_at_utc TEXT NOT NULL
+        )
+
+    NB: nombre `SQLiteAdvisorProfileApprovalCaseRepository` para distinguir
+    del `SQLiteAdvisorProfileApprovalRepository` legacy (Phase 1, sobre
+    `records` table client-scoped).
+
+    Operaciones:
+        create(...)                       — inserta nuevo approval.
+        get(approval_id)                  — dict | None.
+        list_by_case(case_id)             — orden created_at_utc asc, id asc.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                          — bulk update is_current=0 a todos
+                                            los approvals del case excepto
+                                            opcionalmente `exclude_id`.
+
+    No expone update/delete arbitrarios; mark_previous_not_current es la
+    única mutación permitida (necesaria para mantener is_current consistente).
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        proposed_profile: str,
+        decision: str,
+        rationale: str,
+        source: str = "manual",
+        ai_profile_analysis_id: str | None = None,
+        kyc_submission_id: str | None = None,
+        advisor_id: str | None = None,
+        approved_profile: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Inserta un approval. Validaciones de negocio (perfil válido, coherencia
+        decision/approved_profile) se hacen en el endpoint / schema; este
+        repo solo valida shape mínimo y FKs.
+
+        Raises:
+            EntityConflictError: PK collision o FK violation.
+            ValueError: si decision no está en ALLOWED_PROFILE_APPROVAL_DECISIONS.
+        """
+        if decision not in ALLOWED_PROFILE_APPROVAL_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {decision!r}. "
+                f"Permitidas: {sorted(ALLOWED_PROFILE_APPROVAL_DECISIONS)}."
+            )
+
+        approval_id = self._store._next_id("advisor_profile_approval_")
+        now = _now_utc()
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO advisor_profile_approvals
+                        (approval_id, case_id,
+                         ai_profile_analysis_id, kyc_submission_id, advisor_id,
+                         proposed_profile, decision, approved_profile,
+                         rationale, source, is_current, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        approval_id, case_id,
+                        ai_profile_analysis_id, kyc_submission_id, advisor_id,
+                        proposed_profile, decision, approved_profile,
+                        rationale, source, 1 if is_current else 0, now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "approval_id":            approval_id,
+            "case_id":                case_id,
+            "ai_profile_analysis_id": ai_profile_analysis_id,
+            "kyc_submission_id":      kyc_submission_id,
+            "advisor_id":             advisor_id,
+            "proposed_profile":       proposed_profile,
+            "decision":               decision,
+            "approved_profile":       approved_profile,
+            "rationale":              rationale,
+            "source":                 source,
+            "is_current":             bool(is_current),
+            "created_at_utc":         now,
+        }
+
+    def get(self, approval_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT approval_id, case_id,
+                   ai_profile_analysis_id, kyc_submission_id, advisor_id,
+                   proposed_profile, decision, approved_profile,
+                   rationale, source, is_current, created_at_utc
+            FROM advisor_profile_approvals WHERE approval_id = ?
+            """,
+            (approval_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        """Lista approvals del case ordenadas por created_at_utc, approval_id asc."""
+        rows = self._store._conn.execute(
+            """
+            SELECT approval_id, case_id,
+                   ai_profile_analysis_id, kyc_submission_id, advisor_id,
+                   proposed_profile, decision, approved_profile,
+                   rationale, source, is_current, created_at_utc
+            FROM advisor_profile_approvals
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, approval_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        """
+        Marca is_current=0 a todos los approvals del case excepto `exclude_id`
+        (típicamente el approval recién creado que debe quedar is_current=1).
+
+        Devuelve la cantidad de rows afectadas. No falla si el case no
+        existe (devuelve 0).
+        """
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE advisor_profile_approvals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE advisor_profile_approvals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND approval_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "approval_id":            row["approval_id"],
+            "case_id":                row["case_id"],
+            "ai_profile_analysis_id": row["ai_profile_analysis_id"],
+            "kyc_submission_id":      row["kyc_submission_id"],
+            "advisor_id":             row["advisor_id"],
+            "proposed_profile":       row["proposed_profile"],
+            "decision":               row["decision"],
+            "approved_profile":       row["approved_profile"],
+            "rationale":              row["rationale"],
+            "source":                 row["source"],
+            "is_current":             bool(row["is_current"]),
+            "created_at_utc":         row["created_at_utc"],
         }

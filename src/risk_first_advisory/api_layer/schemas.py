@@ -1370,3 +1370,155 @@ class AIProfileAnalysisResponse(BaseModel):
 class AIProfileAnalysisListResponse(BaseModel):
     analyses: list[AIProfileAnalysisResponse]
     count:    int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseAdvisorProfileApproval — Fase 2 Commit 10 (decisión humana case-scoped)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Reutiliza el mismo set de perfiles válidos que la Phase 1 schema legacy
+# (_ADVISOR_VALID_PROFILES) y el mismo enum de decisiones
+# (_ADVISOR_VALID_DECISIONS) para garantizar coherencia entre los dos
+# endpoints (legacy y case-scoped).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CaseAdvisorProfileApprovalCreateRequest(BaseModel):
+    """
+    Decisión del asesor sobre el perfil de un caso.
+
+    Reglas cruzadas (model_validator):
+        - approve : approved_profile None o igual a proposed_profile.
+                    Si None, se auto-completa con proposed_profile.
+                    Distinto → 422.
+        - modify  : approved_profile obligatorio y debe ser perfil válido.
+        - reject  : approved_profile DEBE ser None.
+
+    Reglas adicionales (validadas en el endpoint contra la DB):
+        - ai_profile_analysis_id (si viene) debe existir y pertenecer al case.
+        - kyc_submission_id (si viene) debe existir y pertenecer al case.
+        - Si proposed_profile no viene, se deriva del último análisis del case
+          (o del análisis explícito). Si no hay análisis y no se manda
+          proposed_profile → 422.
+    """
+
+    ai_profile_analysis_id: str | None = None
+    kyc_submission_id:      str | None = None
+    proposed_profile:       str | None = None
+    decision:               str
+    approved_profile:       str | None = None
+    rationale:              str        = Field(min_length=1)
+    source:                 str        = "manual"
+
+    @field_validator("ai_profile_analysis_id", mode="before")
+    @classmethod
+    def _analysis_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("ai_profile_analysis_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("kyc_submission_id", mode="before")
+    @classmethod
+    def _kyc_submission_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("kyc_submission_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, v: str) -> str:
+        if v not in _ADVISOR_VALID_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_VALID_DECISIONS)}."
+            )
+        return v
+
+    @field_validator("proposed_profile")
+    @classmethod
+    def _validate_proposed_profile(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in _ADVISOR_VALID_PROFILES:
+            raise ValueError(
+                f"proposed_profile inválido: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_VALID_PROFILES)}."
+            )
+        return v
+
+    @field_validator("approved_profile")
+    @classmethod
+    def _validate_approved_profile(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in _ADVISOR_VALID_PROFILES:
+            raise ValueError(
+                f"approved_profile inválido: {v!r}. "
+                f"Opciones: {sorted(_ADVISOR_VALID_PROFILES)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _validate_rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios en blanco.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _validate_source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+    @model_validator(mode="after")
+    def _cross_validate_decision(self) -> "CaseAdvisorProfileApprovalCreateRequest":
+        # Si proposed_profile NO viene, no se puede validar coherencia acá;
+        # el endpoint lo deriva del último análisis o devuelve 422.
+        if self.proposed_profile is None:
+            return self
+
+        if self.decision == "approve":
+            if self.approved_profile is None:
+                object.__setattr__(self, "approved_profile", self.proposed_profile)
+            elif self.approved_profile != self.proposed_profile:
+                raise ValueError(
+                    "decision='approve' requiere approved_profile igual a "
+                    "proposed_profile (o None para auto-completar). "
+                    f"Recibido proposed={self.proposed_profile!r}, "
+                    f"approved={self.approved_profile!r}. "
+                    "Usar decision='modify' para aprobar un perfil distinto."
+                )
+        elif self.decision == "modify":
+            if self.approved_profile is None:
+                raise ValueError(
+                    "decision='modify' requiere approved_profile no nulo."
+                )
+            # Profile validity ya validado por _validate_approved_profile.
+        elif self.decision == "reject":
+            if self.approved_profile is not None:
+                raise ValueError(
+                    "decision='reject' requiere approved_profile=None."
+                )
+        return self
+
+
+class CaseAdvisorProfileApprovalResponse(BaseModel):
+    approval_id:            str
+    case_id:                str
+    ai_profile_analysis_id: str | None
+    kyc_submission_id:      str | None
+    advisor_id:             str | None
+    proposed_profile:       str
+    decision:               str
+    approved_profile:       str | None
+    rationale:              str
+    source:                 str
+    is_current:             bool
+    created_at_utc:         str
+
+
+class CaseAdvisorProfileApprovalListResponse(BaseModel):
+    approvals: list[CaseAdvisorProfileApprovalResponse]
+    count:     int

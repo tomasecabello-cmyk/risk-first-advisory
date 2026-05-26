@@ -59,6 +59,9 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisorProfileApprovalRequest,
     AdvisorProfileApprovalResponse,
     AdvisorResponse,
+    CaseAdvisorProfileApprovalCreateRequest,
+    CaseAdvisorProfileApprovalListResponse,
+    CaseAdvisorProfileApprovalResponse,
     AIContradictionResponse,
     AIFilteredPortfolioRequest,
     AIFilteredPortfolioResponse,
@@ -128,6 +131,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     EntityConflictError,
     EntityNotFoundError,
     SQLiteAdvisorRepository,
+    SQLiteAdvisorProfileApprovalCaseRepository,
     SQLiteAdvisoryCaseRepository,
     SQLiteAIProfileAnalysisRepository,
     SQLiteAIRequestLogRepository,
@@ -3566,6 +3570,289 @@ def list_case_profile_analyses(
         data = SQLiteAIProfileAnalysisRepository(store).list_by_case(case_id)
     return AIProfileAnalysisListResponse(
         analyses=[AIProfileAnalysisResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CaseAdvisorProfileApproval endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/profile-approval  → advisor, admin
+#   GET  /cases/{case_id}/profile-approval  → admin, advisor, compliance, viewer
+#
+# Comportamiento de POST:
+#   - 404 si el case no existe.
+#   - 409 si el case está CLOSED.
+#   - 422 si ai_profile_analysis_id explícito no existe / no pertenece al case.
+#   - 422 si kyc_submission_id explícito no existe / no pertenece al case.
+#   - 422 si proposed_profile es None y no hay análisis (o el análisis no tiene
+#     preliminary_profile válido).
+#   - Si proposed_profile viene None, se deriva del análisis (explícito o el
+#     último del case).
+#   - Si kyc_submission_id viene None y se eligió un análisis, se hereda del
+#     análisis.
+#   - decision approve / modify: marca previous is_current=0, este queda
+#     is_current=1, actualiza advisory_cases.current_approved_profile_id.
+#   - decision reject: is_current=0, NO pisa current_approved_profile_id (si
+#     no había uno previo, queda en NULL como estaba).
+#   - Emite AuditEvent: advisor_profile_approved / _modified / _rejected.
+#
+# Diseño:
+#   - El nuevo endpoint NO modifica /advisor/profile-approval legacy.
+#   - Reusa _ADVISOR_VALID_PROFILES via schema; misma policy de decisión.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_PROFILE_APPROVAL_EVENT_BY_DECISION: dict[str, str] = {
+    "approve": "advisor_profile_approved",
+    "modify":  "advisor_profile_modified",
+    "reject":  "advisor_profile_rejected",
+}
+
+# Whitelist de perfiles válidos para derivación de proposed_profile desde un
+# análisis IA. Se duplica acá (mismo conjunto que _ADVISOR_VALID_PROFILES en
+# schemas.py) para evitar tener que importar nombres privados de schemas.
+_ADVISOR_VALID_PROFILES_SET: frozenset[str] = frozenset({
+    "conservador",
+    "moderado-defensivo",
+    "moderado",
+    "moderado-agresivo",
+    "agresivo",
+})
+
+
+@app.post(
+    "/cases/{case_id}/profile-approval",
+    response_model=CaseAdvisorProfileApprovalResponse,
+    status_code=201,
+)
+def create_case_profile_approval(
+    case_id: str,
+    req: CaseAdvisorProfileApprovalCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CaseAdvisorProfileApprovalResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        analysis_repo = SQLiteAIProfileAnalysisRepository(store)
+        kyc_repo = SQLiteKYCSubmissionRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        approval_repo = SQLiteAdvisorProfileApprovalCaseRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # ── 1. case debe existir ──────────────────────────────────────────
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+
+        # ── 2. CLOSED → 409 ───────────────────────────────────────────────
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; profile approvals are not "
+                    "accepted after case closure."
+                ),
+            )
+
+        # ── 3. resolver ai_profile_analysis ───────────────────────────────
+        analysis_data: dict[str, Any] | None = None
+        if req.ai_profile_analysis_id is not None:
+            analysis_data = analysis_repo.get(req.ai_profile_analysis_id)
+            if analysis_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"AI profile analysis not found: "
+                        f"{req.ai_profile_analysis_id!r}"
+                    ),
+                )
+            if analysis_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"AI profile analysis {req.ai_profile_analysis_id!r} "
+                        f"belongs to case {analysis_data['case_id']!r}, not "
+                        f"{case_id!r}."
+                    ),
+                )
+        else:
+            # Sin id explícito: usar el último análisis del case si existe.
+            all_analyses = analysis_repo.list_by_case(case_id)
+            if all_analyses:
+                analysis_data = all_analyses[-1]
+
+        # ── 4. resolver kyc_submission ────────────────────────────────────
+        kyc_id: str | None = None
+        if req.kyc_submission_id is not None:
+            sub_data = kyc_repo.get(req.kyc_submission_id)
+            if sub_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"KYC submission not found: {req.kyc_submission_id!r}"
+                    ),
+                )
+            if sub_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"KYC submission {req.kyc_submission_id!r} belongs to "
+                        f"case {sub_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+            kyc_id = req.kyc_submission_id
+        elif analysis_data is not None:
+            kyc_id = analysis_data["kyc_submission_id"]
+
+        # ── 5. resolver proposed_profile y approved_profile ───────────────
+        proposed_profile = req.proposed_profile
+        approved_profile = req.approved_profile
+
+        if proposed_profile is None:
+            if analysis_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "proposed_profile is required when the case has no "
+                        "AI profile analysis to derive it from."
+                    ),
+                )
+            derived = analysis_data.get("preliminary_profile")
+            if not isinstance(derived, str) or derived not in _ADVISOR_VALID_PROFILES_SET:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Cannot derive proposed_profile from the analysis: "
+                        f"preliminary_profile={derived!r} is not a valid "
+                        "profile. Pass proposed_profile explicitly."
+                    ),
+                )
+            proposed_profile = derived
+
+            # Coherencia cruzada equivalente al schema validator, ahora que
+            # tenemos un proposed_profile derivado.
+            if req.decision == "approve":
+                if approved_profile is None:
+                    approved_profile = proposed_profile
+                elif approved_profile != proposed_profile:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "decision='approve' requires approved_profile "
+                            "equal to proposed_profile (or None to auto-fill)."
+                        ),
+                    )
+            elif req.decision == "modify":
+                if approved_profile is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="decision='modify' requires approved_profile.",
+                    )
+            elif req.decision == "reject":
+                if approved_profile is not None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="decision='reject' requires approved_profile=None.",
+                    )
+
+        # ── 6. soft FK lookup advisor_id ──────────────────────────────────
+        advisor_id_for_row: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            advisor_id_for_row = advisor.advisor_id
+
+        # ── 7. persistir approval ─────────────────────────────────────────
+        is_current_flag = req.decision != "reject"
+        try:
+            approval_data = approval_repo.create(
+                case_id=case_id,
+                ai_profile_analysis_id=(
+                    analysis_data["analysis_id"] if analysis_data is not None else None
+                ),
+                kyc_submission_id=kyc_id,
+                advisor_id=advisor_id_for_row,
+                proposed_profile=proposed_profile,
+                decision=req.decision,
+                approved_profile=approved_profile,
+                rationale=req.rationale,
+                source=req.source,
+                is_current=is_current_flag,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 8. mantener is_current consistente + current_approved_profile_id
+        if req.decision in ("approve", "modify"):
+            approval_repo.mark_previous_not_current(
+                case_id, exclude_id=approval_data["approval_id"]
+            )
+            try:
+                case_repo.update_current_approved_profile(
+                    case_id, approval_data["approval_id"]
+                )
+            except EntityNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # reject: NO toca current_approved_profile_id; is_current ya quedó 0.
+
+        # ── 9. AuditEvent ─────────────────────────────────────────────────
+        event_type = _PROFILE_APPROVAL_EVENT_BY_DECISION[req.decision]
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type=event_type,
+                actor_advisor_id=advisor_id_for_row,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":                case_id,
+                    "approval_id":            approval_data["approval_id"],
+                    "ai_profile_analysis_id": approval_data["ai_profile_analysis_id"],
+                    "kyc_submission_id":      approval_data["kyc_submission_id"],
+                    "proposed_profile":       approval_data["proposed_profile"],
+                    "decision":               approval_data["decision"],
+                    "approved_profile":       approval_data["approved_profile"],
+                    "advisor_id":             approval_data["advisor_id"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Approval {approval_data['approval_id']!r} was persisted "
+                    f"but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CaseAdvisorProfileApprovalResponse(**approval_data)
+
+
+@app.get(
+    "/cases/{case_id}/profile-approval",
+    response_model=CaseAdvisorProfileApprovalListResponse,
+)
+def list_case_profile_approvals(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseAdvisorProfileApprovalListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteAdvisorProfileApprovalCaseRepository(store).list_by_case(
+            case_id
+        )
+    return CaseAdvisorProfileApprovalListResponse(
+        approvals=[CaseAdvisorProfileApprovalResponse(**d) for d in data],
         count=len(data),
     )
 
