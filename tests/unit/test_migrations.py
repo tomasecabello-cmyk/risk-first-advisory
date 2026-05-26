@@ -79,11 +79,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "case_universe_filter_runs",
     # 0006 — case-scoped portfolio proposals
     "case_portfolio_proposals",
+    # 0007 — case-scoped advisor override approvals
+    "case_override_approvals",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 6
+TOTAL_MIGRATIONS: int = 7
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -122,6 +124,10 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_case_portfolio_proposals_filter_run_id",
     "idx_case_portfolio_proposals_approved_profile_id",
     "idx_case_portfolio_proposals_created_by_advisor_id",
+    # 0007 — case_override_approvals indices
+    "idx_case_override_approvals_case_id",
+    "idx_case_override_approvals_proposal_id",
+    "idx_case_override_approvals_advisor_id",
 })
 
 
@@ -288,6 +294,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version6 == "0006"
     assert "portfolio" in description6.lower() or "proposal" in description6.lower()
     assert applied_at6.endswith("Z")
+    # La séptima fila debe ser 0007 — case_override_approvals.
+    version7, description7, applied_at7 = rows[6]
+    assert version7 == "0007"
+    assert "override" in description7.lower() or "approval" in description7.lower()
+    assert applied_at7.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

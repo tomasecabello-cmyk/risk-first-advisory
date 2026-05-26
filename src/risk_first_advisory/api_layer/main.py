@@ -65,6 +65,9 @@ from risk_first_advisory.api_layer.schemas import (
     CaseInvestmentPreferenceCreateRequest,
     CaseInvestmentPreferenceListResponse,
     CaseInvestmentPreferenceResponse,
+    CaseOverrideApprovalCreateRequest,
+    CaseOverrideApprovalListResponse,
+    CaseOverrideApprovalResponse,
     CasePortfolioProposalCreateRequest,
     CasePortfolioProposalListResponse,
     CasePortfolioProposalResponse,
@@ -146,6 +149,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteAIRequestLogRepository,
     SQLiteAuditEventRepository,
     SQLiteCaseInvestmentPreferenceRepository,
+    SQLiteCaseOverrideApprovalRepository,
     SQLiteCasePortfolioProposalRepository,
     SQLiteCaseUniverseFilterRunRepository,
     SQLiteClientRepository,
@@ -4724,6 +4728,231 @@ def list_case_portfolio_proposals(
         data = SQLiteCasePortfolioProposalRepository(store).list_by_case(case_id)
     return CasePortfolioProposalListResponse(
         proposals=[CasePortfolioProposalResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CaseOverrideApproval endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/override-approval  → advisor, admin
+#   GET  /cases/{case_id}/override-approval  → admin, advisor, compliance, viewer
+#
+# Comportamiento POST:
+#   - 404 si case no existe.
+#   - 409 si case está CLOSED.
+#   - Resuelve proposal_id explícito (debe pertenecer al case) o current.
+#   - 409 si no hay proposal en el case.
+#   - 409 si proposal.status != "completed" (override sin candidates no aplica).
+#   - 422 si candidate_variant no está en proposal.candidates.
+#   - 422 si el candidate NO requiere override (metadata.requires_advisor_override=False).
+#   - Persiste override approval + mark_previous_not_current (a nivel case).
+#   - AuditEvent: approve → advisor_override_approved; reject → advisor_override_rejected.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_OVERRIDE_EVENT_BY_DECISION: dict[str, str] = {
+    "approve": "advisor_override_approved",
+    "reject":  "advisor_override_rejected",
+}
+
+
+def _candidate_requires_override(candidate: dict[str, Any]) -> bool:
+    """
+    Inspecciona el dict de un candidate (mismo shape que el persistido en
+    case_portfolio_proposals.candidates_json) para determinar si requiere
+    advisor override.
+
+    Política: confiar en metadata.requires_advisor_override (poblado por
+    `_serialize_candidate_for_proposal` desde meta.requires_advisor_override
+    del coordinator).
+    """
+    if not isinstance(candidate, dict):
+        return False
+    meta = candidate.get("metadata")
+    if isinstance(meta, dict):
+        return bool(meta.get("requires_advisor_override", False))
+    return False
+
+
+@app.post(
+    "/cases/{case_id}/override-approval",
+    response_model=CaseOverrideApprovalResponse,
+    status_code=201,
+)
+def create_case_override_approval(
+    case_id: str,
+    req: CaseOverrideApprovalCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CaseOverrideApprovalResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        proposal_repo = SQLiteCasePortfolioProposalRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        override_repo = SQLiteCaseOverrideApprovalRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # ── 1. case ───────────────────────────────────────────────────────
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; override approvals are not "
+                    "accepted after case closure."
+                ),
+            )
+
+        # ── 2. resolver proposal ──────────────────────────────────────────
+        proposal_data: dict[str, Any] | None
+        if req.proposal_id is not None:
+            proposal_data = proposal_repo.get(req.proposal_id)
+            if proposal_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Portfolio proposal not found: {req.proposal_id!r}",
+                )
+            if proposal_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Portfolio proposal {req.proposal_id!r} belongs to "
+                        f"case {proposal_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+        else:
+            proposal_data = proposal_repo.get_current_for_case(case_id)
+            if proposal_data is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no portfolio proposal. "
+                        "POST a portfolio-proposal first."
+                    ),
+                )
+
+        # ── 3. proposal status debe ser completed ─────────────────────────
+        if proposal_data["status"] != "completed":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Portfolio proposal {proposal_data['proposal_id']!r} has "
+                    f"status {proposal_data['status']!r}; override approval "
+                    "requires a completed proposal with candidates."
+                ),
+            )
+
+        # ── 4. candidate_variant debe existir + requerir override ─────────
+        candidates_by_variant: dict[str, dict[str, Any]] = {
+            c.get("variant"): c
+            for c in proposal_data["candidates"]
+            if isinstance(c, dict) and "variant" in c
+        }
+        if req.candidate_variant not in candidates_by_variant:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Candidate variant {req.candidate_variant!r} not found in "
+                    f"proposal {proposal_data['proposal_id']!r}. Available: "
+                    f"{sorted(candidates_by_variant.keys())}."
+                ),
+            )
+
+        chosen_candidate = candidates_by_variant[req.candidate_variant]
+        if not _candidate_requires_override(chosen_candidate):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Candidate {req.candidate_variant!r} does not require "
+                    "advisor override (metadata.requires_advisor_override=False)."
+                ),
+            )
+
+        # ── 5. soft FK lookup advisor_id ──────────────────────────────────
+        advisor_id_for_row: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            advisor_id_for_row = advisor.advisor_id
+
+        # ── 6. persistir override approval ────────────────────────────────
+        try:
+            override_data = override_repo.create(
+                case_id=case_id,
+                proposal_id=proposal_data["proposal_id"],
+                candidate_variant=req.candidate_variant,
+                decision=req.decision,
+                rationale=req.rationale,
+                source=req.source,
+                reason_codes=list(req.reason_codes),
+                exceeded_constraints=list(req.exceeded_constraints),
+                advisor_id=advisor_id_for_row,
+                is_current=True,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 7. mark previous not current (a nivel case) ───────────────────
+        override_repo.mark_previous_not_current(
+            case_id, exclude_id=override_data["override_approval_id"]
+        )
+
+        # ── 8. AuditEvent ─────────────────────────────────────────────────
+        event_type = _OVERRIDE_EVENT_BY_DECISION[req.decision]
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type=event_type,
+                actor_advisor_id=advisor_id_for_row,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":              case_id,
+                    "override_approval_id": override_data["override_approval_id"],
+                    "proposal_id":          override_data["proposal_id"],
+                    "candidate_variant":    override_data["candidate_variant"],
+                    "decision":             override_data["decision"],
+                    "advisor_id":           override_data["advisor_id"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Override approval {override_data['override_approval_id']!r} "
+                    f"was persisted but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CaseOverrideApprovalResponse(**override_data)
+
+
+@app.get(
+    "/cases/{case_id}/override-approval",
+    response_model=CaseOverrideApprovalListResponse,
+)
+def list_case_override_approvals(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseOverrideApprovalListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCaseOverrideApprovalRepository(store).list_by_case(case_id)
+    return CaseOverrideApprovalListResponse(
+        override_approvals=[CaseOverrideApprovalResponse(**d) for d in data],
         count=len(data),
     )
 

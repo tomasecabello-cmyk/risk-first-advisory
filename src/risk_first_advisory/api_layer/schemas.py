@@ -1710,3 +1710,92 @@ class CasePortfolioProposalResponse(BaseModel):
 class CasePortfolioProposalListResponse(BaseModel):
     proposals: list[CasePortfolioProposalResponse]
     count:     int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseOverrideApproval — Fase 2 Commit 13 (case-scoped advisor override)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_OVERRIDE_VARIANTS:  frozenset[str] = frozenset({"DEFENSIVE", "BALANCED", "GROWTH"})
+_ALLOWED_OVERRIDE_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
+
+
+class CaseOverrideApprovalCreateRequest(BaseModel):
+    proposal_id:          str | None  = None
+    candidate_variant:    str
+    decision:             str
+    reason_codes:         list[str]   = Field(default_factory=list)
+    exceeded_constraints: list[str]   = Field(default_factory=list)
+    rationale:            str         = Field(min_length=1)
+    source:               str         = "manual"
+
+    @field_validator("proposal_id", mode="before")
+    @classmethod
+    def _proposal_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("proposal_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("candidate_variant")
+    @classmethod
+    def _candidate_variant_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_OVERRIDE_VARIANTS:
+            raise ValueError(
+                f"candidate_variant inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_OVERRIDE_VARIANTS)}."
+            )
+        return v
+
+    @field_validator("decision")
+    @classmethod
+    def _decision_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_OVERRIDE_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {v!r}. "
+                f"Permitidas: {sorted(_ALLOWED_OVERRIDE_DECISIONS)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+    @field_validator("reason_codes")
+    @classmethod
+    def _validate_reason_codes(cls, v: list[str]) -> list[str]:
+        return _validate_str_list_no_empty(v, "reason_codes")
+
+    @field_validator("exceeded_constraints")
+    @classmethod
+    def _validate_exceeded_constraints(cls, v: list[str]) -> list[str]:
+        return _validate_str_list_no_empty(v, "exceeded_constraints")
+
+
+class CaseOverrideApprovalResponse(BaseModel):
+    override_approval_id: str
+    case_id:              str
+    proposal_id:          str
+    candidate_variant:    str
+    decision:             str
+    reason_codes:         list[str]
+    exceeded_constraints: list[str]
+    rationale:            str
+    source:               str
+    advisor_id:           str | None
+    is_current:           bool
+    created_at_utc:       str
+
+
+class CaseOverrideApprovalListResponse(BaseModel):
+    override_approvals: list[CaseOverrideApprovalResponse]
+    count:              int

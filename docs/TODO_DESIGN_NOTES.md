@@ -606,8 +606,8 @@ Los tests usan dos autouse fixtures:
 9. ~~CaseAdvisorProfileApproval case-scoped (POST/GET `/cases/{case_id}/profile-approval`); vincula `ai_profile_analysis_id` + `kyc_submission_id` + `advisor_id`; mantiene `is_current` + `current_approved_profile_id`; auto-events `advisor_profile_approved` / `_modified` / `_rejected`.~~ ✅ Commit 10.
 10. ~~CaseInvestmentPreference + CaseUniverseFilterRun case-scoped (POST/GET `/cases/{case_id}/investment-preferences`, POST/GET `/cases/{case_id}/universe-filter`); preferencias manuales o AI-extracted; filter engine sobre CSV; auto-events `investment_preferences_recorded` + `universe_filtered`; AIRequestLog cuando se usa IA.~~ ✅ Commit 11.
 11. ~~CasePortfolioProposal case-scoped (POST/GET `/cases/{case_id}/portfolio-proposal`); reconstruye instrumentos desde el filter run, corre PortfolioGenerationCoordinator con RiskBudget del approved profile; persiste snapshot completo (risk_budget + snapshots + candidates + warnings + status); auto-event `portfolio_proposal_generated`.~~ ✅ Commit 12.
-12. Case-scoped portfolio selection (formaliza `current_portfolio_selection_id` con la variant elegida por el advisor).
-13. Case-scoped override-approval (advisor override sobre GROWTH variants).
+12. ~~CaseOverrideApproval case-scoped (POST/GET `/cases/{case_id}/override-approval`); ancla decisión a `(case_id, proposal_id, candidate_variant)`; valida que el candidate exista y requiera override; auto-events `advisor_override_approved` / `_rejected`.~~ ✅ Commit 13.
+13. Case-scoped portfolio selection (formaliza `current_portfolio_selection_id` con la variant elegida por el advisor).
 14. Case-scoped report generation (markdown / PDF audit-ready).
 15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
@@ -1277,3 +1277,96 @@ Duodécimo commit de Fase 2 — generación de propuestas de portfolio dentro de
 - **`variant_policy` es campo reservado sin uso real**. Solo acepta `"standard"`. Futuras políticas (e.g., "growth_only", "5_variants") requieren cambios en el endpoint.
 - **No hay endpoint detail** `/cases/{id}/portfolio-proposal/{proposal_id}`. GET list devuelve todos; se filtra en cliente. Si crece la necesidad, agregar sin schema changes.
 - **Cross-validation entre filter_run y approved_profile**: el endpoint NO valida que el filter_run se haya hecho DESPUÉS o ANTES del approval. Decisión: temporalmente independientes. Si el advisor quiere coherencia, debe regenerar el filter después de cambiar el approval. Documentar este matiz en UX cuando exista el workbench.
+
+---
+
+## Fase 2 — CaseOverrideApproval case-scoped ✅ (Commit 13)
+
+### Estado actual
+
+Decimotercer commit de Fase 2 — decisión humana del asesor sobre una variante de portfolio que excede el RiskBudget aprobado y requiere advisor override (típicamente GROWTH). Anclado a un `CasePortfolioProposal` concreto y a un `candidate_variant` específico.
+
+#### Archivos creados / modificados
+
+- **`migrations/0007_case_override_approvals.sql`** — nueva migración:
+  - Tabla `case_override_approvals(override_approval_id PK, case_id NOT NULL FK→advisory_cases, proposal_id NOT NULL FK→case_portfolio_proposals, candidate_variant NOT NULL, decision NOT NULL, reason_codes_json, exceeded_constraints_json, rationale NOT NULL, source NOT NULL, advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1)` + 3 índices.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `ALLOWED_OVERRIDE_APPROVAL_DECISIONS = {"approve", "reject"}`.
+  - `SQLiteCaseOverrideApprovalRepository` con `create`, `get`, `list_by_case`, `get_current_for_case`, `mark_previous_not_current`. IDs `case_override_approval_NNNNNN`. `reason_codes_json` y `exceeded_constraints_json` envueltos en `{"items": [...]}` (mismo patrón).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `_ALLOWED_OVERRIDE_VARIANTS = {DEFENSIVE, BALANCED, GROWTH}`, `_ALLOWED_OVERRIDE_DECISIONS = {approve, reject}`.
+  - `CaseOverrideApprovalCreateRequest` con validators (variant en allowlist, decision en allowlist, rationale/source no whitespace, reason_codes/exceeded_constraints validados via `_validate_str_list_no_empty` reutilizado).
+  - `CaseOverrideApprovalResponse`, `CaseOverrideApprovalListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Constante `_OVERRIDE_EVENT_BY_DECISION` mapping `approve/reject` → `advisor_override_approved/_rejected`.
+  - Helper `_candidate_requires_override(candidate_dict)` — inspecciona `metadata.requires_advisor_override` del dict persistido por el proposal.
+  - 2 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/override-approval` | advisor, admin | Resuelve proposal (current o explícito), valida que sea `status=completed`, busca el candidate por variant, exige que requiera override, persiste approval + mark_previous_not_current + AuditEvent. |
+  | `GET /cases/{case_id}/override-approval` | admin, advisor, compliance, viewer | Lista approvals ordenadas por `created_at_utc` asc. |
+
+- **`tests/integration/test_api_case_override_approval.py`** — 41 tests en 7 clases:
+  - `TestCreateApprove` (12): guardrail que el fixture genera al menos un override-requiring variant (rompe rápido si la premisa cambia); 201; prefix `case_override_approval_`; proposal_id/candidate_variant/decision/reason_codes/exceeded_constraints/advisor_id correctos; is_current=true; GET cuenta 1.
+  - `TestReject` (1): reject → 201.
+  - `TestCurrent` (1): segundo POST marca primero `is_current=false`.
+  - `TestValidation` (13): missing case (POST/GET) → 404; CLOSED → 409; sin proposal → 409 ("no portfolio proposal"); proposal de otro case → 422 ("belongs to case"); proposal unknown → 422; candidate ausente del proposal → 422 (skippeable si el fixture genera los 3); candidate sin override required → 422 ("does not require advisor override"); decision/rationale/source/reason_codes/exceeded_constraints inválidos → 422.
+  - `TestRBACPost` (5): 401, 403 (compliance/viewer), 201 (advisor/admin).
+  - `TestRBACGet` (3): 401, 200 (compliance/viewer).
+  - `TestAudit` (3): approve emite `advisor_override_approved`; reject emite `advisor_override_rejected`; payload contiene `override_approval_id`/`candidate_variant`/`decision`; `verify_chain` intact.
+  - `TestNoRegression` (4): `/advisor/override-approval` legacy, `/ai/filtered-portfolio-demo`, `/health`, `/auth/me`.
+
+- **`tests/unit/test_migrations.py`** — actualizado: `PHASE2_TABLES += case_override_approvals`; `REQUIRED_INDEXES += 3 nuevos`; `TOTAL_MIGRATIONS = 7`; assert fila `0007` en schema_migrations.
+
+**Total tests tras este commit:** 2868 (todos pasando). Δ = +41 integration.
+
+#### Decisiones de diseño
+
+1. **`proposal_id` NOT NULL en la tabla**. Cada override approval queda anclado a una propuesta concreta. Sin proposal no hay candidate sobre el cual decidir.
+
+2. **`candidate_variant` se valida contra el proposal en runtime, no solo schema**. El schema acepta `{DEFENSIVE, BALANCED, GROWTH}` (allowlist estática), pero el endpoint exige adicionalmente que el variant esté presente en `proposal.candidates`. Si el proposal no generó esa variant (e.g., infeasibility puntual) → 422.
+
+3. **422 si el candidate NO requiere override** (decisión documentada). Política: override approval es para los casos donde la variant excede el budget aprobado. Si una variant ya respeta el budget, no hay nada que aprobar/rechazar como override. El endpoint legacy permite cualquier candidate; el case-scoped es más estricto.
+
+4. **`proposal.status` debe ser `"completed"`**. Override sobre proposals blocked/infeasible no tiene sentido (no hay candidates). 409 con mensaje explícito.
+
+5. **`is_current` a nivel case** (no por proposal_id ni candidate_variant). Decisión simple: un override approval vigente por case. Si el advisor quiere revisar dos variants del mismo proposal en paralelo, el segundo POST invalida el primero. La granularidad fina queda para futuro si compliance la pide.
+
+6. **`_candidate_requires_override` confía en `metadata.requires_advisor_override`** poblado por `_serialize_candidate_for_proposal` (Commit 12). No re-evalúa la lógica del coordinator — usa el snapshot persistido como fuente de verdad.
+
+7. **`reason_codes` y `exceeded_constraints` los declara el caller**, no se derivan automáticamente del candidate. Razón: el advisor puede declarar reason codes adicionales que no aparecen en el candidate metadata (e.g., contexto del cliente). Si el caller no manda nada, queda lista vacía.
+
+8. **Reusa `_validate_str_list_no_empty`** de schemas.py (existente desde Phase 1 `/advisor/override-approval`). Mismo comportamiento: cada item debe ser string no vacío.
+
+9. **Audit event mapping con dict literal** (`_OVERRIDE_EVENT_BY_DECISION`), mismo patrón que profile approval (Commit 10).
+
+10. **AuditEvent payload solo metadata** (override_approval_id, proposal_id, candidate_variant, decision, advisor_id). No duplica reason_codes / exceeded_constraints — auditor navega por `override_approval_id` si necesita el detalle.
+
+11. **Soft FK lookup para `advisor_id`** (mismo patrón que todos los commits previos): si `advisor.advisor_id` del token existe como entity → se usa; si no → None.
+
+12. **Tabla coexiste con `records` legacy.** El endpoint `/advisor/override-approval` Phase 1 (client_id-scoped, sobre `records.record_type='advisor_override_approval'`) sigue vivo y no entra en conflicto. Deprecación queda para item 22.
+
+13. **`mark_previous_not_current(exclude_id=new_id)`** después del insert para evitar invalidar el approval recién creado. Mismo patrón que profile_approvals (Commit 10).
+
+14. **Test fixture usa `moderado` profile**. La razón: bajo el universo CSV actual, GROWTH bajo `moderado` excede el budget y `requires_advisor_override=True`. Bajo `conservador`, el optimizer mantiene todas las variants dentro del budget (no se requiere override) — `conservador` ya es muy restrictivo, no hay donde "exceder más". El guardrail `test_proposal_has_at_least_one_override_variant` rompe rápido si esta premisa cambia.
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/override-approval` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/override-approval` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay portfolio selection todavía** (item 13). El override approval autoriza al advisor a presentar la variant exceeding-budget al cliente, pero el "elegirla" como final queda para el endpoint de selection (item 13).
+- **`current_override_approval_id` NO existe en `advisory_cases`.** El puntero no se materializa en la tabla del case porque no es necesario para portfolio selection (que apuntará a la variant elegida, no al override).
+- **No hay reconciliación con `/advisor/override-approval` legacy** (Phase 1, client-scoped). Coexisten; deprecación queda para item 22.
+- **Override approvals huérfanos**: si el proposal subyacente cambia (nuevo proposal), el override approval previo queda `is_current=false` pero sigue referenciando el proposal_id viejo (FK válido). El nuevo flow debe re-aprobar override contra el proposal nuevo si quiere mantener consistencia. Documentado para UX.
+- **No se valida que `reason_codes` / `exceeded_constraints` coincidan con el candidate**. El advisor puede declarar reason codes que NO aparecen en `candidate.reason_codes` (uso intencional: documentación adicional del advisor). Si compliance requiere validación cruzada, se agrega en una iteración futura.
+- **No hay endpoint detail** `/cases/{id}/override-approval/{override_approval_id}`. GET list devuelve todos; filtrar en cliente.
+- **No hay actor_role explícito en el payload** del response (solo `advisor_id`). El `actor_role` se preserva en el audit event vía `_pick_actor_role`. Si el caller necesita el rol en el response, se agrega en una iteración futura.

@@ -2689,3 +2689,196 @@ class SQLiteCasePortfolioProposalRepository:
             "is_current":             bool(row["is_current"]),
             "created_at_utc":         row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseOverrideApproval — Fase 2 Commit 13 (case-scoped advisor override)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Decisión del asesor sobre una variante de portfolio (típicamente GROWTH) que
+# excede el RiskBudget aprobado y requiere advisor override.
+#
+# is_current se mantiene a nivel case: cada nuevo override approval invalida
+# los previos del case, sin discriminar por proposal_id o candidate_variant.
+# Política simple y suficiente para Phase 2 (un override vigente por case).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_OVERRIDE_APPROVAL_DECISIONS: frozenset[str] = frozenset({"approve", "reject"})
+
+
+class SQLiteCaseOverrideApprovalRepository:
+    """
+    Persiste y lee override approvals case-scoped sobre `case_override_approvals`
+    (migration 0007).
+
+    Operaciones:
+        create(...)                       — inserta nueva approval.
+        get(override_approval_id)         — dict | None.
+        list_by_case(case_id)             — orden created_at_utc asc, id asc.
+        get_current_for_case(case_id)     — is_current=1 más reciente o None.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                          — bulk is_current=0.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        proposal_id: str,
+        candidate_variant: str,
+        decision: str,
+        rationale: str,
+        source: str = "manual",
+        reason_codes: list[str] | None = None,
+        exceeded_constraints: list[str] | None = None,
+        advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        if decision not in ALLOWED_OVERRIDE_APPROVAL_DECISIONS:
+            raise ValueError(
+                f"decision inválida: {decision!r}. "
+                f"Permitidas: {sorted(ALLOWED_OVERRIDE_APPROVAL_DECISIONS)}."
+            )
+
+        codes_list = list(reason_codes or [])
+        constraints_list = list(exceeded_constraints or [])
+
+        override_approval_id = self._store._next_id("case_override_approval_")
+        now = _now_utc()
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_override_approvals
+                        (override_approval_id, case_id, proposal_id,
+                         candidate_variant, decision,
+                         reason_codes_json, exceeded_constraints_json,
+                         rationale, source, advisor_id,
+                         created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        override_approval_id, case_id, proposal_id,
+                        candidate_variant, decision,
+                        _canonical_json({"items": codes_list}),
+                        _canonical_json({"items": constraints_list}),
+                        rationale, source, advisor_id,
+                        now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "override_approval_id": override_approval_id,
+            "case_id":              case_id,
+            "proposal_id":          proposal_id,
+            "candidate_variant":    candidate_variant,
+            "decision":             decision,
+            "reason_codes":         codes_list,
+            "exceeded_constraints": constraints_list,
+            "rationale":            rationale,
+            "source":               source,
+            "advisor_id":           advisor_id,
+            "is_current":           bool(is_current),
+            "created_at_utc":       now,
+        }
+
+    def get(self, override_approval_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT override_approval_id, case_id, proposal_id,
+                   candidate_variant, decision,
+                   reason_codes_json, exceeded_constraints_json,
+                   rationale, source, advisor_id,
+                   created_at_utc, is_current
+            FROM case_override_approvals WHERE override_approval_id = ?
+            """,
+            (override_approval_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT override_approval_id, case_id, proposal_id,
+                   candidate_variant, decision,
+                   reason_codes_json, exceeded_constraints_json,
+                   rationale, source, advisor_id,
+                   created_at_utc, is_current
+            FROM case_override_approvals
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, override_approval_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT override_approval_id, case_id, proposal_id,
+                   candidate_variant, decision,
+                   reason_codes_json, exceeded_constraints_json,
+                   rationale, source, advisor_id,
+                   created_at_utc, is_current
+            FROM case_override_approvals
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, override_approval_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_override_approvals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_override_approvals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                          AND override_approval_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "override_approval_id": row["override_approval_id"],
+            "case_id":              row["case_id"],
+            "proposal_id":          row["proposal_id"],
+            "candidate_variant":    row["candidate_variant"],
+            "decision":             row["decision"],
+            "reason_codes":         json.loads(row["reason_codes_json"]).get("items", []),
+            "exceeded_constraints": json.loads(row["exceeded_constraints_json"]).get("items", []),
+            "rationale":            row["rationale"],
+            "source":               row["source"],
+            "advisor_id":           row["advisor_id"],
+            "is_current":           bool(row["is_current"]),
+            "created_at_utc":       row["created_at_utc"],
+        }
