@@ -1173,3 +1173,121 @@ class AuditVerifyResponse(BaseModel):
     first_broken_sequence: int | None
     checked_at_utc:        str
     message:               str
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AIRequestLog — Fase 2 Commit 7
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_AI_LOG_STATUSES: frozenset[str] = frozenset(
+    {"parsed_ok", "parse_error", "validation_error", "api_error"}
+)
+
+
+class AIRequestLogResponse(BaseModel):
+    request_id:              str
+    case_id:                 str | None
+    requested_by_advisor_id: str | None
+    endpoint:                str
+    model:                   str
+    prompt_version:          str
+    input_redacted:          dict[str, Any]
+    input_hash:              str
+    raw_response:            dict[str, Any] | None
+    validation_status:       str
+    latency_ms:              int | None
+    prompt_tokens:           int | None
+    completion_tokens:       int | None
+    error_message:           str | None
+    created_at_utc:          str
+
+
+class AIRequestLogListResponse(BaseModel):
+    logs:  list[AIRequestLogResponse]
+    count: int
+
+
+class AIRequestLogCreateRequest(BaseModel):
+    """
+    Para creación manual de logs (endpoints admin / scripts internos).
+
+    No es el camino normal: lo habitual es que los endpoints `/ai/*`
+    persistan logs automáticamente. Esta request existe para soportar
+    backfill, importación o tests manuales.
+    """
+
+    case_id:                 str | None     = None
+    requested_by_advisor_id: str | None     = None
+    endpoint:                str            = Field(min_length=1)
+    model:                   str            = Field(min_length=1)
+    prompt_version:          str            = Field(min_length=1)
+    input_payload:           dict[str, Any] = Field(default_factory=dict)
+    raw_response:            dict[str, Any] | None = None
+    validation_status:       str
+    latency_ms:              int | None     = None
+    prompt_tokens:           int | None     = None
+    completion_tokens:       int | None     = None
+    error_message:           str | None     = None
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("endpoint no puede ser solo espacios.")
+        return v
+
+    @field_validator("model")
+    @classmethod
+    def _model_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("model no puede ser solo espacios.")
+        return v
+
+    @field_validator("prompt_version")
+    @classmethod
+    def _prompt_version_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("prompt_version no puede ser solo espacios.")
+        return v
+
+    @field_validator("validation_status")
+    @classmethod
+    def _validation_status_must_be_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_AI_LOG_STATUSES:
+            raise ValueError(
+                f"validation_status inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_AI_LOG_STATUSES)}."
+            )
+        return v
+
+    @field_validator("latency_ms")
+    @classmethod
+    def _latency_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("latency_ms debe ser >= 0.")
+        return v
+
+    @field_validator("prompt_tokens")
+    @classmethod
+    def _prompt_tokens_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("prompt_tokens debe ser >= 0.")
+        return v
+
+    @field_validator("completion_tokens")
+    @classmethod
+    def _completion_tokens_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("completion_tokens debe ser >= 0.")
+        return v
+
+    @field_validator("input_payload", mode="before")
+    @classmethod
+    def _input_payload_must_be_dict(cls, v: object) -> object:
+        if v is None:
+            raise ValueError("input_payload no puede ser null; usar {} si está vacío.")
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"input_payload debe ser un objeto JSON (dict); recibido {type(v).__name__}."
+            )
+        return v

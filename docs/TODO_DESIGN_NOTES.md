@@ -600,10 +600,12 @@ Los tests usan dos autouse fixtures:
 3. ~~Repositorios `FirmRepository` / `AdvisorRepository` / `ClientRepository` + endpoints CRUD.~~ ✅ Commit 4.
 4. ~~`AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.~~ ✅ Commit 5.
 5. ~~AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.~~ ✅ Commit 6.
-6. AIRequestLog wrapper alrededor de `OpenAIProfileClient` + redaction de PII.
+6. ~~AIRequestLog wrapper alrededor de los endpoints `/ai/*` + redaction de PII.~~ ✅ Commit 7.
 7. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 8. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
-9. Firm-level access control sobre `/cases/*` y `/cases/{id}/audit*` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+9. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+10. AIRequestLog case-scoped por default — hoy `case_id=None` salvo cuando se setea explícitamente vía POST manual; cuando los endpoints `/ai/*` sean case-scoped, propagar `case_id` automáticamente.
+11. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`.
 
 ---
 
@@ -682,5 +684,106 @@ Sexto commit de Fase 2 — append-only audit log por `AdvisoryCase` con encadena
 
 - **AuditEvent NO se integra todavía con `/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`** — solo `POST /cases` registra evento automático. La integración completa queda para un commit siguiente.
 - **Firm-level access control sobre `/cases/{id}/audit*`** — cualquier token con el rol adecuado puede leer/escribir audit events de cualquier case. El filtrado por `firm_id` queda pendiente.
-- **AIRequestLog** sigue pendiente (independiente del hash chain de AuditEvent).
+- **AIRequestLog** se completa en Commit 7 (ver siguiente sección).
 - **Acuse externo / firma digital** — el hash chain no es blockchain: un actor con acceso directo a SQLite puede reescribir coherentemente toda la cadena (incluyendo todos los `event_hash`). `verify_chain` detecta mutaciones puntuales (un payload, un hash, un sequence gap), no una reescritura completa coordinada. Para protección contra DBA malicioso haría falta firma asimétrica por evento o anclaje a una autoridad de timestamping externa.
+
+---
+
+## Fase 2 — AIRequestLog funcional ✅ (Commit 7)
+
+### Estado actual
+
+Séptimo commit de Fase 2 — logging trazable y append-only de cada llamada a IA, con redacción de PII y `input_hash` sobre el payload original para correlación sin exposición.
+
+#### Archivos creados / modificados
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `ALLOWED_AI_LOG_STATUSES = {"parsed_ok", "parse_error", "validation_error", "api_error"}`.
+  - `_AI_LOG_STRUCTURED_KEYS` (allowlist de campos no sensibles que se conservan en claro: scores, montos, `currency`, `country`, `entity`, `allowed_instrument_types`, `model`, `prompt_version`, etc.).
+  - `_AI_LOG_REDACTED_KEYS` (denylist de campos siempre redactados: `natural_language_preferences`, `open_*`, `kyc_context`, `previous_profile_analysis`).
+  - `_AI_LOG_FREE_TEXT_MIN_LEN = 80` — heurística defensiva: strings largos en claves NO whitelisted se redactan aunque no estén en denylist.
+  - `_hash_short_client_id(value)` → `client_<sha256[:8]>`.
+  - `_looks_like_api_key(value)` → heurística para detectar OpenAI keys (`sk-`, `sk_`, `pk-`), Bearer tokens y prefijos `api_key=`/`token=`.
+  - `_redact_string(value)` → `<REDACTED:text_N_chars>`.
+  - `_redact_value(key, value)` — recursivo (dict → recurse, list → redact each, str → policy, otros → conservar).
+  - `redact_ai_input(payload)` — entrada pública: devuelve copia redactada (no muta el original); levanta `ValueError` si no es mapping.
+  - `compute_input_hash(payload)` — SHA-256 hex digest del canonical JSON del **original** (no del redactado), para que dos inputs con el mismo texto libre tengan el mismo hash.
+  - `SQLiteAIRequestLogRepository` con:
+    - `create(...)` — inserta y devuelve dict. IDs `ai_request_000001`, ... . FK violation → `EntityConflictError`.
+    - `get(request_id)` → dict | None.
+    - `list_by_case(case_id)` — orden `created_at_utc ASC, request_id ASC`.
+    - `list_all(limit=None)` — mismo orden, con LIMIT opcional.
+    - Sin update ni delete (append-only).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `AIRequestLogResponse` (campos: `request_id`, `case_id`, `requested_by_advisor_id`, `endpoint`, `model`, `prompt_version`, `input_redacted`, `input_hash`, `raw_response`, `validation_status`, `latency_ms`, `prompt_tokens`, `completion_tokens`, `error_message`, `created_at_utc`).
+  - `AIRequestLogListResponse` (`logs`, `count`).
+  - `AIRequestLogCreateRequest` con validators (`endpoint`/`model`/`prompt_version` no whitespace, `validation_status` ∈ allowlist, `latency_ms`/`prompt_tokens`/`completion_tokens` ≥ 0 si vienen, `input_payload` debe ser dict).
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - `_persist_ai_request_log(...)` helper que aplica `redact_ai_input` + `compute_input_hash` y persiste sin nunca propagar excepciones (fail-safe: logging failure no rompe el endpoint AI principal).
+  - `_resolve_ai_model_name(client)` — best-effort getattr a `_model`.
+  - Constantes `_AI_LOG_PROMPT_INVESTMENT_PREFS = "investment_preferences_v1"`, `_AI_LOG_PROMPT_FILTER_UNIVERSE = "ai_universe_filter_v1"`, `_AI_LOG_PROMPT_FILTERED_PORTFOLIO = "ai_filtered_portfolio_v1"`.
+  - Integración automática en `/ai/investment-preferences`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`: medición de `latency_ms` con `time.perf_counter`, `validation_status="parsed_ok"` en éxito y `"api_error"` en `ValueError`/`Exception`, con `error_message` poblado.
+  - 4 endpoints nuevos:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `GET /admin/ai-logs` | admin, compliance | Lista todos los logs (query opcional `limit`, 0–1000) |
+  | `GET /admin/ai-logs/{request_id}` | admin, compliance | Detalle de un log; 404 si no existe |
+  | `GET /cases/{case_id}/ai-logs` | admin, compliance | Logs del caso; 404 si case no existe |
+  | `POST /admin/ai-logs` | admin only | Creación manual con FK validation explícita; redacta el input antes de persistir |
+
+- **`tests/unit/test_ai_request_log_redaction.py`** — 35 tests unitarios (sin DB):
+  - `TestClientIdRedaction` (4): `client_id` → `client_<sha256[:8]>` determinístico.
+  - `TestFreeTextRedaction` (7): `natural_language_preferences` / `open_*` / `kyc_context` (dict recursivo) redactados con longitud preservada.
+  - `TestStructuredFieldsPreserved` (10): scores, amounts, currency, country, entity, instrument types, bools y None se mantienen en claro.
+  - `TestSafetyNets` (8): keys `sk-...` y `Bearer ...` siempre redactadas (incluyendo dentro de dicts y lists anidados), strings largos en keys desconocidas redactados, no mutación del input, non-dict input levanta `ValueError`.
+  - `TestInputHash` (6): SHA-256 hex; estable bajo reordenamiento de keys; cambia con el payload; computado sobre el ORIGINAL (no el redactado); maneja unicode.
+
+- **`tests/integration/test_api_ai_request_logs.py`** — 38 tests de integración:
+  - `TestRBACList` (5): 401/403 (advisor, viewer) / 200 (admin, compliance).
+  - `TestRBACGet` (2): 404 cuando no existe; 403 para advisor.
+  - `TestRBACCaseLogs` (4): compliance OK con count=0; advisor 403; sin token 401; case inexistente 404.
+  - `TestPostManual` (11): admin crea OK; advisor/compliance 403; `validation_status` inválido 422; case/advisor FK violation 422; con case existente OK; endpoint vacío 422; latency negativa 422; `input_payload` no dict 422; input persistido está realmente redactado.
+  - `TestAutoInvestmentPreferences` (8): log creado con endpoint/prompt_version correctos; `natural_language_preferences` no aparece en claro; `client_id` hasheado; `raw_response` capturado; contrato del endpoint intacto; `input_hash` cambia con el payload; `validation_status=api_error` cuando OpenAI falla; `latency_ms` poblado.
+  - `TestAutoFilterUniverse` (1): log con `prompt_version=ai_universe_filter_v1`.
+  - `TestAutoFilteredPortfolio` (1): log con `prompt_version=ai_filtered_portfolio_v1`.
+  - `TestListOrdering` (2): orden por `created_at_utc ASC, request_id ASC`; query param `limit` respetado.
+  - `TestNoRegression` (4): `/health`, `/auth/me`, `/advisor/profile-approval`, `/ai/filtered-portfolio-demo` sin auth.
+
+**Total tests tras este commit:** 2594 (todos pasando). Δ = +73 (35 unit + 38 integration).
+
+#### Decisiones de diseño
+
+1. **`input_hash` sobre el ORIGINAL, no sobre el redactado.** Esto garantiza que dos inputs idénticos hasheen igual y que un cambio en texto libre cambie el hash, aunque el `input_redacted_json` persistido sea el mismo. Sirve para correlación (auditor puede confirmar "este texto produjo este log") sin necesidad de almacenar el texto.
+2. **Canonical JSON `sort_keys=True / separators=(",",":") / ensure_ascii=False`** — mismo formato que `compute_payload_hash` y `compute_event_hash` (Commit 6). Determinismo total.
+3. **Redacción por allowlist + denylist + heurística defensiva.** El allowlist (`_AI_LOG_STRUCTURED_KEYS`) cubre los campos estructurados conocidos de Phase 2; el denylist (`_AI_LOG_REDACTED_KEYS`) cubre el texto libre conocido; la heurística "string largo en key no whitelisted → redactar" atrapa campos no anticipados (defensa en profundidad). Strings cortos en keys desconocidas se conservan — over-redaction de etiquetas no aporta seguridad y rompe debuggability.
+4. **API keys siempre redactadas, en cualquier posición.** `_looks_like_api_key` se evalúa sobre TODO string leaf (no solo keys conocidas), incluyendo dentro de dicts y lists anidados. Cubre `sk-`, `sk_`, `pk-`, `Bearer ...`, `api_key=`, `token=`.
+5. **`client_id` se hashea, no se redacta como texto libre.** `client_<sha256[:8]>` es determinístico y permite correlacionar logs del mismo cliente sin exponer el ID.
+6. **Logging es fail-safe en los endpoints automáticos.** `_persist_ai_request_log` captura cualquier excepción y devuelve `None`. Decisión: una llamada a IA que tuvo éxito (o que falló por OpenAI) NO debe propagar un 5xx por un problema de persistencia del log. La operación principal del endpoint manda. Iteración futura puede agregar telemetría / re-tirar bajo feature flag.
+7. **`AIRequestLogResponse` siempre devuelve `raw_response` como dict o null.** Si el JSON persistido es válido se devuelve directamente; defensivo: si por alguna razón el JSON está corrupto, se envuelve en `{"__raw_response_parse_error__": True}` para no romper la lectura.
+8. **POST `/admin/ai-logs` valida FKs en el endpoint, no en el repositorio.** Mismo patrón que `POST /cases`. El repositorio solo conoce su tabla. La política "case_id debe existir si se provee" es de negocio.
+9. **POST `/admin/ai-logs` es admin-only.** Compliance puede leer pero no crear logs (preserva la propiedad de que los logs son producidos por el sistema, no inyectados por revisores).
+10. **`latency_ms` se mide con `time.perf_counter()`** — monotónico, alta resolución; correcto para diffs de tiempo (no para timestamps absolutos).
+11. **`prompt_version` es un string libre declarado por el endpoint.** No hay registry formal todavía (item 10 del pending list). El convención `<feature>_v<n>` se aplica en los tres endpoints integrados.
+12. **`POST /admin/ai-logs` para test/backfill manual.** El camino productivo NO es este endpoint — es la integración automática. Existe para soportar importación, scripts internos y testing del repositorio sin tener que disparar IA real.
+
+#### Tabla de RBAC actualizada (nuevos endpoints AIRequestLog)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `GET /admin/ai-logs` | ❌ 403 | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 401 |
+| `GET /admin/ai-logs/{id}` | ❌ 403 | ✅ 200/404 | ✅ 200/404 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/ai-logs` | ❌ 403 | ✅ 200/404 | ✅ 200/404 | ❌ 403 | ❌ 401 |
+| `POST /admin/ai-logs` | ❌ 403 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **AIRequestLog NO está case-scoped por default en los endpoints automáticos.** `case_id=None` salvo cuando se setea via POST manual. Cuando los endpoints `/ai/*` sean case-scoped (futuro), propagar `case_id` automáticamente.
+- **No hay cifrado at-rest del SQLite.** Los `input_redacted_json` quedan en plano dentro del archivo. Para producción real haría falta cifrado a nivel de filesystem o de columna.
+- **No hay retention / pruning policy.** Los logs se acumulan indefinidamente.
+- **No hay prompt registry formal.** `prompt_version` es un string declarado por endpoint. Cambios incompatibles del prompt requieren bump manual (e.g. `_v1` → `_v2`).
+- **No se integra con `/ai/profile-demo` ni `/ai/profile-follow-up`.** Sólo los tres endpoints declarados en el alcance del commit. Los otros dos quedan para una iteración posterior; el helper `_persist_ai_request_log` es reusable directamente.
+- **`prompt_tokens` y `completion_tokens` se persisten como `None`.** El `OpenAIProfileClient` actual no expone token usage de la respuesta de OpenAI; cuando se exponga, el campo se puebla sin cambios de schema.
+- **Firm-level access control sobre `/admin/ai-logs` y `/cases/{id}/ai-logs`** — un compliance/admin de la firma A puede leer logs de la firma B. Pendiente con el resto del scoping multi-tenant.

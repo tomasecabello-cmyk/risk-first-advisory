@@ -20,8 +20,10 @@ Constantes monkeypatcheables en tests:
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +42,9 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisoryCaseListResponse,
     AdvisoryCaseResponse,
     AdvisoryCaseStatusUpdateRequest,
+    AIRequestLogCreateRequest,
+    AIRequestLogListResponse,
+    AIRequestLogResponse,
     AuditEventCreateRequest,
     AuditEventListResponse,
     AuditEventResponse,
@@ -112,16 +117,20 @@ from risk_first_advisory.persistence_layer.repositories import (
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.entity_repository import (
+    ALLOWED_AI_LOG_STATUSES,
     ALLOWED_CASE_STATUSES,
     CaseTransitionError,
     EntityConflictError,
     EntityNotFoundError,
     SQLiteAdvisorRepository,
     SQLiteAdvisoryCaseRepository,
+    SQLiteAIRequestLogRepository,
     SQLiteAuditEventRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
     SQLiteFirmRepository,
+    compute_input_hash,
+    redact_ai_input,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
     SQLiteAdvisorOverrideApprovalRepository,
@@ -650,6 +659,88 @@ def _persist_advisor_portfolio_selection(
             override_approval_record_id=override_approval_record_id,
         )
     return record.record_id, record.created_at_utc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper de persistencia para AIRequestLog
+#
+# Política Fase 2:
+#   - El logging NUNCA debe romper el endpoint AI principal. Si el insert
+#     falla, se devuelve None y el endpoint continúa normalmente.
+#   - Devolvemos el request_id en caso de éxito por si el caller quiere
+#     incluirlo en la respuesta o en advisor_notes.
+#   - El caller arma el input_payload original y la redacción / hash se
+#     computan acá para garantizar consistencia.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _persist_ai_request_log(
+    *,
+    endpoint: str,
+    model: str,
+    prompt_version: str,
+    input_payload: dict[str, Any],
+    validation_status: str,
+    db_path: Path,
+    case_id: str | None = None,
+    requested_by_advisor_id: str | None = None,
+    raw_response: dict[str, Any] | None = None,
+    latency_ms: int | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    error_message: str | None = None,
+) -> str | None:
+    """
+    Persiste un AIRequestLog. Devuelve `request_id` si tuvo éxito, None si
+    falló (la operación principal del endpoint no se rompe).
+
+    Importante: NUNCA loggea el input_payload original. La redacción y el
+    hash se computan acá vía `redact_ai_input` / `compute_input_hash`.
+    """
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        input_redacted = redact_ai_input(input_payload)
+        input_hash = compute_input_hash(input_payload)
+        with SQLiteEntityStore(db_path) as store:
+            repo = SQLiteAIRequestLogRepository(store)
+            data = repo.create(
+                endpoint=endpoint,
+                model=model,
+                prompt_version=prompt_version,
+                input_redacted=input_redacted,
+                input_hash=input_hash,
+                validation_status=validation_status,
+                case_id=case_id,
+                requested_by_advisor_id=requested_by_advisor_id,
+                raw_response=raw_response,
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                error_message=error_message,
+            )
+        return data["request_id"]
+    except Exception:
+        # Logging failure no rompe el endpoint AI. La operación principal
+        # ya tiene su propia ruta de error/éxito. Si esto se vuelve un
+        # problema operativo, una iteración futura puede agregar telemetría
+        # o re-tirar la excepción.
+        return None
+
+
+def _resolve_ai_model_name(ai_client: Any) -> str:
+    """Mejor esfuerzo para obtener el nombre de modelo del OpenAIProfileClient."""
+    return str(getattr(ai_client, "_model", None) or "unknown")
+
+
+# Prompt versions de cada endpoint AI integrado en Fase 2 Commit 7. Cambiar
+# el sufijo si la forma del prompt / output schema cambia de forma incompatible.
+_AI_LOG_ENDPOINT_INVESTMENT_PREFS:  str = "/ai/investment-preferences"
+_AI_LOG_ENDPOINT_FILTER_UNIVERSE:   str = "/ai/filter-universe-demo"
+_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO: str = "/ai/filtered-portfolio-demo"
+
+_AI_LOG_PROMPT_INVESTMENT_PREFS:    str = "investment_preferences_v1"
+_AI_LOG_PROMPT_FILTER_UNIVERSE:     str = "ai_universe_filter_v1"
+_AI_LOG_PROMPT_FILTERED_PORTFOLIO:  str = "ai_filtered_portfolio_v1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1404,10 +1495,22 @@ def ai_investment_preferences(
         "previous_profile_analysis": req.previous_profile_analysis,
     }
 
-    # ── 3. Llamar a la IA ─────────────────────────────────────────────────
+    # ── 3. Llamar a la IA + AIRequestLog automático ──────────────────────
+    _start = time.perf_counter()
+    _model_name = _resolve_ai_model_name(ai_client)
     try:
         result = ai_client.extract_investment_preferences(preferences_payload)
-    except ValueError:
+    except ValueError as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_INVESTMENT_PREFS,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_INVESTMENT_PREFS,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail=(
@@ -1415,11 +1518,32 @@ def ai_investment_preferences(
                 "The AI returned an invalid response. Check backend logs."
             ),
         )
-    except Exception:
+    except Exception as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_INVESTMENT_PREFS,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_INVESTMENT_PREFS,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail="AI investment preferences extraction failed due to an unexpected error.",
         )
+
+    _persist_ai_request_log(
+        endpoint=_AI_LOG_ENDPOINT_INVESTMENT_PREFS,
+        model=_model_name,
+        prompt_version=_AI_LOG_PROMPT_INVESTMENT_PREFS,
+        input_payload=preferences_payload,
+        validation_status="parsed_ok",
+        db_path=DEFAULT_DB_PATH,
+        raw_response=dict(result) if isinstance(result, dict) else None,
+        latency_ms=int((time.perf_counter() - _start) * 1000),
+    )
 
     # ── 4. Construir respuesta ─────────────────────────────────────────────
     return AIInvestmentPreferencesResponse(
@@ -1493,25 +1617,58 @@ def ai_filter_universe_demo(
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
         )
 
-    # ── 2. Extraer preferencias con IA ───────────────────────────────────
+    # ── 2. Extraer preferencias con IA + AIRequestLog automático ─────────
     preferences_payload: dict = {
         "client_id": req.client_id,
         "natural_language_preferences": req.natural_language_preferences,
         "kyc_context": req.kyc_context,
         "previous_profile_analysis": req.previous_profile_analysis,
     }
+    _start = time.perf_counter()
+    _model_name = _resolve_ai_model_name(ai_client)
     try:
         ai_result = ai_client.extract_investment_preferences(preferences_payload)
-    except ValueError:
+    except ValueError as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_FILTER_UNIVERSE,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_FILTER_UNIVERSE,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed. The AI returned an invalid response.",
         )
-    except Exception:
+    except Exception as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_FILTER_UNIVERSE,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_FILTER_UNIVERSE,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed due to an unexpected error.",
         )
+
+    _persist_ai_request_log(
+        endpoint=_AI_LOG_ENDPOINT_FILTER_UNIVERSE,
+        model=_model_name,
+        prompt_version=_AI_LOG_PROMPT_FILTER_UNIVERSE,
+        input_payload=preferences_payload,
+        validation_status="parsed_ok",
+        db_path=DEFAULT_DB_PATH,
+        raw_response=dict(ai_result) if isinstance(ai_result, dict) else None,
+        latency_ms=int((time.perf_counter() - _start) * 1000),
+    )
 
     # ── 3. Cargar universo ────────────────────────────────────────────────
     csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
@@ -1739,25 +1896,58 @@ def ai_filtered_portfolio_demo(
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
         )
 
-    # ── 3. Extraer preferencias con IA ───────────────────────────────────
+    # ── 3. Extraer preferencias con IA + AIRequestLog automático ─────────
     preferences_payload: dict = {
         "client_id": req.client_id,
         "natural_language_preferences": req.natural_language_preferences,
         "kyc_context": req.kyc_context,
         "previous_profile_analysis": req.previous_profile_analysis,
     }
+    _start = time.perf_counter()
+    _model_name = _resolve_ai_model_name(ai_client)
     try:
         ai_result = ai_client.extract_investment_preferences(preferences_payload)
-    except ValueError:
+    except ValueError as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_FILTERED_PORTFOLIO,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed. The AI returned an invalid response.",
         )
-    except Exception:
+    except Exception as exc:
+        _persist_ai_request_log(
+            endpoint=_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO,
+            model=_model_name,
+            prompt_version=_AI_LOG_PROMPT_FILTERED_PORTFOLIO,
+            input_payload=preferences_payload,
+            validation_status="api_error",
+            db_path=DEFAULT_DB_PATH,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed due to an unexpected error.",
         )
+
+    _persist_ai_request_log(
+        endpoint=_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO,
+        model=_model_name,
+        prompt_version=_AI_LOG_PROMPT_FILTERED_PORTFOLIO,
+        input_payload=preferences_payload,
+        validation_status="parsed_ok",
+        db_path=DEFAULT_DB_PATH,
+        raw_response=dict(ai_result) if isinstance(ai_result, dict) else None,
+        latency_ms=int((time.perf_counter() - _start) * 1000),
+    )
 
     # ── 4. Cargar universo ────────────────────────────────────────────────
     csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
@@ -2856,3 +3046,136 @@ def verify_case_audit_chain(
         checked_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         message=result["message"],
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — AIRequestLog endpoints
+#
+# RBAC:
+#   GET  /admin/ai-logs               → admin, compliance
+#   GET  /admin/ai-logs/{request_id}  → admin, compliance
+#   GET  /cases/{case_id}/ai-logs     → admin, compliance
+#   POST /admin/ai-logs               → admin only (creación manual)
+#
+# Política:
+#   - Lectura solo para roles auditores (admin/compliance). advisor/viewer
+#     no ven logs IA por default — pueden contener inferencias intermedias
+#     que no son resultados consumibles.
+#   - Logs ordenados por created_at_utc asc, request_id asc como tiebreaker.
+#   - input_redacted siempre se devuelve; el payload original NUNCA se
+#     persiste, solo su hash.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.get(
+    "/admin/ai-logs",
+    response_model=AIRequestLogListResponse,
+)
+def list_ai_logs(
+    limit: int | None = Query(default=None, ge=0, le=1000),
+    _: AdvisorIdentity = Depends(require_roles("admin", "compliance")),
+) -> AIRequestLogListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAIRequestLogRepository(store).list_all(limit=limit)
+    return AIRequestLogListResponse(
+        logs=[AIRequestLogResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.get(
+    "/admin/ai-logs/{request_id}",
+    response_model=AIRequestLogResponse,
+)
+def get_ai_log(
+    request_id: str,
+    _: AdvisorIdentity = Depends(require_roles("admin", "compliance")),
+) -> AIRequestLogResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        data = SQLiteAIRequestLogRepository(store).get(request_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"AI request log not found: {request_id!r}"
+        )
+    return AIRequestLogResponse(**data)
+
+
+@app.get(
+    "/cases/{case_id}/ai-logs",
+    response_model=AIRequestLogListResponse,
+)
+def list_case_ai_logs(
+    case_id: str,
+    _: AdvisorIdentity = Depends(require_roles("admin", "compliance")),
+) -> AIRequestLogListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteAIRequestLogRepository(store).list_by_case(case_id)
+    return AIRequestLogListResponse(
+        logs=[AIRequestLogResponse(**d) for d in data], count=len(data)
+    )
+
+
+@app.post(
+    "/admin/ai-logs",
+    response_model=AIRequestLogResponse,
+    status_code=201,
+)
+def create_ai_log(
+    req: AIRequestLogCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("admin")),
+) -> AIRequestLogResponse:
+    """
+    Creación manual de log (backfill / scripts / tests internos).
+
+    Valida FKs (case_id / requested_by_advisor_id) y redacta el
+    input_payload antes de persistir. El input original NO se persiste.
+    """
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        # FK validation explícita en endpoint (igual patrón que /cases)
+        if req.case_id is not None:
+            if SQLiteAdvisoryCaseRepository(store).get(req.case_id) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Case not found: {req.case_id!r}",
+                )
+        if req.requested_by_advisor_id is not None:
+            if SQLiteAdvisorRepository(store).get(req.requested_by_advisor_id) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Advisor not found: {req.requested_by_advisor_id!r}",
+                )
+
+        input_redacted = redact_ai_input(req.input_payload)
+        input_hash = compute_input_hash(req.input_payload)
+
+        try:
+            data = SQLiteAIRequestLogRepository(store).create(
+                endpoint=req.endpoint.strip(),
+                model=req.model.strip(),
+                prompt_version=req.prompt_version.strip(),
+                input_redacted=input_redacted,
+                input_hash=input_hash,
+                validation_status=req.validation_status,
+                case_id=req.case_id,
+                requested_by_advisor_id=req.requested_by_advisor_id,
+                raw_response=req.raw_response,
+                latency_ms=req.latency_ms,
+                prompt_tokens=req.prompt_tokens,
+                completion_tokens=req.completion_tokens,
+                error_message=req.error_message,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return AIRequestLogResponse(**data)

@@ -1108,3 +1108,410 @@ class SQLiteAuditEventRepository:
             "event_hash":       row["event_hash"],
             "created_at_utc":   row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AIRequestLog — constants, redaction, repository
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Logging trazable de cada llamada a IA: qué endpoint la disparó, qué modelo
+# y prompt_version se usaron, payload (redactado) que se mandó, respuesta cruda
+# capturada (si la hubo) y un input_hash sobre el original para correlación
+# sin necesidad de exponer texto libre del cliente.
+#
+# Limitaciones documentadas:
+#   - No hay cifrado at-rest (SQLite plain file).
+#   - No hay retention / pruning de logs.
+#   - No hay prompt registry formal: `prompt_version` es un string libre que
+#     el endpoint declara.
+#   - El log queda case-scoped solo si el caller pasa explícitamente case_id
+#     (los endpoints /ai/* actuales no son case-scoped todavía).
+#   - La redacción es por allowlist + denylist explícita; tipos no reconocidos
+#     se recursan pero los strings se evalúan contra heurísticas defensivas.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_AI_LOG_STATUSES: frozenset[str] = frozenset(
+    {"parsed_ok", "parse_error", "validation_error", "api_error"}
+)
+
+
+# Campos estructurados conocidos — se conservan en claro porque no contienen
+# texto libre ni datos identificatorios fuertes. Esto cubre los inputs típicos
+# de los endpoints /ai/* en Fase 2.
+_AI_LOG_STRUCTURED_KEYS: frozenset[str] = frozenset({
+    "age",
+    "risk_tolerance_score",
+    "risk_capacity_score",
+    "liquidity_need_score",
+    "liquidity_needs",
+    "investment_horizon_years",
+    "max_acceptable_drawdown_pct",
+    "investment_experience",
+    "income_stability",
+    "needs_income",
+    "net_worth",
+    "net_worth_usd",
+    "liquid_net_worth",
+    "liquid_net_worth_usd",
+    "annual_income_usd",
+    "jurisdiction",
+    "preferred_currency",
+    "investment_objective",
+    "prefers_simple_products",
+    "profile",
+    "model",
+    "prompt_version",
+    "endpoint",
+    "allowed_instrument_types",
+    "excluded_instrument_types",
+    "currency",
+    "country",
+    "entity",
+    "hard_dollar_only",
+    "esg_strictness_level",
+    "esg_exclusions",
+    "esg_preferences",
+})
+
+
+# Campos siempre redactados — texto libre o blobs de contexto cuyo contenido
+# puede arrastrar PII / opiniones sensibles del cliente.
+_AI_LOG_REDACTED_KEYS: frozenset[str] = frozenset({
+    "natural_language_preferences",
+    "open_investment_goal",
+    "open_risk_reaction",
+    "open_past_experience",
+    "open_concerns",
+    "kyc_context",
+    "previous_profile_analysis",
+})
+
+
+# Heurística de longitud: strings con más de N chars y NO en allowlist se
+# redactan. Pensado para atrapar texto libre que no aparezca explícitamente
+# en _AI_LOG_REDACTED_KEYS (defensa en profundidad).
+_AI_LOG_FREE_TEXT_MIN_LEN: int = 80
+
+
+def _hash_short_client_id(client_id: str) -> str:
+    """Hash corto determinístico de un client_id; útil para correlación sin PII."""
+    digest = hashlib.sha256(client_id.encode("utf-8")).hexdigest()
+    return f"client_{digest[:8]}"
+
+
+def _redact_string(value: str) -> str:
+    """Reemplaza un string libre con su longitud nominal."""
+    return f"<REDACTED:text_{len(value)}_chars>"
+
+
+def _looks_like_api_key(value: str) -> bool:
+    """
+    Heurística para detectar API keys que jamás deberían persistirse.
+    Cubre claves OpenAI ('sk-...'), tokens 'Bearer ...' y prefijos comunes.
+    """
+    s = value.strip()
+    if len(s) < 20:
+        return False
+    lower = s.lower()
+    return (
+        s.startswith("sk-")
+        or s.startswith("sk_")
+        or s.startswith("pk-")
+        or lower.startswith("bearer ")
+        or lower.startswith("api_key=")
+        or lower.startswith("token=")
+    )
+
+
+def _redact_value(key: str | None, value: Any) -> Any:
+    """
+    Aplica la política de redacción a un (key, value).
+
+    Reglas:
+        - value es dict  → recurse con `redact_ai_input`.
+        - value es list  → redactar cada elemento (sin key context).
+        - key == 'client_id' (str) → hash corto.
+        - key en _AI_LOG_REDACTED_KEYS:
+            * str  → `<REDACTED:text_N_chars>`
+            * dict → recurse (pero se preserva la forma)
+            * list → redactar cada elemento
+            * None → None
+            * otro → `<REDACTED:non_str>` (defensivo)
+        - key en _AI_LOG_STRUCTURED_KEYS → conservar tal cual.
+        - value es str que parece API key → siempre redactar.
+        - value es str "largo" (>= _AI_LOG_FREE_TEXT_MIN_LEN) y key NO en
+          allowlist → redactar.
+        - Otros (números, bool, None, strings cortos no sensibles) → conservar.
+    """
+    if isinstance(value, dict):
+        return redact_ai_input(value)
+
+    if isinstance(value, list):
+        return [_redact_value(None, item) for item in value]
+
+    if key == "client_id" and isinstance(value, str):
+        return _hash_short_client_id(value)
+
+    if key in _AI_LOG_REDACTED_KEYS:
+        if isinstance(value, str):
+            return _redact_string(value)
+        if value is None:
+            return None
+        return "<REDACTED:non_str>"
+
+    if isinstance(value, str):
+        if _looks_like_api_key(value):
+            return _redact_string(value)
+        if key not in _AI_LOG_STRUCTURED_KEYS and len(value) >= _AI_LOG_FREE_TEXT_MIN_LEN:
+            return _redact_string(value)
+        return value
+
+    # números, bool, None → conservar
+    return value
+
+
+def redact_ai_input(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    Devuelve una copia del payload con campos sensibles redactados.
+
+    Política:
+        - Estructura preservada (dict in / dict out, mismas claves top-level).
+        - Texto libre conocido (open_*, natural_language_preferences,
+          kyc_context, previous_profile_analysis) → `<REDACTED:text_N_chars>`.
+        - client_id → `client_<sha256[:8]>` (correlación sin PII).
+        - API keys (sk-, Bearer ...) → siempre redactadas (defensa).
+        - Strings largos en keys no whitelisted → redactados.
+        - Numéricos, bools y None → conservados.
+
+    No modifica el payload original.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            f"redact_ai_input requiere un mapping; recibido {type(payload).__name__}."
+        )
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        out[str(key)] = _redact_value(str(key), value)
+    return out
+
+
+def compute_input_hash(payload: Mapping[str, Any]) -> str:
+    """SHA-256 hex digest del payload original (canonical JSON)."""
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLiteAIRequestLogRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteAIRequestLogRepository:
+    """
+    Append-only log de llamadas a IA.
+
+    Tabla (de 0001_phase2_core_schema.sql):
+        ai_request_logs(
+            request_id TEXT PK,
+            case_id TEXT NULL FK→advisory_cases,
+            requested_by_advisor_id TEXT NULL FK→advisors,
+            endpoint TEXT,
+            model TEXT,
+            prompt_version TEXT,
+            input_redacted_json TEXT,
+            input_hash TEXT,
+            raw_response_json TEXT NULL,
+            validation_status TEXT,
+            latency_ms INTEGER NULL,
+            prompt_tokens INTEGER NULL,
+            completion_tokens INTEGER NULL,
+            error_message TEXT NULL,
+            created_at_utc TEXT
+        )
+
+    Operaciones:
+        create(...)         — inserta un nuevo log.
+        get(request_id)     — devuelve dict | None.
+        list_by_case(...)   — lista los logs de un case, ordenados por
+                              created_at_utc asc (luego request_id asc).
+        list_all(limit=...) — lista los logs (limit opcional).
+
+    No expone update ni delete.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        endpoint: str,
+        model: str,
+        prompt_version: str,
+        input_redacted: Mapping[str, Any],
+        input_hash: str,
+        validation_status: str,
+        case_id: str | None = None,
+        requested_by_advisor_id: str | None = None,
+        raw_response: Mapping[str, Any] | None = None,
+        latency_ms: int | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Inserta un nuevo AIRequestLog y devuelve el dict equivalente.
+
+        Raises:
+            EntityConflictError: PK collision o FK violation.
+        """
+        if validation_status not in ALLOWED_AI_LOG_STATUSES:
+            raise ValueError(
+                f"validation_status inválido: {validation_status!r}. "
+                f"Permitidos: {sorted(ALLOWED_AI_LOG_STATUSES)}."
+            )
+        request_id = self._store._next_id("ai_request_")
+        now = _now_utc()
+
+        input_redacted_json = _canonical_json(dict(input_redacted))
+        raw_response_json: str | None = None
+        if raw_response is not None:
+            raw_response_json = _canonical_json(dict(raw_response))
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO ai_request_logs
+                        (request_id, case_id, requested_by_advisor_id,
+                         endpoint, model, prompt_version,
+                         input_redacted_json, input_hash,
+                         raw_response_json, validation_status,
+                         latency_ms, prompt_tokens, completion_tokens,
+                         error_message, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        request_id, case_id, requested_by_advisor_id,
+                        endpoint, model, prompt_version,
+                        input_redacted_json, input_hash,
+                        raw_response_json, validation_status,
+                        latency_ms, prompt_tokens, completion_tokens,
+                        error_message, now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "request_id":              request_id,
+            "case_id":                 case_id,
+            "requested_by_advisor_id": requested_by_advisor_id,
+            "endpoint":                endpoint,
+            "model":                   model,
+            "prompt_version":          prompt_version,
+            "input_redacted":          dict(input_redacted),
+            "input_hash":              input_hash,
+            "raw_response":            dict(raw_response) if raw_response is not None else None,
+            "validation_status":       validation_status,
+            "latency_ms":              latency_ms,
+            "prompt_tokens":           prompt_tokens,
+            "completion_tokens":       completion_tokens,
+            "error_message":           error_message,
+            "created_at_utc":          now,
+        }
+
+    def get(self, request_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT request_id, case_id, requested_by_advisor_id,
+                   endpoint, model, prompt_version,
+                   input_redacted_json, input_hash,
+                   raw_response_json, validation_status,
+                   latency_ms, prompt_tokens, completion_tokens,
+                   error_message, created_at_utc
+            FROM ai_request_logs WHERE request_id = ?
+            """,
+            (request_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        """
+        Lista los logs del caso. Orden: created_at_utc asc, request_id asc
+        como tiebreaker determinístico.
+        """
+        rows = self._store._conn.execute(
+            """
+            SELECT request_id, case_id, requested_by_advisor_id,
+                   endpoint, model, prompt_version,
+                   input_redacted_json, input_hash,
+                   raw_response_json, validation_status,
+                   latency_ms, prompt_tokens, completion_tokens,
+                   error_message, created_at_utc
+            FROM ai_request_logs
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, request_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def list_all(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """
+        Lista todos los logs ordenados por created_at_utc asc, request_id asc.
+        Si limit se provee, aplica un LIMIT simple.
+        """
+        if limit is not None and (not isinstance(limit, int) or limit < 0):
+            raise ValueError(f"limit debe ser int >= 0; recibido {limit!r}.")
+        sql = """
+            SELECT request_id, case_id, requested_by_advisor_id,
+                   endpoint, model, prompt_version,
+                   input_redacted_json, input_hash,
+                   raw_response_json, validation_status,
+                   latency_ms, prompt_tokens, completion_tokens,
+                   error_message, created_at_utc
+            FROM ai_request_logs
+            ORDER BY created_at_utc ASC, request_id ASC
+        """
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        rows = self._store._conn.execute(sql, params).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        raw_resp = row["raw_response_json"]
+        raw_response: dict[str, Any] | None
+        if raw_resp is None:
+            raw_response = None
+        else:
+            try:
+                parsed = json.loads(raw_resp)
+            except json.JSONDecodeError:
+                # No debería pasar — siempre se serializa via _canonical_json.
+                # Defensivo: devolvemos un wrapper para no romper la lectura.
+                parsed = {"__raw_response_parse_error__": True}
+            raw_response = parsed if isinstance(parsed, dict) else {"value": parsed}
+
+        return {
+            "request_id":              row["request_id"],
+            "case_id":                 row["case_id"],
+            "requested_by_advisor_id": row["requested_by_advisor_id"],
+            "endpoint":                row["endpoint"],
+            "model":                   row["model"],
+            "prompt_version":          row["prompt_version"],
+            "input_redacted":          json.loads(row["input_redacted_json"]),
+            "input_hash":              row["input_hash"],
+            "raw_response":            raw_response,
+            "validation_status":       row["validation_status"],
+            "latency_ms":              row["latency_ms"],
+            "prompt_tokens":           row["prompt_tokens"],
+            "completion_tokens":       row["completion_tokens"],
+            "error_message":           row["error_message"],
+            "created_at_utc":          row["created_at_utc"],
+        }
