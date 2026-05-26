@@ -1291,3 +1291,27 @@ class AIRequestLogCreateRequest(BaseModel):
                 f"input_payload debe ser un objeto JSON (dict); recibido {type(v).__name__}."
             )
         return v
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KYCSubmission — Fase 2 Commit 8 (case-scoped KYC)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Nota: el request del POST es KYCDataRequest (reutilizado, no duplicado).
+# Solo se agregan los modelos de respuesta.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class KYCSubmissionResponse(BaseModel):
+    kyc_submission_id:       str
+    case_id:                 str
+    version:                 int
+    submitted_by_advisor_id: str | None
+    payload:                 dict[str, Any]
+    payload_hash:            str
+    created_at_utc:          str
+
+
+class KYCSubmissionListResponse(BaseModel):
+    submissions: list[KYCSubmissionResponse]
+    count:       int

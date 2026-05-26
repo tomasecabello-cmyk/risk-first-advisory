@@ -80,6 +80,8 @@ from risk_first_advisory.api_layer.schemas import (
     InstrumentExclusionResponse,
     InstrumentResponse,
     KYCDataRequest,
+    KYCSubmissionListResponse,
+    KYCSubmissionResponse,
     LivePortfolioCandidateResponse,
     LivePortfolioMetadataResponse,
     LivePortfolioRequest,
@@ -129,6 +131,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteClientRepository,
     SQLiteEntityStore,
     SQLiteFirmRepository,
+    SQLiteKYCSubmissionRepository,
     compute_input_hash,
     redact_ai_input,
 )
@@ -3119,6 +3122,172 @@ def list_case_ai_logs(
         data = SQLiteAIRequestLogRepository(store).list_by_case(case_id)
     return AIRequestLogListResponse(
         logs=[AIRequestLogResponse(**d) for d in data], count=len(data)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — KYCSubmission endpoints (case-scoped, versioned)
+#
+# RBAC:
+#   POST /cases/{case_id}/kyc  → advisor, admin
+#   GET  /cases/{case_id}/kyc  → admin, advisor, compliance, viewer
+#
+# Comportamiento de POST:
+#   - Valida que el case exista (404 si no).
+#   - Rechaza con 409 si el case está CLOSED (no se aceptan nuevas KYC tras
+#     cierre formal del caso).
+#   - Crea kyc_submission con version siguiente por case_id (1, 2, 3, ...).
+#   - Actualiza advisory_cases.current_kyc_submission_id → submission nueva.
+#   - Si el case está en DRAFT, transiciona a IN_PROGRESS (sigue la FSM).
+#   - Si el case ya está en IN_PROGRESS o PORTFOLIO_SELECTED, mantiene el
+#     status (no se exige re-aprobación de variantes acá; eso queda para
+#     iteraciones futuras).
+#   - Crea AuditEvent automático "kyc_submitted" con payload mínimo
+#     (case_id, kyc_submission_id, version, submitted_by_advisor_id,
+#     payload_hash). NO loggea el payload KYC completo en el audit chain
+#     — ese vive en kyc_submissions con su propio hash.
+#
+# Limitaciones:
+#   - El KYC submission y el audit event NO se persisten en una única
+#     transacción atómica. Si el audit insert falla después del KYC insert,
+#     el endpoint devuelve 500 con mensaje claro (mismo patrón que
+#     POST /cases). Iteración futura puede consolidar.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/kyc",
+    response_model=KYCSubmissionResponse,
+    status_code=201,
+)
+def create_case_kyc(
+    case_id: str,
+    req: KYCDataRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> KYCSubmissionResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        kyc_repo = SQLiteKYCSubmissionRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # ── 1. case debe existir ──────────────────────────────────────────
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+
+        # ── 2. case no puede estar CLOSED ─────────────────────────────────
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; new KYC submissions are not "
+                    "accepted. Re-open or create a new case."
+                ),
+            )
+
+        # ── 3. resolver actor_advisor_id contra entity (soft FK) ──────────
+        # submitted_by_advisor_id (kyc_submissions FK) y actor_advisor_id
+        # (audit_events FK) requieren un advisor entity. El advisor_id del
+        # token (Phase 1) puede no existir como entity → fallback a None
+        # para no violar la FK. La identidad del actor queda capturada igual
+        # via actor_role en el audit event.
+        submitted_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            submitted_by_advisor_id = advisor.advisor_id
+
+        # ── 4. persistir submission ───────────────────────────────────────
+        payload_dict = req.model_dump()
+        try:
+            sub_data = kyc_repo.create(
+                case_id=case_id,
+                payload=payload_dict,
+                submitted_by_advisor_id=submitted_by_advisor_id,
+            )
+        except EntityNotFoundError as exc:
+            # Defensive — el case ya fue verificado arriba.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 5. actualizar puntero current_kyc_submission_id ───────────────
+        try:
+            case_repo.update_current_kyc_submission(
+                case_id, sub_data["kyc_submission_id"]
+            )
+        except EntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        # ── 6. mover status DRAFT → IN_PROGRESS si corresponde ────────────
+        if case_data["status"] == "DRAFT":
+            try:
+                case_repo.update_status(case_id, "IN_PROGRESS")
+            except (EntityNotFoundError, CaseTransitionError) as exc:
+                # No deberíamos llegar acá si DRAFT → IN_PROGRESS está en la
+                # FSM (lo está). Defensivo: devolver 500 con mensaje claro
+                # si la FSM cambia en el futuro.
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"KYC submission persisted but case status transition "
+                        f"failed: {exc}"
+                    ),
+                ) from exc
+
+        # ── 7. AuditEvent kyc_submitted ───────────────────────────────────
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="kyc_submitted",
+                actor_advisor_id=submitted_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":                 case_id,
+                    "kyc_submission_id":       sub_data["kyc_submission_id"],
+                    "version":                 sub_data["version"],
+                    "submitted_by_advisor_id": submitted_by_advisor_id,
+                    "payload_hash":            sub_data["payload_hash"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"KYC submission {sub_data['kyc_submission_id']!r} was "
+                    f"persisted but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return KYCSubmissionResponse(**sub_data)
+
+
+@app.get(
+    "/cases/{case_id}/kyc",
+    response_model=KYCSubmissionListResponse,
+)
+def list_case_kyc(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> KYCSubmissionListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteKYCSubmissionRepository(store).list_by_case(case_id)
+    return KYCSubmissionListResponse(
+        submissions=[KYCSubmissionResponse(**d) for d in data],
+        count=len(data),
     )
 
 

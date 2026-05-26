@@ -675,6 +675,34 @@ class SQLiteAdvisoryCaseRepository:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def update_current_kyc_submission(
+        self, case_id: str, kyc_submission_id: str
+    ) -> dict[str, Any]:
+        """
+        Setea advisory_cases.current_kyc_submission_id = kyc_submission_id.
+
+        No valida que el kyc_submission_id exista en kyc_submissions —
+        ese contrato lo cumple el endpoint (que acaba de insertarlo).
+
+        Raises:
+            EntityNotFoundError: si el case no existe.
+        """
+        current = self.get(case_id)
+        if current is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+        with self._store._conn:
+            self._store._conn.execute(
+                """
+                UPDATE advisory_cases
+                SET current_kyc_submission_id = ?
+                WHERE case_id = ?
+                """,
+                (kyc_submission_id, case_id),
+            )
+        updated = dict(current)
+        updated["current_kyc_submission_id"] = kyc_submission_id
+        return updated
+
     def update_status(self, case_id: str, new_status: str) -> dict[str, Any]:
         """
         Transitions the case to new_status.
@@ -1513,5 +1541,168 @@ class SQLiteAIRequestLogRepository:
             "prompt_tokens":           row["prompt_tokens"],
             "completion_tokens":       row["completion_tokens"],
             "error_message":           row["error_message"],
+            "created_at_utc":          row["created_at_utc"],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLiteKYCSubmissionRepository — Fase 2 Commit 8 (case-scoped KYC)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Cada submission queda fija en el tiempo. La versión más reciente del case
+# se sigue desde advisory_cases.current_kyc_submission_id (el endpoint
+# actualiza ese puntero después del insert).
+#
+# Limitaciones:
+#   - No expone update / delete: cada modificación es una nueva submission
+#     con version siguiente.
+#   - El payload se serializa con canonical JSON para que payload_hash sea
+#     reproducible. Si una migración futura quisiera cambiar el formato,
+#     habría que versionar el algoritmo de hashing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteKYCSubmissionRepository:
+    """
+    Persiste y lee KYCSubmissions desde `kyc_submissions`.
+
+    Tabla (de 0002_kyc_submissions.sql):
+        kyc_submissions(
+            kyc_submission_id TEXT PK,
+            case_id TEXT NOT NULL FK→advisory_cases,
+            version INTEGER NOT NULL,
+            submitted_by_advisor_id TEXT NULL FK→advisors,
+            payload_json TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            UNIQUE(case_id, version)
+        )
+
+    Operaciones:
+        create(...)         — inserta version siguiente para el case_id dado.
+        get(submission_id)  — dict | None.
+        list_by_case(...)   — ordenado por version asc.
+
+    No expone update ni delete.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        payload: Mapping[str, Any],
+        submitted_by_advisor_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Inserta una nueva submission. Calcula version = MAX(version)+1 por
+        case_id; payload_hash sobre el canonical JSON.
+
+        Raises:
+            EntityNotFoundError: si el case no existe.
+            EntityConflictError: PK collision (extremadamente raro) o FK
+                violation en submitted_by_advisor_id (el caller debe
+                pre-validar el case_id; FK del case se traduce igualmente).
+            ValueError: si payload no es un mapping.
+        """
+        if not isinstance(payload, Mapping):
+            raise ValueError(
+                f"payload debe ser un mapping (dict); recibido {type(payload).__name__}."
+            )
+
+        # ── 1. case debe existir (defensa explícita; la FK abajo también lo
+        #       atrapa pero un error claro es mejor que el mensaje SQLite).
+        case_row = self._store._conn.execute(
+            "SELECT case_id FROM advisory_cases WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        if case_row is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+
+        # ── 2. sequence (version) siguiente ─────────────────────────────────
+        last_row = self._store._conn.execute(
+            "SELECT MAX(version) FROM kyc_submissions WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        last_version = last_row[0] if last_row and last_row[0] is not None else 0
+        new_version = int(last_version) + 1
+
+        # ── 3. payload canonical + hash ─────────────────────────────────────
+        payload_dict = dict(payload)
+        payload_json = _canonical_json(payload_dict)
+        payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        now = _now_utc()
+
+        # ── 4. ID e insert ──────────────────────────────────────────────────
+        submission_id = self._store._next_id("kyc_submission_")
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO kyc_submissions
+                        (kyc_submission_id, case_id, version,
+                         submitted_by_advisor_id,
+                         payload_json, payload_hash, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        submission_id, case_id, new_version,
+                        submitted_by_advisor_id,
+                        payload_json, payload_hash, now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "kyc_submission_id":       submission_id,
+            "case_id":                 case_id,
+            "version":                 new_version,
+            "submitted_by_advisor_id": submitted_by_advisor_id,
+            "payload":                 payload_dict,
+            "payload_hash":            payload_hash,
+            "created_at_utc":          now,
+        }
+
+    def get(self, kyc_submission_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT kyc_submission_id, case_id, version,
+                   submitted_by_advisor_id,
+                   payload_json, payload_hash, created_at_utc
+            FROM kyc_submissions WHERE kyc_submission_id = ?
+            """,
+            (kyc_submission_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        """Lista las submissions del case ordenadas por version ascendente."""
+        rows = self._store._conn.execute(
+            """
+            SELECT kyc_submission_id, case_id, version,
+                   submitted_by_advisor_id,
+                   payload_json, payload_hash, created_at_utc
+            FROM kyc_submissions
+            WHERE case_id = ?
+            ORDER BY version ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "kyc_submission_id":       row["kyc_submission_id"],
+            "case_id":                 row["case_id"],
+            "version":                 int(row["version"]),
+            "submitted_by_advisor_id": row["submitted_by_advisor_id"],
+            "payload":                 json.loads(row["payload_json"]),
+            "payload_hash":            row["payload_hash"],
             "created_at_utc":          row["created_at_utc"],
         }

@@ -601,11 +601,16 @@ Los tests usan dos autouse fixtures:
 4. ~~`AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.~~ ✅ Commit 5.
 5. ~~AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.~~ ✅ Commit 6.
 6. ~~AIRequestLog wrapper alrededor de los endpoints `/ai/*` + redaction de PII.~~ ✅ Commit 7.
-7. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
-8. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
-9. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
-10. AIRequestLog case-scoped por default — hoy `case_id=None` salvo cuando se setea explícitamente vía POST manual; cuando los endpoints `/ai/*` sean case-scoped, propagar `case_id` automáticamente.
-11. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`.
+7. ~~KYCSubmission case-scoped (POST/GET `/cases/{case_id}/kyc`) + auto-event `kyc_submitted` + transición DRAFT → IN_PROGRESS.~~ ✅ Commit 8.
+8. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+9. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
+10. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+11. AIRequestLog case-scoped por default — hoy `case_id=None` salvo cuando se setea explícitamente vía POST manual; cuando los endpoints `/ai/*` sean case-scoped, propagar `case_id` automáticamente.
+12. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs` y `kyc_submissions`.
+13. Case-scoped AI profile analysis sobre el `current_kyc_submission_id` del case (en vez del payload anónimo de hoy).
+14. Case-scoped profile approval (formaliza `current_approved_profile_id`).
+15. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
+16. UI Case Workbench (frontend para flujo end-to-end por case).
 
 ---
 
@@ -787,3 +792,86 @@ Séptimo commit de Fase 2 — logging trazable y append-only de cada llamada a I
 - **No se integra con `/ai/profile-demo` ni `/ai/profile-follow-up`.** Sólo los tres endpoints declarados en el alcance del commit. Los otros dos quedan para una iteración posterior; el helper `_persist_ai_request_log` es reusable directamente.
 - **`prompt_tokens` y `completion_tokens` se persisten como `None`.** El `OpenAIProfileClient` actual no expone token usage de la respuesta de OpenAI; cuando se exponga, el campo se puebla sin cambios de schema.
 - **Firm-level access control sobre `/admin/ai-logs` y `/cases/{id}/ai-logs`** — un compliance/admin de la firma A puede leer logs de la firma B. Pendiente con el resto del scoping multi-tenant.
+
+---
+
+## Fase 2 — KYCSubmission case-scoped ✅ (Commit 8)
+
+### Estado actual
+
+Octavo commit de Fase 2 — primer paso del workflow real conectado al `AdvisoryCase`. El KYC ahora vive dentro de un case, con versionado monotónico, audit chain automático y transición de estado.
+
+#### Archivos creados / modificados
+
+- **`migrations/0002_kyc_submissions.sql`** — nueva migración:
+  - Tabla `kyc_submissions(kyc_submission_id PK, case_id FK→advisory_cases, version INT, submitted_by_advisor_id NULL FK→advisors, payload_json, payload_hash, created_at_utc, UNIQUE(case_id, version))`.
+  - Índices `idx_kyc_submissions_case_id`, `idx_kyc_submissions_submitted_by_advisor_id`.
+  - Sin BEGIN/COMMIT explícitos (el runner los envuelve).
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `SQLiteAdvisoryCaseRepository.update_current_kyc_submission(case_id, kyc_submission_id)` — setea el puntero sin pasar por la FSM. Lanza `EntityNotFoundError` si el case no existe.
+  - `SQLiteKYCSubmissionRepository`:
+    - `create(*, case_id, payload, submitted_by_advisor_id=None)` — valida que el case exista (404 antes que mensaje FK), calcula `version = MAX(version)+1` por `case_id`, serializa el payload con `_canonical_json` y hashea con SHA-256. IDs con prefijo `kyc_submission_`.
+    - `get(kyc_submission_id)` → dict | None.
+    - `list_by_case(case_id)` → orden `version ASC`.
+    - Sin `update` / `delete` (append-only por design).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con `KYCSubmissionResponse` y `KYCSubmissionListResponse`. **No se introduce un nuevo request schema**: el POST reutiliza `KYCDataRequest` (que ya tiene todos los validators de Phase 1).
+
+- **`src/risk_first_advisory/api_layer/main.py`** — 2 endpoints nuevos + integración con el case lifecycle:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/kyc` | advisor, admin | Crea submission; actualiza `current_kyc_submission_id`; transiciona `DRAFT → IN_PROGRESS` si corresponde; emite `kyc_submitted` audit event |
+  | `GET /cases/{case_id}/kyc` | admin, advisor, compliance, viewer | Lista submissions ordenadas por `version` asc |
+
+- **`tests/integration/test_api_case_kyc.py`** — 45 tests nuevos en 7 clases:
+  - `TestCreateAndList` (12): 201 + `kyc_submission_` prefix + case_id correcto + version 1 + round-trip de `age`/`jurisdiction`/`preferred_currency` + `payload_hash` len=64 + `created_at_utc` con sufijo Z + `submitted_by_advisor_id` resuelto a entity + segunda submission → version 2 + GET lista [1, 2, 3].
+  - `TestCaseStateSideEffects` (5): `current_kyc_submission_id` actualizado + apunta al último tras N submissions + DRAFT → IN_PROGRESS + IN_PROGRESS se mantiene + CLOSED rechaza con 409.
+  - `TestAuditEventIntegration` (4): chain contiene `case_created` + `kyc_submitted`; payload del `kyc_submitted` tiene `case_id`/`kyc_submission_id`/`version`/`payload_hash`; `actor_advisor_id` propagado; `verify_chain` sigue `is_intact=true` después de KYC.
+  - `TestRBACPost` (5): 401 / 403 (compliance, viewer) / 201 (advisor, admin).
+  - `TestRBACGet` (5): 401 sin token / 200 para todos los roles válidos.
+  - `TestValidation` (7): case inexistente (POST y GET) → 404; age < 18 → 422; annual_income negativo → 422; jurisdiction whitespace → 422; preferred_currency whitespace → 422; investment_objective inválido → 422.
+  - `TestPersistence` (4): `payload_hash = sha256(canonical(payload))`; repo directo con case inexistente lanza `EntityNotFoundError`; repo directo devuelve dict con version=1; `update_current_kyc_submission` actualiza el puntero sin pasar por FSM.
+  - `TestNoRegression` (3): `/health`, `/auth/me`, `/advisor/profile-approval` siguen funcionando.
+
+- **`tests/unit/test_migrations.py`** — actualizado para reflejar la nueva migración:
+  - `PHASE2_TABLES` incluye `kyc_submissions`.
+  - `REQUIRED_INDEXES` incluye los dos nuevos índices.
+  - Nuevo `TOTAL_MIGRATIONS = 2` reemplaza los `assert applied == 1` hardcoded.
+  - `test_schema_migrations_records_0001_with_metadata` ahora valida también la fila `0002`.
+
+**Total tests tras este commit:** 2639 (todos pasando). Δ = +45 (45 KYC integration).
+
+#### Decisiones de diseño
+
+1. **`version` se calcula en write-time (`MAX(version)+1` por `case_id`)**, no via AUTOINCREMENT. Mismo patrón que `audit_events.sequence` (Commit 6). `UNIQUE(case_id, version)` actúa como guard rail; un race condition extremo entre dos POST concurrentes para el mismo case → `EntityConflictError` (UNIQUE) → 409.
+2. **`payload_json` se persiste en formato canonical** (`sort_keys=True / separators=(",", ":") / ensure_ascii=False`) para que `payload_hash` sea reproducible. Si una iteración futura quisiera cambiar el algoritmo de hashing, habría que versionarlo.
+3. **El POST reutiliza `KYCDataRequest`**, no se introduce un schema nuevo. Reusa todos los validators de Phase 1 (age, jurisdiction, currency, investment_objective, ESG, etc.) sin duplicación. Si Phase 2 necesita validaciones específicas del case (e.g., el KYC debe coincidir con el firm del case), se agregan via post-validation en el endpoint, no en el schema.
+4. **Soft FK lookup para `submitted_by_advisor_id`**, igual al patrón de `case_created` y `kyc_submitted` actor: si el `advisor.advisor_id` del token existe como advisor entity → se usa; si no → None. Defensivo contra la separación entre tokens (Phase 1) y entidades (Phase 2).
+5. **Status transitions**:
+   - `DRAFT → IN_PROGRESS` automático en el primer (y cualquier) POST mientras el case esté en DRAFT.
+   - `IN_PROGRESS` se mantiene en POSTs subsecuentes (no se exige nueva FSM transition).
+   - `PORTFOLIO_SELECTED` permite nuevo KYC sin cambiar status (decisión: re-KYC durante revisión de portfolio no invalida la selección automáticamente; queda a juicio del advisor si re-aprueba o no).
+   - `CLOSED` → 409 hard: tras cierre formal del caso no se aceptan más submissions. Re-open / nuevo case son los workflows correctos.
+6. **AuditEvent automático con payload mínimo.** El evento `kyc_submitted` registra solo metadata (`case_id`, `kyc_submission_id`, `version`, `submitted_by_advisor_id`, `payload_hash`) — NO el KYC payload completo. La fuente de verdad del payload sigue siendo `kyc_submissions` con su propio hash. Esto evita duplicación y mantiene el audit chain liviano.
+7. **No-atomicidad documentada**: KYC insert + case update + status transition + audit insert NO están en una transacción única. Si el audit falla después del KYC insert, el endpoint devuelve 500 con mensaje claro. Mismo patrón que `POST /cases` (Commit 6). Iteración futura puede consolidar todo en un `BEGIN ... COMMIT` manual.
+8. **`update_current_kyc_submission` no pasa por la FSM**. Es un setter directo del puntero. La razón: actualizar el puntero al último KYC NO es una transición de status del case (eso se hace via `update_status`). Mantenerlos separados evita confusión y permite que el caller decida cuándo cada uno se invoca.
+9. **GET es abierto a todos los roles válidos** (admin/advisor/compliance/viewer); POST es solo advisor/admin. Mismo principio que audit listing.
+10. **Tests usan `_full_chain` con `advisor_id="ADV-KYC-001"` explícito** para que el advisor entity coincida con el token, permitiendo testear el path donde `submitted_by_advisor_id` se resuelve (no `None`). Mismo patrón que `test_api_audit_events.py`.
+
+#### Tabla de RBAC actualizada (nuevos endpoints KYC)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/kyc` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/kyc` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay case-scoped AI profile analysis todavía.** `/ai/profile-demo` y `/ai/profile-follow-up` siguen recibiendo el KYC payload directamente; no consultan `current_kyc_submission_id`. Queda como item 13 del pending list.
+- **No hay case-scoped profile approval todavía.** `/advisor/profile-approval` sigue recibiendo `client_id`, no `case_id`. `advisory_cases.current_approved_profile_id` queda en `None`. Item 14.
+- **No hay case-scoped portfolio proposal todavía.** `/ai/filtered-portfolio-demo` no actualiza `current_portfolio_selection_id`. Item 15.
+- **No hay UI Case Workbench.** El flujo end-to-end por case solo se puede ejercer via API. Item 16.
+- **No hay firm-level access control sobre `/cases/{id}/kyc`** — un advisor/admin de la firma A puede crear/leer KYC submissions de cualquier case. Mismo gap que en los otros endpoints `/cases/*`.
+- **El `PATCH /cases/{id}/status` no genera audit event automático todavía.** Cuando KYC dispara la transición `DRAFT → IN_PROGRESS`, el audit chain registra solo `case_created` + `kyc_submitted` (no un evento separado de transición). Iteración futura: agregar `status_changed` event en el endpoint PATCH y en el path automático del POST KYC.

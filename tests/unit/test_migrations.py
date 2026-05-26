@@ -68,7 +68,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "advisory_cases",
     "audit_events",
     "ai_request_logs",
+    # 0002 — case-scoped KYC submissions
+    "kyc_submissions",
 })
+
+# Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
+# este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
+TOTAL_MIGRATIONS: int = 2
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -83,6 +89,9 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_audit_events_case_sequence",
     "idx_ai_request_logs_case_id",
     "idx_ai_request_logs_requested_by_advisor_id",
+    # 0002 — kyc_submissions indices
+    "idx_kyc_submissions_case_id",
+    "idx_kyc_submissions_submitted_by_advisor_id",
 })
 
 
@@ -171,7 +180,7 @@ def _seed_full_chain(conn: sqlite3.Connection) -> None:
 def test_run_returns_number_of_applied_migrations(tmp_path):
     db = tmp_path / "test.db"
     applied = migrate.run(db_path=db, migrations_dir=_MIGRATIONS_DIR, verbose=False)
-    assert applied == 1
+    assert applied == TOTAL_MIGRATIONS
 
 
 def test_run_creates_db_file_if_missing(tmp_path):
@@ -212,13 +221,19 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
         ).fetchall()
     finally:
         conn.close()
-    assert len(rows) == 1
+    assert len(rows) == TOTAL_MIGRATIONS
+    # La primera fila (orden lexicográfico) debe ser 0001 — phase2 core.
     version, description, applied_at = rows[0]
     assert version == "0001"
     assert "phase2" in description.lower()
     # ISO-8601 UTC con sufijo Z (alineado con SQLitePersistenceStore)
     assert applied_at.endswith("Z")
     assert "T" in applied_at
+    # La segunda fila debe ser 0002 — kyc_submissions.
+    version2, description2, applied_at2 = rows[1]
+    assert version2 == "0002"
+    assert "kyc" in description2.lower()
+    assert applied_at2.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────
@@ -257,7 +272,7 @@ def test_legacy_persistence_store_init_before_migration(tmp_path):
         store.init_schema()
 
     applied = migrate.run(db_path=db, migrations_dir=_MIGRATIONS_DIR, verbose=False)
-    assert applied == 1
+    assert applied == TOTAL_MIGRATIONS
     tables = _list_tables(db)
     assert "records" in tables
     assert "counters" in tables
@@ -326,7 +341,7 @@ def test_run_is_idempotent_second_call_applies_nothing(tmp_path):
     db = tmp_path / "test.db"
     n1 = migrate.run(db_path=db, migrations_dir=_MIGRATIONS_DIR, verbose=False)
     n2 = migrate.run(db_path=db, migrations_dir=_MIGRATIONS_DIR, verbose=False)
-    assert n1 == 1
+    assert n1 == TOTAL_MIGRATIONS
     assert n2 == 0
 
 
