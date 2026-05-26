@@ -65,6 +65,9 @@ from risk_first_advisory.api_layer.schemas import (
     CaseInvestmentPreferenceCreateRequest,
     CaseInvestmentPreferenceListResponse,
     CaseInvestmentPreferenceResponse,
+    CasePortfolioProposalCreateRequest,
+    CasePortfolioProposalListResponse,
+    CasePortfolioProposalResponse,
     CaseUniverseFilterRunCreateRequest,
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
@@ -143,6 +146,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteAIRequestLogRepository,
     SQLiteAuditEventRepository,
     SQLiteCaseInvestmentPreferenceRepository,
+    SQLiteCasePortfolioProposalRepository,
     SQLiteCaseUniverseFilterRunRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
@@ -4317,6 +4321,409 @@ def list_case_universe_filter_runs(
         data = SQLiteCaseUniverseFilterRunRepository(store).list_by_case(case_id)
     return CaseUniverseFilterRunListResponse(
         filter_runs=[CaseUniverseFilterRunResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CasePortfolioProposal endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/portfolio-proposal  → advisor, admin
+#   GET  /cases/{case_id}/portfolio-proposal  → admin, advisor, compliance, viewer
+#
+# Comportamiento POST:
+#   - 404 si case no existe.
+#   - 409 si case está CLOSED.
+#   - 409 si no hay approved_profile (current o explícito) en el case.
+#   - 409 si no hay universe filter run (current o explícito) en el case.
+#   - 422 si filter_run_id o approved_profile_id explícitos pertenecen a otro case.
+#   - Reconstruye FinancialInstrument desde filter_run.eligible_instruments
+#     (snapshot trazable; no se re-carga CSV).
+#   - Convierte a MarketDataSnapshot vía InstrumentMarketDataAdapter.
+#   - Construye RiskBudget desde profile_name vía _build_live_risk_budget.
+#   - Aplica thresholds (min snapshots, diversification capacity) → status:
+#     blocked_insufficient_universe / blocked_insufficient_diversification_capacity.
+#   - Genera candidatos con PortfolioGenerationCoordinator → status completed
+#     o infeasible (ValueError del coordinator).
+#   - Persiste proposal + mark_previous_not_current + AuditEvent
+#     portfolio_proposal_generated.
+#   - Devuelve 201 con la response completa (también para casos blocked /
+#     infeasible — el proposal se persiste con el status correspondiente para
+#     auditabilidad).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _reconstruct_instrument_from_dict(d: dict[str, Any]) -> Any:
+    """
+    Reconstruye un FinancialInstrument desde el dict persistido por
+    case_universe_filter_runs.eligible_instruments. Preserva el snapshot:
+    no depende del CSV ni de cambios posteriores en el universo.
+    """
+    from risk_first_advisory.universe_layer.instruments import (
+        AssetClass,
+        FinancialInstrument,
+        InstrumentType,
+    )
+
+    return FinancialInstrument(
+        ticker=d["ticker"],
+        name=d["name"],
+        issuer=d["issuer"],
+        instrument_type=InstrumentType(d["instrument_type"]),
+        asset_class=AssetClass(d["asset_class"]),
+        currency=d["currency"],
+        country=d["country"],
+        sector=d["sector"],
+        available_entities=list(d.get("available_entities", [])),
+        hard_dollar=bool(d["hard_dollar"]),
+        maturity_date=d.get("maturity_date"),
+        coupon_rate=d.get("coupon_rate"),
+        ytm=d.get("ytm"),
+        duration=d.get("duration"),
+        liquidity_score=float(d.get("liquidity_score", 0.0)),
+        min_piece=d.get("min_piece"),
+        rating=d.get("rating"),
+        notes=list(d.get("notes", [])),
+    )
+
+
+def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
+    """Mismo shape que FilteredSnapshotResponse para coherencia con endpoints legacy."""
+    return {
+        "ticker":                 snap.ticker,
+        "expected_return_annual": snap.expected_return_annual,
+        "volatility_annual":      snap.volatility_annual,
+        "duration":               snap.duration,
+        "liquidity_score":        snap.liquidity_score,
+        "notes":                  list(snap.notes),
+    }
+
+
+def _serialize_candidate_for_proposal(variant_name: str, portfolio: Any, meta: Any) -> dict[str, Any]:
+    """
+    Mismo shape que LivePortfolioCandidateResponse para coherencia con
+    /ai/filtered-portfolio-demo. Pesos ordenados mayor→menor, solo > 1e-6.
+    """
+    sorted_weights = sorted(
+        ((t, w) for t, w in portfolio.weights.items() if w > 1e-6),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    return {
+        "variant":                variant_name,
+        "objective":              portfolio.objective.value,
+        "expected_return_annual": portfolio.expected_return_annual,
+        "volatility_annual":      portfolio.volatility_annual,
+        "risk_score":             portfolio.risk_score,
+        "constraints_satisfied":  portfolio.constraints_satisfied,
+        "reason_codes":           list(portfolio.reason_codes),
+        "notes":                  list(portfolio.notes),
+        "metadata": {
+            "risk_budget_exceeded":      meta.risk_budget_exceeded if meta else False,
+            "requires_advisor_override": meta.requires_advisor_override if meta else False,
+            "exceeded_constraints":      list(meta.exceeded_constraints) if meta else [],
+            "reason_codes":              list(meta.reason_codes) if meta else [],
+            "notes":                     list(meta.notes) if meta else [],
+        },
+        "weights": [{"ticker": t, "weight": w} for t, w in sorted_weights],
+    }
+
+
+@app.post(
+    "/cases/{case_id}/portfolio-proposal",
+    response_model=CasePortfolioProposalResponse,
+    status_code=201,
+)
+def create_case_portfolio_proposal(
+    case_id: str,
+    req: CasePortfolioProposalCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CasePortfolioProposalResponse:
+    import math
+
+    from risk_first_advisory.data_layer.covariance import CovarianceEngine
+    from risk_first_advisory.data_layer.instrument_market_data import (
+        InstrumentMarketDataAdapter,
+    )
+    from risk_first_advisory.data_layer.return_estimator import ReturnEstimator
+    from risk_first_advisory.portfolio_layer.generation import (
+        PortfolioGenerationCoordinator,
+        PortfolioVariant,
+    )
+    from risk_first_advisory.rules_layer.risk_budget_builder import VALID_PROFILES
+
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 1. Validaciones contra la DB ─────────────────────────────────────────
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        filter_repo = SQLiteCaseUniverseFilterRunRepository(store)
+        approval_repo = SQLiteAdvisorProfileApprovalCaseRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; portfolio proposals are "
+                    "not accepted after case closure."
+                ),
+            )
+
+        # Resolver approved profile.
+        approval_data: dict[str, Any] | None
+        if req.approved_profile_id is not None:
+            approval_data = approval_repo.get(req.approved_profile_id)
+            if approval_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Profile approval not found: {req.approved_profile_id!r}"
+                    ),
+                )
+            if approval_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Profile approval {req.approved_profile_id!r} belongs "
+                        f"to case {approval_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+        else:
+            current_id = case_data["current_approved_profile_id"]
+            if current_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no approved profile. "
+                        "POST a profile-approval first."
+                    ),
+                )
+            approval_data = approval_repo.get(current_id)
+            if approval_data is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Case {case_id!r} current_approved_profile_id "
+                        f"{current_id!r} not found in advisor_profile_approvals."
+                    ),
+                )
+
+        # profile_name: derivar de approved_profile (preferencia) o
+        # proposed_profile como fallback.
+        profile_name = approval_data.get("approved_profile") or approval_data.get(
+            "proposed_profile"
+        )
+        if not isinstance(profile_name, str) or profile_name not in VALID_PROFILES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Approved profile {profile_name!r} is not a valid "
+                    f"portfolio profile. Valid: {sorted(VALID_PROFILES)}."
+                ),
+            )
+
+        # Resolver filter run.
+        filter_data: dict[str, Any] | None
+        if req.filter_run_id is not None:
+            filter_data = filter_repo.get(req.filter_run_id)
+            if filter_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Universe filter run not found: {req.filter_run_id!r}",
+                )
+            if filter_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Universe filter run {req.filter_run_id!r} belongs to "
+                        f"case {filter_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+        else:
+            filter_data = filter_repo.get_current_for_case(case_id)
+            if filter_data is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no universe filter run. "
+                        "POST a universe-filter first."
+                    ),
+                )
+
+        created_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            created_by_advisor_id = advisor.advisor_id
+
+    # ── 2. Reconstruir instrumentos desde el snapshot del filter run ────────
+    eligible_dicts = filter_data["eligible_instruments"]
+    eligible_instruments = [_reconstruct_instrument_from_dict(d) for d in eligible_dicts]
+
+    # ── 3. Convertir a MarketDataSnapshot ───────────────────────────────────
+    adapter = InstrumentMarketDataAdapter()
+    all_snapshots = adapter.to_many(eligible_instruments)
+    usable_snapshots = [s for s in all_snapshots if s.is_usable]
+    snapshots_serialized = [_serialize_snapshot_for_proposal(s) for s in all_snapshots]
+
+    # ── 4. RiskBudget ───────────────────────────────────────────────────────
+    risk_budget = _build_live_risk_budget(profile_name)
+    risk_budget_dict = risk_budget.to_dict()
+
+    # ── 5. Threshold blocks ─────────────────────────────────────────────────
+    def _persist_and_return(
+        status: str, candidates: list[dict[str, Any]], warnings: list[str]
+    ) -> CasePortfolioProposalResponse:
+        with SQLiteEntityStore(db_path) as store:
+            proposal_repo = SQLiteCasePortfolioProposalRepository(store)
+            audit_repo = SQLiteAuditEventRepository(store)
+            try:
+                proposal_data = proposal_repo.create(
+                    case_id=case_id,
+                    filter_run_id=filter_data["filter_run_id"],
+                    approved_profile_id=approval_data["approval_id"],
+                    profile_name=profile_name,
+                    status=status,
+                    risk_budget=risk_budget_dict,
+                    snapshots=snapshots_serialized,
+                    candidates=candidates,
+                    warnings=warnings,
+                    created_by_advisor_id=created_by_advisor_id,
+                    is_current=True,
+                )
+            except EntityConflictError as exc:
+                detail = str(exc)
+                status_code = 409 if "UNIQUE constraint" in detail else 422
+                raise HTTPException(status_code=status_code, detail=detail) from exc
+
+            proposal_repo.mark_previous_not_current(
+                case_id, exclude_id=proposal_data["proposal_id"]
+            )
+
+            try:
+                audit_repo.append(
+                    case_id=case_id,
+                    event_type="portfolio_proposal_generated",
+                    actor_advisor_id=created_by_advisor_id,
+                    actor_role=_pick_actor_role(advisor.roles),
+                    payload={
+                        "case_id":             case_id,
+                        "proposal_id":         proposal_data["proposal_id"],
+                        "filter_run_id":       proposal_data["filter_run_id"],
+                        "approved_profile_id": proposal_data["approved_profile_id"],
+                        "profile_name":        proposal_data["profile_name"],
+                        "candidate_count":     len(proposal_data["candidates"]),
+                        "status":              proposal_data["status"],
+                    },
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Proposal {proposal_data['proposal_id']!r} was persisted "
+                        f"but the audit event failed: {exc}"
+                    ),
+                ) from exc
+
+        return CasePortfolioProposalResponse(**proposal_data)
+
+    if len(usable_snapshots) < 3:
+        return _persist_and_return(
+            status="blocked_insufficient_universe",
+            candidates=[],
+            warnings=[
+                f"Only {len(usable_snapshots)} usable snapshot(s) for filtered universe; need at least 3."
+            ],
+        )
+
+    msa = risk_budget.max_single_asset
+    if msa <= 0.0:
+        return _persist_and_return(
+            status="infeasible",
+            candidates=[],
+            warnings=["RiskBudget invalid: max_single_asset must be > 0."],
+        )
+
+    required_min = math.ceil(1.0 / msa)
+    if len(usable_snapshots) < required_min:
+        return _persist_and_return(
+            status="blocked_insufficient_diversification_capacity",
+            candidates=[],
+            warnings=[
+                f"Only {len(usable_snapshots)} usable snapshot(s) for profile "
+                f"{profile_name!r} (max_single_asset={msa:.0%}); need at least "
+                f"{required_min} instruments."
+            ],
+        )
+
+    # ── 6. Estimar retornos / covarianzas ───────────────────────────────────
+    return_estimates = ReturnEstimator().estimate_many(usable_snapshots)
+    covariance_matrix = CovarianceEngine().build(usable_snapshots)
+
+    # ── 7. Generar candidatos ───────────────────────────────────────────────
+    try:
+        candidate_set = PortfolioGenerationCoordinator().generate(
+            client_id=case_id,  # opaque id para el coordinator
+            approved_profile_name=profile_name,
+            return_estimates=return_estimates,
+            covariance_matrix=covariance_matrix,
+            risk_budget=risk_budget,
+        )
+    except ValueError as exc:
+        return _persist_and_return(
+            status="infeasible",
+            candidates=[],
+            warnings=[f"PortfolioGenerationCoordinator failed: {exc}"],
+        )
+
+    # ── 8. Serializar candidatos ────────────────────────────────────────────
+    _variant_order = [
+        PortfolioVariant.DEFENSIVE,
+        PortfolioVariant.BALANCED,
+        PortfolioVariant.GROWTH,
+    ]
+    candidates_serialized: list[dict[str, Any]] = []
+    for variant in _variant_order:
+        if variant not in candidate_set.candidates:
+            continue
+        portfolio = candidate_set.candidates[variant]
+        meta = candidate_set.metadata.get(variant)
+        candidates_serialized.append(
+            _serialize_candidate_for_proposal(variant.value, portfolio, meta)
+        )
+
+    return _persist_and_return(
+        status="completed",
+        candidates=candidates_serialized,
+        warnings=[],
+    )
+
+
+@app.get(
+    "/cases/{case_id}/portfolio-proposal",
+    response_model=CasePortfolioProposalListResponse,
+)
+def list_case_portfolio_proposals(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CasePortfolioProposalListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCasePortfolioProposalRepository(store).list_by_case(case_id)
+    return CasePortfolioProposalListResponse(
+        proposals=[CasePortfolioProposalResponse(**d) for d in data],
         count=len(data),
     )
 

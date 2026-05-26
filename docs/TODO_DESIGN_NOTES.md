@@ -605,17 +605,19 @@ Los tests usan dos autouse fixtures:
 8. ~~AIProfileAnalysis case-scoped (POST/GET `/cases/{case_id}/ai/profile-analysis`) sobre la última KYC; vincula `ai_request_log_id`; auto-event `ai_profile_analyzed`.~~ ✅ Commit 9.
 9. ~~CaseAdvisorProfileApproval case-scoped (POST/GET `/cases/{case_id}/profile-approval`); vincula `ai_profile_analysis_id` + `kyc_submission_id` + `advisor_id`; mantiene `is_current` + `current_approved_profile_id`; auto-events `advisor_profile_approved` / `_modified` / `_rejected`.~~ ✅ Commit 10.
 10. ~~CaseInvestmentPreference + CaseUniverseFilterRun case-scoped (POST/GET `/cases/{case_id}/investment-preferences`, POST/GET `/cases/{case_id}/universe-filter`); preferencias manuales o AI-extracted; filter engine sobre CSV; auto-events `investment_preferences_recorded` + `universe_filtered`; AIRequestLog cuando se usa IA.~~ ✅ Commit 11.
-11. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
-12. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
-13. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
-14. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
-15. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions`, `ai_profile_analyses`, `advisor_profile_approvals`, `case_investment_preferences`, `case_universe_filter_runs`.
-16. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422).
-17. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
-18. Case-scoped override-approval (advisor override sobre GROWTH variants).
-19. Live market data provider para case-scoped flow (hoy universe-filter usa el fixture CSV vía `source_universe="sample_instrument_universe.csv"`).
-20. Deprecar / migrar el endpoint legacy `/advisor/profile-approval` (client-scoped, sin case linkage).
-21. UI Case Workbench (frontend para flujo end-to-end por case).
+11. ~~CasePortfolioProposal case-scoped (POST/GET `/cases/{case_id}/portfolio-proposal`); reconstruye instrumentos desde el filter run, corre PortfolioGenerationCoordinator con RiskBudget del approved profile; persiste snapshot completo (risk_budget + snapshots + candidates + warnings + status); auto-event `portfolio_proposal_generated`.~~ ✅ Commit 12.
+12. Case-scoped portfolio selection (formaliza `current_portfolio_selection_id` con la variant elegida por el advisor).
+13. Case-scoped override-approval (advisor override sobre GROWTH variants).
+14. Case-scoped report generation (markdown / PDF audit-ready).
+15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
+17. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
+18. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
+19. Cifrado at-rest del DB y retention / pruning policy para todas las tablas append-only.
+20. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422).
+21. Live market data provider para case-scoped flow (hoy portfolio-proposal y universe-filter usan el fixture CSV vía `source_universe="sample_instrument_universe.csv"`).
+22. Deprecar / migrar el endpoint legacy `/advisor/profile-approval` (client-scoped, sin case linkage).
+23. UI Case Workbench (frontend para flujo end-to-end por case).
 
 ---
 
@@ -1174,3 +1176,104 @@ Undécimo commit de Fase 2 — bloque combinado que registra preferencias case-s
 - **`mark_previous_not_current` no genera AuditEvent** (mismo principio que en `advisor_profile_approvals`).
 - **No se invalidan filter_runs cuando la preference cambia.** Si el advisor crea una preferencia nueva, los filter_runs viejos quedan `is_current=true` hasta que se corra un filter nuevo. Decisión: el caller controla cuándo recalcular; un filter "huérfano" sigue siendo válido como snapshot histórico.
 - **No hay reconciliación con AIInvestmentPreferencesResponse legacy.** Los dos endpoints `/ai/investment-preferences` (Phase 1, Commit 7 con logging) y `/cases/{id}/investment-preferences` (Phase 2 Commit 11) coexisten; el primero NO persiste preference como entity, solo devuelve el structured result. Migración / deprecación queda para iteración futura.
+
+---
+
+## Fase 2 — CasePortfolioProposal case-scoped ✅ (Commit 12)
+
+### Estado actual
+
+Duodécimo commit de Fase 2 — generación de propuestas de portfolio dentro del case usando el `PortfolioGenerationCoordinator` existente sobre el universo filtrado del case y el `RiskBudget` derivado del approved profile. Snapshot completo persistido (risk_budget + snapshots + candidates + warnings + status), append-only con `is_current` management.
+
+#### Archivos creados / modificados
+
+- **`migrations/0006_case_portfolio_proposals.sql`** — nueva migración:
+  - Tabla `case_portfolio_proposals(proposal_id PK, case_id NOT NULL FK→advisory_cases, filter_run_id NOT NULL FK→case_universe_filter_runs, approved_profile_id NULL FK→advisor_profile_approvals, profile_name NOT NULL, risk_budget_json, snapshots_json, candidates_json, warnings_json, status NOT NULL, created_by_advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1)` + 4 índices.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `SQLiteCaseUniverseFilterRunRepository.get_current_for_case(case_id)` — devuelve el `is_current=1` más reciente del case (necesario para resolver `filter_run_id` default en el endpoint).
+  - `ALLOWED_PORTFOLIO_PROPOSAL_STATUSES = {completed, blocked_insufficient_universe, blocked_insufficient_diversification_capacity, infeasible}`.
+  - `SQLiteCasePortfolioProposalRepository` con `create`, `get`, `list_by_case`, `get_current_for_case`, `mark_previous_not_current`. IDs `case_portfolio_proposal_NNNNNN`. `risk_budget_json` como dict canonical; `snapshots_json`/`candidates_json`/`warnings_json` envueltos en `{"items": [...]}` (mismo patrón que filter_runs).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `_ALLOWED_PORTFOLIO_VARIANT_POLICIES = {"standard"}` constant.
+  - `CasePortfolioProposalCreateRequest` (`filter_run_id` opt, `approved_profile_id` opt, `variant_policy="standard"` con validator).
+  - `CasePortfolioProposalResponse`, `CasePortfolioProposalListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Helpers `_reconstruct_instrument_from_dict(d)` (reconstruye `FinancialInstrument` desde el snapshot persistido del filter run; preserva trazabilidad sin re-cargar CSV); `_serialize_snapshot_for_proposal(snap)` (mismo shape que `FilteredSnapshotResponse`); `_serialize_candidate_for_proposal(variant_name, portfolio, meta)` (mismo shape que `LivePortfolioCandidateResponse`, weights ordenados mayor→menor con threshold `>1e-6`).
+  - 2 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/portfolio-proposal` | advisor, admin | Resuelve filter_run + approved_profile (current o explícito), reconstruye instruments, corre adapter → ReturnEstimator → CovarianceEngine → PortfolioGenerationCoordinator, persiste proposal con status, marca previous, emite AuditEvent. |
+  | `GET /cases/{case_id}/portfolio-proposal` | admin, advisor, compliance, viewer | Lista proposals ordenadas por `created_at_utc` asc. |
+
+  - Helper interno `_persist_and_return(status, candidates, warnings)` factoriza el insert+mark+audit para las 4 rutas de status (blocked × 2, infeasible × 2 caminos, completed).
+
+- **`tests/integration/test_api_case_portfolio_proposal.py`** — 37 tests en 6 clases:
+  - `TestCreate` (13): 201, prefix `case_portfolio_proposal_`, case_id/filter_run_id/approved_profile_id correctos, profile_name=moderado, risk_budget poblado, snapshots no vacío, candidates no vacío en status completed, status válido, is_current=true, GET cuenta 1, segundo POST marca primero `is_current=false`.
+  - `TestValidation` (10): missing case (POST/GET) → 404; CLOSED → 409; sin approved profile → 409; sin universe filter → 409; filter_run de otro case → 422 ("belongs to case"); approval de otro case → 422; variant_policy inválido → 422; filter_run unknown → 422; approval unknown → 422.
+  - `TestRBACPost` (5): 401, 403 (compliance/viewer), 201 (advisor/admin).
+  - `TestRBACGet` (3): 401, 200 (compliance/viewer).
+  - `TestAudit` (2): `portfolio_proposal_generated` con payload metadata (proposal_id, candidate_count, status); `verify_chain` intact.
+  - `TestNoRegression` (4): `/ai/filtered-portfolio-demo`, `/advisor/profile-approval`, `/health`, `/auth/me`.
+
+- **`tests/unit/test_migrations.py`** — actualizado: `PHASE2_TABLES += case_portfolio_proposals`, `REQUIRED_INDEXES += 4 nuevos`, `TOTAL_MIGRATIONS = 6`, assert fila `0006` en schema_migrations.
+
+**Total tests tras este commit:** 2827 (todos pasando). Δ = +37 integration.
+
+#### Decisiones de diseño
+
+1. **Reconstrucción de `FinancialInstrument` desde el snapshot del filter run** (no se re-carga CSV). Preserva la trazabilidad universe → proposal: si el CSV cambia después del filter run, el proposal sigue usando el universo congelado al momento del filter. Defensivo y correcto incluso si el `source_universe` no fuera un fixture en disco.
+
+2. **`filter_run_id` NOT NULL en la tabla**. Cada propuesta queda anclada al universo filtrado concreto. Sin filter run no hay propuesta — la FK lo refuerza.
+
+3. **`approved_profile_id` NULL-able**. En escenarios edge (case con `advisory_cases.current_approved_profile_id` que apunta a un approval borrado, o flujos futuros donde el profile se setea fuera del approval flow) el proposal puede existir sin approval explícito. Camino productivo siempre lo llena (validamos current_approved_profile_id antes).
+
+4. **`profile_name` derivado del approval con fallback**: `approved_profile or proposed_profile`. En `decision="approve"` ambos coinciden; en `decision="reject"` `approved_profile` es None y caemos al `proposed_profile`. Para `reject` el endpoint NO debería llegar acá normalmente (porque `current_approved_profile_id` no apunta a un reject), pero el fallback evita un crash si el caller pasa explícitamente un `approved_profile_id` de un reject. Si no hay ninguno válido → 422 con mensaje de perfil inválido.
+
+5. **Status alineados con `/ai/filtered-portfolio-demo` legacy**: `completed`, `blocked_insufficient_universe`, `blocked_insufficient_diversification_capacity`, `infeasible`. Mismo set, mismo threshold (`< 3` snapshots usables; `< math.ceil(1/max_single_asset)` para diversificación). Coherencia entre el flujo legacy y el case-scoped.
+
+6. **El proposal SIEMPRE se persiste**, incluso en status blocked/infeasible. Razón: trazabilidad — el advisor necesita ver "intenté generar un portfolio con este filter run y falló por estos warnings". Si el caller solo quiere completed, filtra en GET. Esta decisión es consistente con `/ai/filtered-portfolio-demo` que también persiste todos los estados.
+
+7. **`_persist_and_return` helper interno** para no duplicar el insert+mark+audit pattern entre las 4 ramas de status. Trade-off: el factoring sacrifica linealidad por evitar 4× la misma lógica.
+
+8. **`client_id` opaco al coordinator: `case_id`**. `PortfolioGenerationCoordinator.generate(client_id=case_id, ...)` — el coordinator solo usa client_id como identificador opaco para tracking interno; pasarle `case_id` evita exponer el client_id real del CRM y mantiene la trazabilidad case → portfolio.
+
+9. **Snapshots persistidos incluyen TODOS los del adapter** (no solo los `is_usable`). Razón: el auditor puede inspeccionar qué snapshots fueron descartados como no usables (e.g., missing return/volatility) y por qué (`snap.notes`). El coordinator solo recibe los usables, pero la persistencia preserva el conjunto completo.
+
+10. **`is_current` mantenido por el endpoint** vía `mark_previous_not_current` (mismo patrón que Commits 10/11). Cada POST nuevo invalida los previos del case.
+
+11. **`get_current_for_case` agregado a `SQLiteCaseUniverseFilterRunRepository`** (faltaba; este commit lo necesita para resolver `filter_run_id` default). Mismo patrón que en `case_investment_preferences` y `case_portfolio_proposals`.
+
+12. **Cross-resource validation explícita** para `filter_run_id` y `approved_profile_id` (mensaje "belongs to case"). Mismo patrón que en todos los endpoints case-scoped previos.
+
+13. **CLOSED case → 409** (mismo patrón que KYC / análisis / approval / preferences / filter).
+
+14. **AuditEvent payload solo metadata** (proposal_id, candidate_count, status, profile_name, filter_run_id, approved_profile_id). No duplica risk_budget ni candidates serialized — el auditor navega por `proposal_id`.
+
+15. **NO se actualiza `advisory_cases.current_*` desde este endpoint**. El proposal NO es selección — eso queda para `current_portfolio_selection_id` (item 12 del pending list). `case_portfolio_proposals.is_current=1` indica "última propuesta generada", no "variant seleccionada".
+
+16. **`variant_policy="standard"` solo** en este commit. El validator del schema lo restringe; el endpoint no lo usa todavía (la coordinator policy es implícita: genera DEFENSIVE/BALANCED/GROWTH siempre). Field reservado para extensiones futuras (e.g., generar solo BALANCED, generar 5 variants, etc.).
+
+17. **Imports de portfolio/coordinator dentro de la función** (en vez de top-level). Mismo patrón que `/ai/filtered-portfolio-demo`. Evita penalty de import time en startup para endpoints que no se usan, y mantiene aislamiento entre layers (api_layer no carga portfolio_layer eager).
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/portfolio-proposal` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/portfolio-proposal` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay selection (item 12).** El proposal genera N candidates (DEFENSIVE/BALANCED/GROWTH); el advisor todavía no elige uno desde el flow case-scoped. `current_portfolio_selection_id` queda `NULL`.
+- **No hay case-scoped override-approval (item 13).** Si una variant tiene `risk_budget_exceeded=True` y `requires_advisor_override=True`, el advisor todavía no puede aprobar el override desde el flow case-scoped (sigue siendo via `/advisor/override-approval` legacy client-scoped).
+- **No hay case-scoped report generation (item 14).** El proposal se persiste como dict; no se genera markdown/PDF audit-ready por proposal.
+- **`source_universe` se hereda del filter_run** (no del POST request). El campo `source_universe` en `case_portfolio_proposals` no existe; se asume que es el del `filter_run` referenciado.
+- **Reconstrucción de instrumentos asume shape estable del dict persistido.** Si una migración futura cambia el shape de `case_universe_filter_runs.eligible_instruments_json`, hay que adaptar `_reconstruct_instrument_from_dict`. Hoy no hay versionado del shape.
+- **No hay reconciliación con `/advisor/portfolio-selection` legacy** (Phase 1, client-scoped). Coexisten sin conflicto; deprecación queda para item 22.
+- **`variant_policy` es campo reservado sin uso real**. Solo acepta `"standard"`. Futuras políticas (e.g., "growth_only", "5_variants") requieren cambios en el endpoint.
+- **No hay endpoint detail** `/cases/{id}/portfolio-proposal/{proposal_id}`. GET list devuelve todos; se filtra en cliente. Si crece la necesidad, agregar sin schema changes.
+- **Cross-validation entre filter_run y approved_profile**: el endpoint NO valida que el filter_run se haya hecho DESPUÉS o ANTES del approval. Decisión: temporalmente independientes. Si el advisor quiere coherencia, debe regenerar el filter después de cambiar el approval. Documentar este matiz en UX cuando exista el workbench.

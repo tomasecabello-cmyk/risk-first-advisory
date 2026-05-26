@@ -77,11 +77,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     # 0005 — case-scoped investment preferences + universe filter runs
     "case_investment_preferences",
     "case_universe_filter_runs",
+    # 0006 — case-scoped portfolio proposals
+    "case_portfolio_proposals",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 5
+TOTAL_MIGRATIONS: int = 6
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -115,6 +117,11 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_case_universe_filter_runs_case_id",
     "idx_case_universe_filter_runs_preference_id",
     "idx_case_universe_filter_runs_created_by_advisor_id",
+    # 0006 — case_portfolio_proposals indices
+    "idx_case_portfolio_proposals_case_id",
+    "idx_case_portfolio_proposals_filter_run_id",
+    "idx_case_portfolio_proposals_approved_profile_id",
+    "idx_case_portfolio_proposals_created_by_advisor_id",
 })
 
 
@@ -276,6 +283,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
         or "filter" in description5.lower()
     )
     assert applied_at5.endswith("Z")
+    # La sexta fila debe ser 0006 — case_portfolio_proposals.
+    version6, description6, applied_at6 = rows[5]
+    assert version6 == "0006"
+    assert "portfolio" in description6.lower() or "proposal" in description6.lower()
+    assert applied_at6.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

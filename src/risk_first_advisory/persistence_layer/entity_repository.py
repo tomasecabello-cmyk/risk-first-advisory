@@ -2452,3 +2452,240 @@ class SQLiteCaseUniverseFilterRunRepository:
             "is_current":             bool(row["is_current"]),
             "created_at_utc":         row["created_at_utc"],
         }
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        """Devuelve el filter run is_current=1 más reciente del case, o None."""
+        row = self._store._conn.execute(
+            """
+            SELECT filter_run_id, case_id, preference_id,
+                   source_universe,
+                   eligible_instruments_json, exclusions_json,
+                   applied_filters_json, warnings_json,
+                   eligible_count, excluded_count, total_count,
+                   created_by_advisor_id, created_at_utc, is_current
+            FROM case_universe_filter_runs
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, filter_run_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CasePortfolioProposal — Fase 2 Commit 12 (case-scoped portfolio generation)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Snapshot completo de una propuesta generada por PortfolioGenerationCoordinator
+# sobre el universo filtrado del case + RiskBudget construido desde el profile
+# aprobado.
+#
+# Listas/dicts grandes (risk_budget, snapshots, candidates, warnings) van como
+# canonical JSON. Para listas se usa el wrapper {"items": [...]} (mismo patrón
+# que case_universe_filter_runs).
+#
+# Status posibles:
+#   - completed
+#   - blocked_insufficient_universe
+#   - blocked_insufficient_diversification_capacity
+#   - infeasible
+# Alineados con /ai/filtered-portfolio-demo legacy.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_PORTFOLIO_PROPOSAL_STATUSES: frozenset[str] = frozenset({
+    "completed",
+    "blocked_insufficient_universe",
+    "blocked_insufficient_diversification_capacity",
+    "infeasible",
+})
+
+
+class SQLiteCasePortfolioProposalRepository:
+    """
+    Persiste y lee proposals case-scoped sobre `case_portfolio_proposals`
+    (migration 0006).
+
+    Operaciones:
+        create(...)                  — inserta nueva proposal.
+        get(proposal_id)             — dict | None.
+        list_by_case(case_id)        — orden created_at_utc asc, id asc.
+        get_current_for_case(case_id) — is_current=1 más reciente o None.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                     — bulk is_current=0.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        filter_run_id: str,
+        profile_name: str,
+        status: str,
+        risk_budget: Mapping[str, Any],
+        snapshots: list[dict[str, Any]],
+        candidates: list[dict[str, Any]],
+        warnings: list[str],
+        approved_profile_id: str | None = None,
+        created_by_advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        if status not in ALLOWED_PORTFOLIO_PROPOSAL_STATUSES:
+            raise ValueError(
+                f"status inválido: {status!r}. "
+                f"Permitidos: {sorted(ALLOWED_PORTFOLIO_PROPOSAL_STATUSES)}."
+            )
+        if not isinstance(risk_budget, Mapping):
+            raise ValueError(
+                f"risk_budget debe ser un mapping (dict); recibido {type(risk_budget).__name__}."
+            )
+
+        proposal_id = self._store._next_id("case_portfolio_proposal_")
+        now = _now_utc()
+        risk_budget_dict = dict(risk_budget)
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_portfolio_proposals
+                        (proposal_id, case_id, filter_run_id,
+                         approved_profile_id, profile_name,
+                         risk_budget_json, snapshots_json,
+                         candidates_json, warnings_json,
+                         status, created_by_advisor_id,
+                         created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        proposal_id, case_id, filter_run_id,
+                        approved_profile_id, profile_name,
+                        _canonical_json(risk_budget_dict),
+                        _canonical_json({"items": list(snapshots)}),
+                        _canonical_json({"items": list(candidates)}),
+                        _canonical_json({"items": list(warnings)}),
+                        status, created_by_advisor_id,
+                        now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "proposal_id":            proposal_id,
+            "case_id":                case_id,
+            "filter_run_id":          filter_run_id,
+            "approved_profile_id":    approved_profile_id,
+            "profile_name":           profile_name,
+            "risk_budget":            risk_budget_dict,
+            "snapshots":              list(snapshots),
+            "candidates":             list(candidates),
+            "warnings":               list(warnings),
+            "status":                 status,
+            "created_by_advisor_id":  created_by_advisor_id,
+            "is_current":             bool(is_current),
+            "created_at_utc":         now,
+        }
+
+    def get(self, proposal_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT proposal_id, case_id, filter_run_id,
+                   approved_profile_id, profile_name,
+                   risk_budget_json, snapshots_json,
+                   candidates_json, warnings_json,
+                   status, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_portfolio_proposals WHERE proposal_id = ?
+            """,
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT proposal_id, case_id, filter_run_id,
+                   approved_profile_id, profile_name,
+                   risk_budget_json, snapshots_json,
+                   candidates_json, warnings_json,
+                   status, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_portfolio_proposals
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, proposal_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT proposal_id, case_id, filter_run_id,
+                   approved_profile_id, profile_name,
+                   risk_budget_json, snapshots_json,
+                   candidates_json, warnings_json,
+                   status, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_portfolio_proposals
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, proposal_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_portfolio_proposals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_portfolio_proposals
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND proposal_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "proposal_id":            row["proposal_id"],
+            "case_id":                row["case_id"],
+            "filter_run_id":          row["filter_run_id"],
+            "approved_profile_id":    row["approved_profile_id"],
+            "profile_name":           row["profile_name"],
+            "risk_budget":            json.loads(row["risk_budget_json"]),
+            "snapshots":              json.loads(row["snapshots_json"]).get("items", []),
+            "candidates":             json.loads(row["candidates_json"]).get("items", []),
+            "warnings":               json.loads(row["warnings_json"]).get("items", []),
+            "status":                 row["status"],
+            "created_by_advisor_id":  row["created_by_advisor_id"],
+            "is_current":             bool(row["is_current"]),
+            "created_at_utc":         row["created_at_utc"],
+        }

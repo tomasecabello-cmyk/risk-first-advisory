@@ -1652,3 +1652,61 @@ class CaseUniverseFilterRunResponse(BaseModel):
 class CaseUniverseFilterRunListResponse(BaseModel):
     filter_runs: list[CaseUniverseFilterRunResponse]
     count:       int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CasePortfolioProposal — Fase 2 Commit 12 (portfolio generation case-scoped)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_PORTFOLIO_VARIANT_POLICIES: frozenset[str] = frozenset({"standard"})
+
+
+class CasePortfolioProposalCreateRequest(BaseModel):
+    filter_run_id:       str | None = None
+    approved_profile_id: str | None = None
+    variant_policy:      str        = "standard"
+
+    @field_validator("filter_run_id", mode="before")
+    @classmethod
+    def _filter_run_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("filter_run_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("approved_profile_id", mode="before")
+    @classmethod
+    def _approved_profile_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("approved_profile_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("variant_policy")
+    @classmethod
+    def _variant_policy_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_PORTFOLIO_VARIANT_POLICIES:
+            raise ValueError(
+                f"variant_policy inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_PORTFOLIO_VARIANT_POLICIES)}."
+            )
+        return v
+
+
+class CasePortfolioProposalResponse(BaseModel):
+    proposal_id:           str
+    case_id:               str
+    filter_run_id:         str
+    approved_profile_id:   str | None
+    profile_name:          str
+    risk_budget:           dict[str, Any]
+    snapshots:             list[dict[str, Any]]
+    candidates:            list[dict[str, Any]]
+    warnings:              list[str]
+    status:                str
+    created_by_advisor_id: str | None
+    is_current:            bool
+    created_at_utc:        str
+
+
+class CasePortfolioProposalListResponse(BaseModel):
+    proposals: list[CasePortfolioProposalResponse]
+    count:     int
