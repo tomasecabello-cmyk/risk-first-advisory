@@ -604,16 +604,18 @@ Los tests usan dos autouse fixtures:
 7. ~~KYCSubmission case-scoped (POST/GET `/cases/{case_id}/kyc`) + auto-event `kyc_submitted` + transición DRAFT → IN_PROGRESS.~~ ✅ Commit 8.
 8. ~~AIProfileAnalysis case-scoped (POST/GET `/cases/{case_id}/ai/profile-analysis`) sobre la última KYC; vincula `ai_request_log_id`; auto-event `ai_profile_analyzed`.~~ ✅ Commit 9.
 9. ~~CaseAdvisorProfileApproval case-scoped (POST/GET `/cases/{case_id}/profile-approval`); vincula `ai_profile_analysis_id` + `kyc_submission_id` + `advisor_id`; mantiene `is_current` + `current_approved_profile_id`; auto-events `advisor_profile_approved` / `_modified` / `_rejected`.~~ ✅ Commit 10.
-10. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
-11. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
-12. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc`, `/cases/{id}/ai/profile-analysis`, `/cases/{id}/profile-approval` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
-13. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
-14. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions`, `ai_profile_analyses` y `advisor_profile_approvals`.
-15. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422).
-16. Case-scoped universe filter + portfolio proposal (formaliza `current_portfolio_selection_id`).
-17. Case-scoped override-approval (advisor override sobre GROWTH variants).
-18. Deprecar / migrar el endpoint legacy `/advisor/profile-approval` (client-scoped, sin case linkage). Hoy coexiste con el case-scoped sin conflictos.
-19. UI Case Workbench (frontend para flujo end-to-end por case).
+10. ~~CaseInvestmentPreference + CaseUniverseFilterRun case-scoped (POST/GET `/cases/{case_id}/investment-preferences`, POST/GET `/cases/{case_id}/universe-filter`); preferencias manuales o AI-extracted; filter engine sobre CSV; auto-events `investment_preferences_recorded` + `universe_filtered`; AIRequestLog cuando se usa IA.~~ ✅ Commit 11.
+11. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+12. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
+13. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
+14. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
+15. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions`, `ai_profile_analyses`, `advisor_profile_approvals`, `case_investment_preferences`, `case_universe_filter_runs`.
+16. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422).
+17. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
+18. Case-scoped override-approval (advisor override sobre GROWTH variants).
+19. Live market data provider para case-scoped flow (hoy universe-filter usa el fixture CSV vía `source_universe="sample_instrument_universe.csv"`).
+20. Deprecar / migrar el endpoint legacy `/advisor/profile-approval` (client-scoped, sin case linkage).
+21. UI Case Workbench (frontend para flujo end-to-end por case).
 
 ---
 
@@ -1065,3 +1067,110 @@ Décimo commit de Fase 2 — la decisión humana del asesor sobre el perfil ahor
 - **No hay UI Case Workbench** (item 19).
 - **No hay endpoint de `/cases/{id}/profile-approval/{approval_id}` (detail).** Para inspeccionar un approval específico, el caller usa GET list y filtra. Si crece la necesidad, se puede agregar sin cambios de schema.
 - **`mark_previous_not_current` no genera AuditEvent.** La invalidación implícita queda registrada vía `is_current=0` en la tabla y vía el nuevo evento `advisor_profile_approved/_modified` que indica que hubo decisión nueva. Si compliance necesita un evento explícito de "invalidación", se puede agregar.
+
+---
+
+## Fase 2 — CaseInvestmentPreference + CaseUniverseFilterRun ✅ (Commit 11)
+
+### Estado actual
+
+Undécimo commit de Fase 2 — bloque combinado que registra preferencias case-scoped (manuales o IA-extraídas) y corre el `PreferenceFilterEngine` sobre el universo CSV para producir un snapshot persistido por case.
+
+#### Archivos creados / modificados
+
+- **`migrations/0005_case_investment_preferences_and_universe_filters.sql`** — nueva migración:
+  - Tabla `case_investment_preferences(preference_id PK, case_id NOT NULL FK→advisory_cases, source NOT NULL, natural_language_preferences NULL, structured_preferences_json NOT NULL, ai_request_log_id NULL FK→ai_request_logs, created_by_advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1)` + 3 índices.
+  - Tabla `case_universe_filter_runs(filter_run_id PK, case_id NOT NULL FK→advisory_cases, preference_id NULL FK→case_investment_preferences, source_universe NOT NULL, eligible_instruments_json, exclusions_json, applied_filters_json, warnings_json, eligible_count INT, excluded_count INT, total_count INT, created_by_advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1)` + 3 índices.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `ALLOWED_INVESTMENT_PREFERENCE_SOURCES = {"manual", "ai", "imported"}`.
+  - `SQLiteCaseInvestmentPreferenceRepository` con `create`, `get`, `list_by_case`, `get_current_for_case` (devuelve el `is_current=1` más reciente del case), `mark_previous_not_current(case_id, exclude_id=None)`. IDs `case_investment_preference_NNNNNN`. `structured_preferences_json` en canonical.
+  - `SQLiteCaseUniverseFilterRunRepository` con `create`, `get`, `list_by_case`, `mark_previous_not_current`. IDs `case_universe_filter_run_NNNNNN`. Listas envueltas en `{"items": [...]}` antes del canonical JSON (consistente y deserializable directo).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `CaseInvestmentPreferenceCreateRequest`: `natural_language_preferences` opt, `structured_preferences` opt (dict), `source="manual"`. `model_validator` exige al menos uno de los dos inputs. `source` validado contra `_ALLOWED_INVESTMENT_PREFERENCE_SOURCES`.
+  - `CaseInvestmentPreferenceResponse`, `CaseInvestmentPreferenceListResponse`.
+  - `CaseUniverseFilterRunCreateRequest`: `preference_id` opt, `source_universe="sample_instrument_universe.csv"`.
+  - `CaseUniverseFilterRunResponse`, `CaseUniverseFilterRunListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Constante `_AI_LOG_PROMPT_CASE_INVESTMENT_PREFS = "case_investment_preferences_v1"`.
+  - Helper `_convert_ai_preferences_to_structured(ai_result)` — filtra al subset de keys que `PreferenceFilterEngine` entiende (mismo `_AI_FILTER_PREFERENCE_KEYS` reutilizado).
+  - Helper `_serialize_instrument_for_filter_run(inst)` — mismo shape que `InstrumentResponse` para coherencia con endpoints legacy.
+  - 4 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/investment-preferences` | advisor, admin | Persiste preferencia. Si solo NLP, llama al extractor IA (+ AIRequestLog con `case_id`). Si solo structured o ambos, no llama IA. Marca previas `is_current=0`. AuditEvent `investment_preferences_recorded`. |
+  | `GET /cases/{case_id}/investment-preferences` | admin/advisor/compliance/viewer | Lista ordenada por `created_at_utc` asc. |
+  | `POST /cases/{case_id}/universe-filter` | advisor, admin | Resuelve `preference_id` (explícita o current). Carga CSV. Aplica `PreferenceFilterEngine`. Persiste snapshot completo. Marca runs previos `is_current=0`. AuditEvent `universe_filtered`. |
+  | `GET /cases/{case_id}/universe-filter` | admin/advisor/compliance/viewer | Lista runs ordenados por `created_at_utc` asc. |
+
+- **`tests/integration/test_api_case_investment_preferences_universe_filter.py`** — 53 tests en 10 clases:
+  - `TestPreferenceManualStructured` (9): 201, prefix, case_id, source=manual, structured round-trip, `ai_request_log_id=None`, `is_current=true`, GET lista 1, segundo POST marca primero `is_current=false`.
+  - `TestPreferenceNaturalLanguageAI` (7): 201; AIRequestLog con `case_id` + `prompt_version=case_investment_preferences_v1`; `source` promovido a `"ai"` cuando solo viene NLP; structured persisted desde IA result; texto libre `xyz123` NO aparece en `input_redacted`; falla IA → 502; falla IA no crea preference.
+  - `TestPreferenceBothInputs` (1): cuando vienen ambos → structured manda, no se llama IA, `source` queda `manual`, texto se guarda como contexto.
+  - `TestPreferenceValidation` (6): missing case → 404; CLOSED → 409; sin inputs → 422; NLP whitespace → 422; structured no dict → 422; source inválido → 422.
+  - `TestPreferenceAudit` (2): `investment_preferences_recorded` aparece; `verify_chain` intact.
+  - `TestPreferenceRBAC` (5): POST 401/403 (compliance, viewer); GET 200 (compliance, viewer).
+  - `TestFilterCreate` (8): sin preference → 409; con manual → 201; prefix `case_universe_filter_run_`; counts consistentes (`eligible + excluded == total`); `total_count > 0`; `applied_filters` no vacío; GET lista 1; segundo run marca primero `is_current=false`.
+  - `TestFilterValidation` (5): missing case → 404; CLOSED → 409; preference de otro case → 422 ("belongs to case"); preference unknown → 422; source_universe whitespace → 422.
+  - `TestFilterAudit` (2): `universe_filtered` con payload metadata; `verify_chain` intact.
+  - `TestFilterRBAC` (4): POST 401/403; GET 200 (compliance, viewer).
+  - `TestNoRegression` (4): `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`, `/health`, `/auth/me`.
+
+- **`tests/unit/test_migrations.py`** — actualizado: `PHASE2_TABLES += case_investment_preferences, case_universe_filter_runs`; `REQUIRED_INDEXES += 6 nuevos`; `TOTAL_MIGRATIONS = 5`; assert fila `0005` en schema_migrations.
+
+**Total tests tras este commit:** 2790 (todos pasando). Δ = +53 integration.
+
+#### Decisiones de diseño
+
+1. **Una sola migration (0005) para las dos tablas.** Van siempre juntas en el flujo (preferencia → filter run); separarlas en dos migrations agregaría ruido sin ganar nada (no se va a aplicar una sin la otra).
+
+2. **`structured_preferences_json` es la fuente de verdad.** Cuando el caller manda ambos inputs, el texto natural se preserva en `natural_language_preferences` como contexto, pero el filter engine usa solo `structured_preferences`. No se llama a IA cuando hay structured.
+
+3. **`source` se promueve automáticamente** a `"ai"` cuando el caller deja `source="manual"` (default) pero solo manda `natural_language_preferences`. Razón: el `source` refleja el ORIGEN real de las preferencias estructuradas, no el intent del caller. Si pasaron por la IA, son `ai`; si las dictó el advisor directamente, son `manual`; `imported` queda para futuro (CSV bulk, sistema externo).
+
+4. **Solo NLP → llama IA + AIRequestLog**. Reutiliza el helper existente `_persist_ai_request_log` (Commit 7) con `case_id` poblado y `prompt_version=case_investment_preferences_v1`. La falla de IA es 502 + AIRequestLog con `validation_status=api_error`; NO se crea preference. Consistente con `/cases/{id}/ai/profile-analysis` (Commit 9).
+
+5. **`_convert_ai_preferences_to_structured` filtra a `_AI_FILTER_PREFERENCE_KEYS`** (reuso de la constante existente). Esto descarta metadata IA (`confidence`, `advisor_notes`, etc.) que el filter engine no procesa y que tampoco aporta valor a la preference persistida. Si una iteración futura quiere preservar esa metadata, se puede agregar un campo separado sin tocar el schema actual.
+
+6. **`is_current` mantenido por el endpoint** vía `mark_previous_not_current` (mismo patrón que `advisor_profile_approvals` en Commit 10). Cada POST nuevo invalida los previos del case.
+
+7. **`get_current_for_case` con ORDER BY desc + LIMIT 1.** Defensive: aunque por design solo debería haber un `is_current=1` por case en cualquier momento, si hubiera una race condition se devuelve el más reciente.
+
+8. **`eligible_instruments`/`exclusions`/`applied_filters`/`warnings` se envuelven en `{"items": [...]}`** antes de canonical JSON. Razón: `_canonical_json` espera un dict, no una list. Wrapper consistente que mantiene el formato canonical y se deserializa directo en `_row_to_dict`.
+
+9. **`_serialize_instrument_for_filter_run` duplica el shape de `InstrumentResponse`** (no se importa). Coherencia con endpoints legacy sin acoplar el persistence layer a Pydantic schemas. Si el shape cambia, ambos puntos hay que tocarlos — trade-off aceptado.
+
+10. **Filter run requiere preference existente.** Si no se pasa `preference_id`, se usa `get_current_for_case`. Si tampoco hay current → 409 con mensaje explícito "POST a investment-preferences first". Decisión: filter sin preference es operacionalmente ambiguo (¿qué filtra?), mejor obligar al caller a establecer el contexto.
+
+11. **`preference_id` explícito debe pertenecer al case** (validación cross-resource). Mismo patrón que `kyc_submission_id` en AI profile analysis (Commit 9).
+
+12. **`source_universe` libre como string** (default `"sample_instrument_universe.csv"`). Hoy el endpoint solo soporta el fixture CSV; el campo queda preparado para futuro (live data provider, otros CSVs). Si el caller pasa un valor distinto, igual se usa el fixture pero el valor se persiste como metadata — esto se documentará explícitamente cuando se implementen los otros universos.
+
+13. **CLOSED case → 409** en ambos endpoints POST (mismo patrón que KYC / análisis / approval).
+
+14. **AuditEvent payloads solo metadata** (no se duplica `structured_preferences` ni el resultado del filter). Auditor navega por IDs si necesita inspeccionar.
+
+15. **Filter run NO modifica `current_*` de `advisory_cases`.** No hay `current_filter_run_id` en el schema de `advisory_cases` (sería propio del portfolio proposal flow, item 17). El filter es un cálculo derivado; mantener el puntero queda para cuando exista portfolio_selection.
+
+16. **`is_current` se mantiene SOLO en las tablas case-scoped relevantes**, no se propaga al `advisory_cases` puntero. La razón: el filter es ephemeral (se puede regenerar desde la preferencia); la preferencia sí es decisión durable, pero no requiere un puntero en `advisory_cases` porque el caller siempre puede llamar a `GET /cases/{id}/investment-preferences` y filtrar por `is_current=true`.
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/investment-preferences` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/investment-preferences` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `POST /cases/{id}/universe-filter` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/universe-filter` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay case-scoped portfolio proposal** (item 17). El filter run es el último paso del bloque "data preparation"; la propuesta de portfolio sobre el universo filtrado queda para el próximo commit.
+- **`source_universe` solo acepta el fixture CSV en la práctica.** El campo se persiste tal cual viene pero la implementación siempre carga `_INSTRUMENT_UNIVERSE_CSV`. Item 19 (live market data).
+- **No hay endpoint detail** `/cases/{id}/investment-preferences/{preference_id}` ni `/cases/{id}/universe-filter/{filter_run_id}`. Si se necesitan, se agregan sin cambios de schema.
+- **`mark_previous_not_current` no genera AuditEvent** (mismo principio que en `advisor_profile_approvals`).
+- **No se invalidan filter_runs cuando la preference cambia.** Si el advisor crea una preferencia nueva, los filter_runs viejos quedan `is_current=true` hasta que se corra un filter nuevo. Decisión: el caller controla cuándo recalcular; un filter "huérfano" sigue siendo válido como snapshot histórico.
+- **No hay reconciliación con AIInvestmentPreferencesResponse legacy.** Los dos endpoints `/ai/investment-preferences` (Phase 1, Commit 7 con logging) y `/cases/{id}/investment-preferences` (Phase 2 Commit 11) coexisten; el primero NO persiste preference como entity, solo devuelve el structured result. Migración / deprecación queda para iteración futura.

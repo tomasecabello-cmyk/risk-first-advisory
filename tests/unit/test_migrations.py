@@ -74,11 +74,14 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "ai_profile_analyses",
     # 0004 — case-scoped advisor profile approvals
     "advisor_profile_approvals",
+    # 0005 — case-scoped investment preferences + universe filter runs
+    "case_investment_preferences",
+    "case_universe_filter_runs",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 4
+TOTAL_MIGRATIONS: int = 5
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -105,6 +108,13 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_advisor_profile_approvals_ai_profile_analysis_id",
     "idx_advisor_profile_approvals_kyc_submission_id",
     "idx_advisor_profile_approvals_advisor_id",
+    # 0005 — case_investment_preferences + case_universe_filter_runs indices
+    "idx_case_investment_preferences_case_id",
+    "idx_case_investment_preferences_ai_request_log_id",
+    "idx_case_investment_preferences_created_by_advisor_id",
+    "idx_case_universe_filter_runs_case_id",
+    "idx_case_universe_filter_runs_preference_id",
+    "idx_case_universe_filter_runs_created_by_advisor_id",
 })
 
 
@@ -257,6 +267,15 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version4 == "0004"
     assert "approval" in description4.lower() or "profile" in description4.lower()
     assert applied_at4.endswith("Z")
+    # La quinta fila debe ser 0005 — investment_preferences + universe_filters.
+    version5, description5, applied_at5 = rows[4]
+    assert version5 == "0005"
+    assert (
+        "preference" in description5.lower()
+        or "universe" in description5.lower()
+        or "filter" in description5.lower()
+    )
+    assert applied_at5.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

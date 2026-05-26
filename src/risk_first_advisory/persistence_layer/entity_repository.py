@@ -2104,3 +2104,351 @@ class SQLiteAdvisorProfileApprovalCaseRepository:
             "is_current":             bool(row["is_current"]),
             "created_at_utc":         row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseInvestmentPreference — Fase 2 Commit 11 (case-scoped preferences)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Preferencias estructuradas del cliente sobre instrumentos, ancladas a un
+# AdvisoryCase. Pueden originarse manualmente (advisor las introduce) o por
+# extracción IA desde lenguaje natural.
+#
+# is_current se mantiene desde el endpoint (vía mark_previous_not_current),
+# no por triggers. Cada nuevo POST marca las previas =0 y la nueva =1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_INVESTMENT_PREFERENCE_SOURCES: frozenset[str] = frozenset(
+    {"manual", "ai", "imported"}
+)
+
+
+class SQLiteCaseInvestmentPreferenceRepository:
+    """
+    Persiste y lee preferencias case-scoped sobre `case_investment_preferences`
+    (migration 0005).
+
+    Operaciones:
+        create(...)                       — inserta nuevo registro.
+        get(preference_id)                — dict | None.
+        list_by_case(case_id)             — orden created_at_utc asc.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                          — bulk is_current=0.
+
+    No expone update / delete arbitrarios.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        source: str,
+        structured_preferences: Mapping[str, Any],
+        natural_language_preferences: str | None = None,
+        ai_request_log_id: str | None = None,
+        created_by_advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        if source not in ALLOWED_INVESTMENT_PREFERENCE_SOURCES:
+            raise ValueError(
+                f"source inválido: {source!r}. "
+                f"Permitidos: {sorted(ALLOWED_INVESTMENT_PREFERENCE_SOURCES)}."
+            )
+        if not isinstance(structured_preferences, Mapping):
+            raise ValueError(
+                "structured_preferences debe ser un mapping (dict); "
+                f"recibido {type(structured_preferences).__name__}."
+            )
+
+        preference_id = self._store._next_id("case_investment_preference_")
+        now = _now_utc()
+        prefs_dict = dict(structured_preferences)
+        prefs_json = _canonical_json(prefs_dict)
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_investment_preferences
+                        (preference_id, case_id, source,
+                         natural_language_preferences,
+                         structured_preferences_json,
+                         ai_request_log_id, created_by_advisor_id,
+                         created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        preference_id, case_id, source,
+                        natural_language_preferences,
+                        prefs_json,
+                        ai_request_log_id, created_by_advisor_id,
+                        now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "preference_id":                preference_id,
+            "case_id":                      case_id,
+            "source":                       source,
+            "natural_language_preferences": natural_language_preferences,
+            "structured_preferences":       prefs_dict,
+            "ai_request_log_id":            ai_request_log_id,
+            "created_by_advisor_id":        created_by_advisor_id,
+            "is_current":                   bool(is_current),
+            "created_at_utc":               now,
+        }
+
+    def get(self, preference_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT preference_id, case_id, source,
+                   natural_language_preferences,
+                   structured_preferences_json,
+                   ai_request_log_id, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_investment_preferences WHERE preference_id = ?
+            """,
+            (preference_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT preference_id, case_id, source,
+                   natural_language_preferences,
+                   structured_preferences_json,
+                   ai_request_log_id, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_investment_preferences
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, preference_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        """Devuelve la preference is_current=1 más reciente del case, o None."""
+        row = self._store._conn.execute(
+            """
+            SELECT preference_id, case_id, source,
+                   natural_language_preferences,
+                   structured_preferences_json,
+                   ai_request_log_id, created_by_advisor_id,
+                   created_at_utc, is_current
+            FROM case_investment_preferences
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, preference_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_investment_preferences
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_investment_preferences
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND preference_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "preference_id":                row["preference_id"],
+            "case_id":                      row["case_id"],
+            "source":                       row["source"],
+            "natural_language_preferences": row["natural_language_preferences"],
+            "structured_preferences":       json.loads(row["structured_preferences_json"]),
+            "ai_request_log_id":            row["ai_request_log_id"],
+            "created_by_advisor_id":        row["created_by_advisor_id"],
+            "is_current":                   bool(row["is_current"]),
+            "created_at_utc":               row["created_at_utc"],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseUniverseFilterRun — Fase 2 Commit 11
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteCaseUniverseFilterRunRepository:
+    """
+    Persiste y lee filter runs sobre `case_universe_filter_runs` (migration 0005).
+
+    Cada run captura el snapshot completo del resultado del filter engine:
+    instruments elegibles, exclusiones, filtros aplicados, warnings y counts.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        source_universe: str,
+        eligible_instruments: list[dict[str, Any]],
+        exclusions: list[dict[str, Any]],
+        applied_filters: list[str],
+        warnings: list[str],
+        eligible_count: int,
+        excluded_count: int,
+        total_count: int,
+        preference_id: str | None = None,
+        created_by_advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        filter_run_id = self._store._next_id("case_universe_filter_run_")
+        now = _now_utc()
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_universe_filter_runs
+                        (filter_run_id, case_id, preference_id,
+                         source_universe,
+                         eligible_instruments_json, exclusions_json,
+                         applied_filters_json, warnings_json,
+                         eligible_count, excluded_count, total_count,
+                         created_by_advisor_id, created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        filter_run_id, case_id, preference_id,
+                        source_universe,
+                        _canonical_json({"items": eligible_instruments}),
+                        _canonical_json({"items": exclusions}),
+                        _canonical_json({"items": list(applied_filters)}),
+                        _canonical_json({"items": list(warnings)}),
+                        int(eligible_count), int(excluded_count), int(total_count),
+                        created_by_advisor_id, now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "filter_run_id":          filter_run_id,
+            "case_id":                case_id,
+            "preference_id":          preference_id,
+            "source_universe":        source_universe,
+            "eligible_instruments":   list(eligible_instruments),
+            "exclusions":             list(exclusions),
+            "applied_filters":        list(applied_filters),
+            "warnings":               list(warnings),
+            "eligible_count":         int(eligible_count),
+            "excluded_count":         int(excluded_count),
+            "total_count":            int(total_count),
+            "created_by_advisor_id":  created_by_advisor_id,
+            "is_current":             bool(is_current),
+            "created_at_utc":         now,
+        }
+
+    def get(self, filter_run_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT filter_run_id, case_id, preference_id,
+                   source_universe,
+                   eligible_instruments_json, exclusions_json,
+                   applied_filters_json, warnings_json,
+                   eligible_count, excluded_count, total_count,
+                   created_by_advisor_id, created_at_utc, is_current
+            FROM case_universe_filter_runs WHERE filter_run_id = ?
+            """,
+            (filter_run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT filter_run_id, case_id, preference_id,
+                   source_universe,
+                   eligible_instruments_json, exclusions_json,
+                   applied_filters_json, warnings_json,
+                   eligible_count, excluded_count, total_count,
+                   created_by_advisor_id, created_at_utc, is_current
+            FROM case_universe_filter_runs
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, filter_run_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_universe_filter_runs
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_universe_filter_runs
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND filter_run_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "filter_run_id":          row["filter_run_id"],
+            "case_id":                row["case_id"],
+            "preference_id":          row["preference_id"],
+            "source_universe":        row["source_universe"],
+            "eligible_instruments":   json.loads(row["eligible_instruments_json"]).get("items", []),
+            "exclusions":             json.loads(row["exclusions_json"]).get("items", []),
+            "applied_filters":        json.loads(row["applied_filters_json"]).get("items", []),
+            "warnings":               json.loads(row["warnings_json"]).get("items", []),
+            "eligible_count":         int(row["eligible_count"]),
+            "excluded_count":         int(row["excluded_count"]),
+            "total_count":            int(row["total_count"]),
+            "created_by_advisor_id":  row["created_by_advisor_id"],
+            "is_current":             bool(row["is_current"]),
+            "created_at_utc":         row["created_at_utc"],
+        }

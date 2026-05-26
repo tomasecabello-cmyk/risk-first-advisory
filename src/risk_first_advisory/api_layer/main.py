@@ -62,6 +62,12 @@ from risk_first_advisory.api_layer.schemas import (
     CaseAdvisorProfileApprovalCreateRequest,
     CaseAdvisorProfileApprovalListResponse,
     CaseAdvisorProfileApprovalResponse,
+    CaseInvestmentPreferenceCreateRequest,
+    CaseInvestmentPreferenceListResponse,
+    CaseInvestmentPreferenceResponse,
+    CaseUniverseFilterRunCreateRequest,
+    CaseUniverseFilterRunListResponse,
+    CaseUniverseFilterRunResponse,
     AIContradictionResponse,
     AIFilteredPortfolioRequest,
     AIFilteredPortfolioResponse,
@@ -136,6 +142,8 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteAIProfileAnalysisRepository,
     SQLiteAIRequestLogRepository,
     SQLiteAuditEventRepository,
+    SQLiteCaseInvestmentPreferenceRepository,
+    SQLiteCaseUniverseFilterRunRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
     SQLiteFirmRepository,
@@ -753,6 +761,7 @@ _AI_LOG_PROMPT_INVESTMENT_PREFS:    str = "investment_preferences_v1"
 _AI_LOG_PROMPT_FILTER_UNIVERSE:     str = "ai_universe_filter_v1"
 _AI_LOG_PROMPT_FILTERED_PORTFOLIO:  str = "ai_filtered_portfolio_v1"
 _AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS: str = "case_profile_analysis_v1"
+_AI_LOG_PROMPT_CASE_INVESTMENT_PREFS: str = "case_investment_preferences_v1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3853,6 +3862,461 @@ def list_case_profile_approvals(
         )
     return CaseAdvisorProfileApprovalListResponse(
         approvals=[CaseAdvisorProfileApprovalResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CaseInvestmentPreferences endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/investment-preferences  → advisor, admin
+#   GET  /cases/{case_id}/investment-preferences  → admin, advisor, compliance, viewer
+#
+# Política de fuente:
+#   - solo structured_preferences  → source="manual" (a menos que se override), no IA.
+#   - solo natural_language_preferences  → llamada al extractor IA; AIRequestLog
+#     se persiste con case_id; ai_request_log_id queda vinculado.
+#   - ambos                          → structured es fuente de verdad; texto se
+#     guarda como contexto; NO se llama a IA.
+#
+# `is_current` mantenido por el endpoint vía mark_previous_not_current.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _convert_ai_preferences_to_structured(ai_result: dict[str, Any]) -> dict[str, Any]:
+    """
+    Convierte el output del extractor IA al dict que entiende PreferenceFilterEngine.
+
+    Filtra a las keys que el engine procesa (mismas que `_AI_FILTER_PREFERENCE_KEYS`)
+    para no inyectar metadata IA (confidence, advisor_notes, etc.) en las
+    preferences persistidas.
+    """
+    return {k: v for k, v in ai_result.items() if k in _AI_FILTER_PREFERENCE_KEYS}
+
+
+@app.post(
+    "/cases/{case_id}/investment-preferences",
+    response_model=CaseInvestmentPreferenceResponse,
+    status_code=201,
+)
+def create_case_investment_preference(
+    case_id: str,
+    req: CaseInvestmentPreferenceCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CaseInvestmentPreferenceResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 1. Validaciones de case ─────────────────────────────────────────────
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; investment preferences are "
+                    "not accepted after case closure."
+                ),
+            )
+
+        created_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            created_by_advisor_id = advisor.advisor_id
+
+    # ── 2. Resolver structured_preferences (con o sin IA) ──────────────────
+    structured: dict[str, Any]
+    ai_request_log_id: str | None = None
+    final_source = req.source
+
+    if req.structured_preferences is not None:
+        # Fuente de verdad: structured. NO se llama a IA aunque venga NLP.
+        structured = dict(req.structured_preferences)
+    else:
+        # Solo NLP: llamar al extractor IA.
+        # (el schema garantiza que al menos uno de los dos viene)
+        try:
+            ai_client = _get_openai_profile_client()
+        except (ValueError, ImportError):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "OPENAI_API_KEY is not configured. "
+                    "Set the environment variable and retry."
+                ),
+            )
+
+        model_name = _resolve_ai_model_name(ai_client)
+        endpoint_str = f"/cases/{case_id}/investment-preferences"
+        ai_input_payload: dict[str, Any] = {
+            "client_id":                    case_id,  # opaque id para la IA
+            "case_id":                      case_id,
+            "natural_language_preferences": req.natural_language_preferences,
+        }
+
+        _start = time.perf_counter()
+        try:
+            ai_result = ai_client.extract_investment_preferences(ai_input_payload)
+        except ValueError as exc:
+            _persist_ai_request_log(
+                endpoint=endpoint_str,
+                model=model_name,
+                prompt_version=_AI_LOG_PROMPT_CASE_INVESTMENT_PREFS,
+                input_payload=ai_input_payload,
+                validation_status="api_error",
+                db_path=db_path,
+                case_id=case_id,
+                requested_by_advisor_id=created_by_advisor_id,
+                latency_ms=int((time.perf_counter() - _start) * 1000),
+                error_message=str(exc),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "AI investment preferences extraction failed. "
+                    "The AI returned an invalid response."
+                ),
+            )
+        except Exception as exc:
+            _persist_ai_request_log(
+                endpoint=endpoint_str,
+                model=model_name,
+                prompt_version=_AI_LOG_PROMPT_CASE_INVESTMENT_PREFS,
+                input_payload=ai_input_payload,
+                validation_status="api_error",
+                db_path=db_path,
+                case_id=case_id,
+                requested_by_advisor_id=created_by_advisor_id,
+                latency_ms=int((time.perf_counter() - _start) * 1000),
+                error_message=str(exc),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="AI investment preferences extraction failed due to an unexpected error.",
+            )
+
+        latency_ms = int((time.perf_counter() - _start) * 1000)
+        ai_request_log_id = _persist_ai_request_log(
+            endpoint=endpoint_str,
+            model=model_name,
+            prompt_version=_AI_LOG_PROMPT_CASE_INVESTMENT_PREFS,
+            input_payload=ai_input_payload,
+            validation_status="parsed_ok",
+            db_path=db_path,
+            case_id=case_id,
+            requested_by_advisor_id=created_by_advisor_id,
+            raw_response=dict(ai_result) if isinstance(ai_result, dict) else None,
+            latency_ms=latency_ms,
+        )
+
+        structured = _convert_ai_preferences_to_structured(
+            dict(ai_result) if isinstance(ai_result, dict) else {}
+        )
+        # Si el caller dejó source="manual" pero usó NLP, marcarlo como "ai".
+        if req.source == "manual":
+            final_source = "ai"
+
+    # ── 3. Persistir preference + mark previous + AuditEvent ───────────────
+    with SQLiteEntityStore(db_path) as store:
+        pref_repo = SQLiteCaseInvestmentPreferenceRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        try:
+            pref_data = pref_repo.create(
+                case_id=case_id,
+                source=final_source,
+                structured_preferences=structured,
+                natural_language_preferences=req.natural_language_preferences,
+                ai_request_log_id=ai_request_log_id,
+                created_by_advisor_id=created_by_advisor_id,
+                is_current=True,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        pref_repo.mark_previous_not_current(
+            case_id, exclude_id=pref_data["preference_id"]
+        )
+
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="investment_preferences_recorded",
+                actor_advisor_id=created_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":               case_id,
+                    "preference_id":         pref_data["preference_id"],
+                    "source":                pref_data["source"],
+                    "ai_request_log_id":     pref_data["ai_request_log_id"],
+                    "created_by_advisor_id": pref_data["created_by_advisor_id"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Preference {pref_data['preference_id']!r} was persisted "
+                    f"but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CaseInvestmentPreferenceResponse(**pref_data)
+
+
+@app.get(
+    "/cases/{case_id}/investment-preferences",
+    response_model=CaseInvestmentPreferenceListResponse,
+)
+def list_case_investment_preferences(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseInvestmentPreferenceListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCaseInvestmentPreferenceRepository(store).list_by_case(case_id)
+    return CaseInvestmentPreferenceListResponse(
+        preferences=[CaseInvestmentPreferenceResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CaseUniverseFilterRun endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/universe-filter  → advisor, admin
+#   GET  /cases/{case_id}/universe-filter  → admin, advisor, compliance, viewer
+#
+# Comportamiento POST:
+#   - Resuelve preference: explícita (debe ser del case) o current del case.
+#   - Carga universo CSV (mismo fixture que los endpoints legacy).
+#   - Aplica PreferenceFilterEngine.
+#   - Serializa instruments/exclusions y persiste el snapshot completo.
+#   - mark_previous_not_current.
+#   - Emite AuditEvent "universe_filtered".
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _serialize_instrument_for_filter_run(inst: Any) -> dict[str, Any]:
+    """Mismo shape que `InstrumentResponse` para coherencia con endpoints legacy."""
+    return {
+        "ticker":             inst.ticker,
+        "name":               inst.name,
+        "issuer":             inst.issuer,
+        "instrument_type":    inst.instrument_type.value,
+        "asset_class":        inst.asset_class.value,
+        "currency":           inst.currency,
+        "country":            inst.country,
+        "sector":             inst.sector,
+        "available_entities": list(inst.available_entities),
+        "hard_dollar":        inst.hard_dollar,
+        "maturity_date":      inst.maturity_date,
+        "coupon_rate":        inst.coupon_rate,
+        "ytm":                inst.ytm,
+        "duration":           inst.duration,
+        "liquidity_score":    inst.liquidity_score,
+        "min_piece":          inst.min_piece,
+        "rating":             inst.rating,
+        "notes":              list(inst.notes),
+    }
+
+
+@app.post(
+    "/cases/{case_id}/universe-filter",
+    response_model=CaseUniverseFilterRunResponse,
+    status_code=201,
+)
+def create_case_universe_filter_run(
+    case_id: str,
+    req: CaseUniverseFilterRunCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CaseUniverseFilterRunResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 1. Validaciones de case + resolución de preference ─────────────────
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        pref_repo = SQLiteCaseInvestmentPreferenceRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; universe filter runs are "
+                    "not accepted after case closure."
+                ),
+            )
+
+        preference_data: dict[str, Any] | None
+        if req.preference_id is not None:
+            preference_data = pref_repo.get(req.preference_id)
+            if preference_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Investment preference not found: {req.preference_id!r}",
+                )
+            if preference_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Investment preference {req.preference_id!r} belongs "
+                        f"to case {preference_data['case_id']!r}, not "
+                        f"{case_id!r}."
+                    ),
+                )
+        else:
+            preference_data = pref_repo.get_current_for_case(case_id)
+            if preference_data is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no investment preferences. "
+                        "POST to /cases/{case_id}/investment-preferences first."
+                    ),
+                )
+
+        created_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            created_by_advisor_id = advisor.advisor_id
+
+    # ── 2. Cargar universo CSV + aplicar filter engine ─────────────────────
+    csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+    try:
+        universe = CSVInstrumentUniverseProvider(csv_path).load()
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Instrument universe fixture not found.",
+        )
+
+    total_count = len(universe.instruments)
+
+    # Filtrar la dict de preferencias a las keys que el engine entiende
+    # (defensa contra structured_preferences con metadata extra).
+    structured_prefs = dict(preference_data["structured_preferences"])
+    filter_prefs = _convert_ai_preferences_to_structured(structured_prefs)
+
+    try:
+        filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    eligible_serialized = [
+        _serialize_instrument_for_filter_run(inst)
+        for inst in filter_result.eligible_universe.instruments
+    ]
+    exclusions_serialized = [
+        {"ticker": exc.ticker, "reasons": list(exc.reasons)}
+        for exc in filter_result.exclusions
+    ]
+    applied_filters = list(filter_result.applied_filters)
+    warnings = list(filter_result.warnings)
+
+    # ── 3. Persistir + mark previous + AuditEvent ──────────────────────────
+    with SQLiteEntityStore(db_path) as store:
+        runs_repo = SQLiteCaseUniverseFilterRunRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        try:
+            run_data = runs_repo.create(
+                case_id=case_id,
+                preference_id=preference_data["preference_id"],
+                source_universe=req.source_universe.strip(),
+                eligible_instruments=eligible_serialized,
+                exclusions=exclusions_serialized,
+                applied_filters=applied_filters,
+                warnings=warnings,
+                eligible_count=len(eligible_serialized),
+                excluded_count=len(exclusions_serialized),
+                total_count=total_count,
+                created_by_advisor_id=created_by_advisor_id,
+                is_current=True,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        runs_repo.mark_previous_not_current(
+            case_id, exclude_id=run_data["filter_run_id"]
+        )
+
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="universe_filtered",
+                actor_advisor_id=created_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":         case_id,
+                    "filter_run_id":   run_data["filter_run_id"],
+                    "preference_id":   run_data["preference_id"],
+                    "eligible_count":  run_data["eligible_count"],
+                    "excluded_count":  run_data["excluded_count"],
+                    "total_count":     run_data["total_count"],
+                    "source_universe": run_data["source_universe"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Filter run {run_data['filter_run_id']!r} was persisted "
+                    f"but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CaseUniverseFilterRunResponse(**run_data)
+
+
+@app.get(
+    "/cases/{case_id}/universe-filter",
+    response_model=CaseUniverseFilterRunListResponse,
+)
+def list_case_universe_filter_runs(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseUniverseFilterRunListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCaseUniverseFilterRunRepository(store).list_by_case(case_id)
+    return CaseUniverseFilterRunListResponse(
+        filter_runs=[CaseUniverseFilterRunResponse(**d) for d in data],
         count=len(data),
     )
 

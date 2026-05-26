@@ -1522,3 +1522,133 @@ class CaseAdvisorProfileApprovalResponse(BaseModel):
 class CaseAdvisorProfileApprovalListResponse(BaseModel):
     approvals: list[CaseAdvisorProfileApprovalResponse]
     count:     int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseInvestmentPreference + CaseUniverseFilterRun — Fase 2 Commit 11
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_INVESTMENT_PREFERENCE_SOURCES: frozenset[str] = frozenset(
+    {"manual", "ai", "imported"}
+)
+
+
+class CaseInvestmentPreferenceCreateRequest(BaseModel):
+    """
+    Preferencias case-scoped del cliente. Puede venir como:
+      - structured_preferences (dict): se usa tal cual. ai_request_log_id=None.
+      - natural_language_preferences (str): se llama al extractor IA.
+      - ambos: structured_preferences es la fuente de verdad; el texto se
+        guarda como contexto. No se llama a IA.
+
+    Al menos uno de los dos debe venir.
+    """
+
+    natural_language_preferences: str | None             = None
+    structured_preferences:       dict[str, Any] | None  = None
+    source:                       str                    = "manual"
+
+    @field_validator("natural_language_preferences")
+    @classmethod
+    def _nlp_not_whitespace(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not v.strip():
+            raise ValueError(
+                "natural_language_preferences no puede ser solo espacios."
+            )
+        return v
+
+    @field_validator("structured_preferences", mode="before")
+    @classmethod
+    def _structured_must_be_dict_if_present(cls, v: object) -> object:
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError(
+                "structured_preferences debe ser un objeto JSON (dict); "
+                f"recibido {type(v).__name__}."
+            )
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _source_must_be_allowed(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede ser solo espacios.")
+        if v not in _ALLOWED_INVESTMENT_PREFERENCE_SOURCES:
+            raise ValueError(
+                f"source inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_INVESTMENT_PREFERENCE_SOURCES)}."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _at_least_one_input(self) -> "CaseInvestmentPreferenceCreateRequest":
+        if self.natural_language_preferences is None and self.structured_preferences is None:
+            raise ValueError(
+                "Debe proveerse al menos uno de "
+                "natural_language_preferences o structured_preferences."
+            )
+        return self
+
+
+class CaseInvestmentPreferenceResponse(BaseModel):
+    preference_id:                str
+    case_id:                      str
+    source:                       str
+    natural_language_preferences: str | None
+    structured_preferences:       dict[str, Any]
+    ai_request_log_id:            str | None
+    created_by_advisor_id:        str | None
+    is_current:                   bool
+    created_at_utc:               str
+
+
+class CaseInvestmentPreferenceListResponse(BaseModel):
+    preferences: list[CaseInvestmentPreferenceResponse]
+    count:       int
+
+
+# ── UniverseFilterRun ───────────────────────────────────────────────────────
+
+
+class CaseUniverseFilterRunCreateRequest(BaseModel):
+    preference_id:   str | None = None
+    source_universe: str        = "sample_instrument_universe.csv"
+
+    @field_validator("preference_id", mode="before")
+    @classmethod
+    def _preference_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("preference_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("source_universe")
+    @classmethod
+    def _source_universe_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source_universe no puede ser solo espacios.")
+        return v
+
+
+class CaseUniverseFilterRunResponse(BaseModel):
+    filter_run_id:          str
+    case_id:                str
+    preference_id:          str | None
+    source_universe:        str
+    eligible_instruments:   list[dict[str, Any]]
+    exclusions:             list[dict[str, Any]]
+    applied_filters:        list[str]
+    warnings:               list[str]
+    eligible_count:         int
+    excluded_count:         int
+    total_count:            int
+    created_by_advisor_id:  str | None
+    is_current:             bool
+    created_at_utc:         str
+
+
+class CaseUniverseFilterRunListResponse(BaseModel):
+    filter_runs: list[CaseUniverseFilterRunResponse]
+    count:       int
