@@ -40,6 +40,10 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisoryCaseListResponse,
     AdvisoryCaseResponse,
     AdvisoryCaseStatusUpdateRequest,
+    AuditEventCreateRequest,
+    AuditEventListResponse,
+    AuditEventResponse,
+    AuditVerifyResponse,
     AdvisorOverrideApprovalRequest,
     AdvisorOverrideApprovalResponse,
     AdvisorPortfolioSelectionRequest,
@@ -114,6 +118,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     EntityNotFoundError,
     SQLiteAdvisorRepository,
     SQLiteAdvisoryCaseRepository,
+    SQLiteAuditEventRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
     SQLiteFirmRepository,
@@ -2500,10 +2505,26 @@ def list_advisor_clients(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _pick_actor_role(roles: list[str], fallback: str = "advisor") -> str:
+    """
+    Selecciona un rol representativo del advisor para registrar en el audit
+    event. Preferencia: admin > advisor > compliance > viewer > fallback.
+
+    No reordena ni modifica los roles del advisor; solo elige uno para
+    estampar en el audit (actor_role es un string single-valued en la tabla
+    audit_events).
+    """
+    priority = ("admin", "advisor", "compliance", "viewer")
+    for r in priority:
+        if r in roles:
+            return r
+    return fallback
+
+
 @app.post("/cases", response_model=AdvisoryCaseResponse, status_code=201)
 def create_case(
     req: AdvisoryCaseCreateRequest,
-    _: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
 ) -> AdvisoryCaseResponse:
     db_path: Path = DEFAULT_DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2512,6 +2533,7 @@ def create_case(
         adv_repo = SQLiteAdvisorRepository(store)
         client_repo = SQLiteClientRepository(store)
         case_repo = SQLiteAdvisoryCaseRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
 
         # ── 1. firm must exist ────────────────────────────────────────────
         firm_data = firm_repo.get(req.firm_id.strip())
@@ -2571,6 +2593,50 @@ def create_case(
             detail = str(exc)
             status_code = 409 if "UNIQUE constraint" in detail else 422
             raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 7. audit event automático "case_created" ──────────────────────
+        # Limitación: el insert del case y el insert del audit event NO están
+        # envueltos en una sola transacción explícita. Si el audit insert falla
+        # (debería ser muy raro: el case acaba de existir, los hashes son
+        # determinísticos, no hay FK rota), el case queda persistido sin su
+        # primer evento. Devolvemos 500 con mensaje claro en ese caso.
+        #
+        # Si esto se vuelve crítico, una iteración futura puede mover ambos
+        # inserts a un BEGIN/COMMIT manual.
+        #
+        # actor_advisor_id: la tabla audit_events tiene FK a advisors. El
+        # advisor_id del token NO siempre coincide con un advisor entity
+        # registrado (los tokens son del scaffold de Phase 1, las entities
+        # son Phase 2). Hacemos un soft lookup: si existe, lo usamos;
+        # si no, dejamos None para no violar la FK. La identidad del actor
+        # queda igualmente capturada via actor_role.
+        token_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            token_advisor_id = advisor.advisor_id
+
+        try:
+            audit_repo.append(
+                case_id=data["case_id"],
+                event_type="case_created",
+                actor_advisor_id=token_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":         data["case_id"],
+                    "firm_id":         data["firm_id"],
+                    "client_id":       data["client_id"],
+                    "lead_advisor_id": data["lead_advisor_id"],
+                    "status":          data["status"],
+                    "title":           data["title"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Case {data['case_id']!r} was created but the initial "
+                    f"audit event failed: {exc}"
+                ),
+            ) from exc
 
     return AdvisoryCaseResponse(**data)
 
@@ -2673,4 +2739,120 @@ def list_firm_cases(
         data = SQLiteAdvisoryCaseRepository(store).list_by_firm(firm_id)
     return AdvisoryCaseListResponse(
         cases=[AdvisoryCaseResponse(**d) for d in data], count=len(data)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — AuditEvent endpoints (hash chain por AdvisoryCase)
+#
+# RBAC:
+#   POST  /cases/{case_id}/audit-events  → advisor, admin
+#   GET   /cases/{case_id}/audit         → admin, advisor, compliance, viewer
+#   GET   /cases/{case_id}/audit/verify  → admin, compliance
+#
+# Notas:
+#   - case_created se registra automáticamente en POST /cases (ver create_case).
+#   - El acceso por firma todavía no está controlado: cualquier token válido
+#     con el rol adecuado puede ver/crear eventos de cualquier caso. Firm-level
+#     scoping queda pendiente.
+#   - Esto NO es blockchain: un actor con acceso directo a la DB puede
+#     reescribir toda la cadena (incluyendo todos los event_hash). verify_chain
+#     detecta mutaciones puntuales (un payload, un hash, un sequence gap), no
+#     una reescritura completa coordinada.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/audit-events",
+    response_model=AuditEventResponse,
+    status_code=201,
+)
+def create_audit_event(
+    case_id: str,
+    req: AuditEventCreateRequest,
+    _: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> AuditEventResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with SQLiteEntityStore(db_path) as store:
+        adv_repo = SQLiteAdvisorRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # Si actor_advisor_id viene declarado, debe existir en la DB.
+        # Convención: el caller declara explícitamente al actor, y la API
+        # rechaza referencias colgadas para mantener la cadena auditable.
+        if req.actor_advisor_id is not None:
+            advisor_row = adv_repo.get(req.actor_advisor_id)
+            if advisor_row is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Advisor not found: {req.actor_advisor_id!r}",
+                )
+
+        try:
+            data = audit_repo.append(
+                case_id=case_id,
+                event_type=req.event_type.strip(),
+                actor_role=req.actor_role.strip(),
+                payload=dict(req.payload),
+                actor_advisor_id=req.actor_advisor_id,
+            )
+        except EntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return AuditEventResponse(**data)
+
+
+@app.get(
+    "/cases/{case_id}/audit",
+    response_model=AuditEventListResponse,
+)
+def list_case_audit_events(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> AuditEventListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        events = SQLiteAuditEventRepository(store).list_by_case(case_id)
+    return AuditEventListResponse(
+        events=[AuditEventResponse(**e) for e in events],
+        count=len(events),
+    )
+
+
+@app.get(
+    "/cases/{case_id}/audit/verify",
+    response_model=AuditVerifyResponse,
+)
+def verify_case_audit_chain(
+    case_id: str,
+    _: AdvisorIdentity = Depends(require_roles("admin", "compliance")),
+) -> AuditVerifyResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        result = SQLiteAuditEventRepository(store).verify_chain(case_id)
+
+    return AuditVerifyResponse(
+        case_id=case_id,
+        is_intact=result["is_intact"],
+        total_events=result["total_events"],
+        first_broken_sequence=result["first_broken_sequence"],
+        checked_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        message=result["message"],
     )

@@ -31,11 +31,12 @@ Note on FK enforcement:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -725,4 +726,385 @@ class SQLiteAdvisoryCaseRepository:
             "current_portfolio_selection_id": row["current_portfolio_selection_id"],
             "created_at_utc": row["created_at_utc"],
             "closed_at_utc": row["closed_at_utc"],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AuditEvent — hash chain helpers
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Cada evento de audit forma un eslabón de una cadena append-only por
+# case_id. Los hashes son determinísticos: dada la misma terna
+# (payload + metadatos del evento + previous_hash) el event_hash siempre
+# es el mismo. Esto permite verificar integridad sin secretos.
+#
+# Limitaciones:
+#   - No es blockchain: no es resistente a un admin con acceso directo a la
+#     DB que reescriba toda la cadena (incluyendo todos los hashes).
+#   - Solo protege contra mutaciones puntuales: cambiar un payload, un
+#     previous_hash o crear un gap de sequence se detecta vía verify_chain.
+#   - Las firmas digitales / anclaje externo (timestamping authority,
+#     publicación de root hash a otro storage) quedan fuera del scope.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _canonical_json(payload: Mapping[str, Any]) -> str:
+    """
+    Serialización canonical determinística para hashing.
+
+    Mantiene:
+        sort_keys=True            → orden estable
+        separators=(",", ":")     → sin whitespace
+        ensure_ascii=False        → no escapa unicode innecesariamente
+    """
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def compute_payload_hash(payload: Mapping[str, Any]) -> str:
+    """SHA-256 hex digest del payload canonical."""
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def compute_event_hash(
+    *,
+    previous_hash: str | None,
+    sequence: int,
+    event_type: str,
+    actor_advisor_id: str | None,
+    actor_role: str,
+    created_at_utc: str,
+    payload_hash: str,
+) -> str:
+    """
+    SHA-256 hex digest del evento, incluyendo el hash del eslabón anterior.
+
+    Representación estable: dict serializado vía _canonical_json. None se
+    sustituye por "" para `previous_hash` y `actor_advisor_id` para evitar
+    ambigüedad entre null y empty string en la cadena hasheada.
+    """
+    parts = {
+        "previous_hash":    previous_hash or "",
+        "sequence":         sequence,
+        "event_type":       event_type,
+        "actor_advisor_id": actor_advisor_id or "",
+        "actor_role":       actor_role,
+        "created_at_utc":   created_at_utc,
+        "payload_hash":     payload_hash,
+    }
+    return hashlib.sha256(_canonical_json(parts).encode("utf-8")).hexdigest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLiteAuditEventRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteAuditEventRepository:
+    """
+    Append-only audit event log per AdvisoryCase con hash chain.
+
+    Tabla (de 0001_phase2_core_schema.sql):
+        audit_events(
+            event_id TEXT PK,
+            case_id TEXT FK→advisory_cases,
+            sequence INTEGER,
+            event_type TEXT,
+            actor_advisor_id TEXT NULL FK→advisors,
+            actor_role TEXT,
+            payload_json TEXT,
+            payload_hash TEXT,
+            previous_hash TEXT NULL,
+            event_hash TEXT,
+            created_at_utc TEXT,
+            UNIQUE(case_id, sequence)
+        )
+
+    Operaciones:
+        append(...)       — crea un nuevo evento con sequence siguiente.
+        list_by_case(...) — devuelve eventos del caso ordenados por sequence asc.
+        verify_chain(...) — recomputa hashes y valida sequence/previous_hash.
+
+    No expone update ni delete.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    # ── append ───────────────────────────────────────────────────────────────
+
+    def append(
+        self,
+        *,
+        case_id: str,
+        event_type: str,
+        actor_role: str,
+        payload: Mapping[str, Any] | None = None,
+        actor_advisor_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Inserta un nuevo audit event al final de la cadena del case_id.
+
+        Comportamiento:
+            - sequence empieza en 1 y crece monotónicamente por case_id.
+            - previous_hash = None si sequence == 1; en otro caso, event_hash
+              del evento anterior.
+            - payload_hash y event_hash se calculan determinísticamente.
+
+        Raises:
+            EntityNotFoundError: si case_id no existe.
+            EntityConflictError: si hay colisión en UNIQUE(case_id, sequence)
+                                 (race condition extremo) o FK violation.
+        """
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, Mapping):
+            raise ValueError(
+                f"payload debe ser un mapping (dict); recibido {type(payload).__name__}."
+            )
+
+        # ── 1. El case debe existir ─────────────────────────────────────────
+        case_row = self._store._conn.execute(
+            "SELECT case_id FROM advisory_cases WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        if case_row is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+
+        # ── 2. sequence y previous_hash ─────────────────────────────────────
+        last_row = self._store._conn.execute(
+            """
+            SELECT sequence, event_hash
+            FROM audit_events
+            WHERE case_id = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if last_row is None:
+            new_sequence = 1
+            previous_hash: str | None = None
+        else:
+            new_sequence = int(last_row["sequence"]) + 1
+            previous_hash = last_row["event_hash"]
+
+        # ── 3. Hashes ───────────────────────────────────────────────────────
+        payload_dict = dict(payload)
+        payload_json = _canonical_json(payload_dict)
+        payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        now = _now_utc()
+        event_hash = compute_event_hash(
+            previous_hash=previous_hash,
+            sequence=new_sequence,
+            event_type=event_type,
+            actor_advisor_id=actor_advisor_id,
+            actor_role=actor_role,
+            created_at_utc=now,
+            payload_hash=payload_hash,
+        )
+
+        # ── 4. ID e insert ──────────────────────────────────────────────────
+        event_id = self._store._next_id("audit_event_")
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO audit_events
+                        (event_id, case_id, sequence, event_type,
+                         actor_advisor_id, actor_role,
+                         payload_json, payload_hash, previous_hash,
+                         event_hash, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id, case_id, new_sequence, event_type,
+                        actor_advisor_id, actor_role,
+                        payload_json, payload_hash, previous_hash,
+                        event_hash, now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "event_id":         event_id,
+            "case_id":          case_id,
+            "sequence":         new_sequence,
+            "event_type":       event_type,
+            "actor_advisor_id": actor_advisor_id,
+            "actor_role":       actor_role,
+            "payload":          payload_dict,
+            "payload_hash":     payload_hash,
+            "previous_hash":    previous_hash,
+            "event_hash":       event_hash,
+            "created_at_utc":   now,
+        }
+
+    # ── list ─────────────────────────────────────────────────────────────────
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        """Devuelve eventos del caso en orden de sequence ascendente."""
+        rows = self._store._conn.execute(
+            """
+            SELECT event_id, case_id, sequence, event_type,
+                   actor_advisor_id, actor_role,
+                   payload_json, payload_hash, previous_hash,
+                   event_hash, created_at_utc
+            FROM audit_events
+            WHERE case_id = ?
+            ORDER BY sequence ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    # ── verify ───────────────────────────────────────────────────────────────
+
+    def verify_chain(self, case_id: str) -> dict[str, Any]:
+        """
+        Recomputa hashes y valida sequence/previous_hash para la cadena del caso.
+
+        Devuelve dict con:
+            is_intact:              bool
+            total_events:           int
+            first_broken_sequence:  int | None
+            message:                str
+
+        Reglas:
+            - Cadena vacía (0 eventos)            → is_intact=True
+            - sequence debe ser 1..N sin gaps      → false si hay gap
+            - previous_hash debe encadenar         → false si no coincide
+            - payload_hash recomputado == stored   → false si payload manipulado
+            - event_hash recomputado == stored     → false si metadata manipulada
+        """
+        rows = self._store._conn.execute(
+            """
+            SELECT event_id, case_id, sequence, event_type,
+                   actor_advisor_id, actor_role,
+                   payload_json, payload_hash, previous_hash,
+                   event_hash, created_at_utc
+            FROM audit_events
+            WHERE case_id = ?
+            ORDER BY sequence ASC
+            """,
+            (case_id,),
+        ).fetchall()
+
+        if not rows:
+            return {
+                "is_intact":             True,
+                "total_events":          0,
+                "first_broken_sequence": None,
+                "message":               "No audit events for this case.",
+            }
+
+        expected_previous_hash: str | None = None
+        total = len(rows)
+
+        for i, row in enumerate(rows):
+            expected_seq = i + 1
+            actual_seq = int(row["sequence"])
+
+            # ── sequence 1..N sin gaps ─────────────────────────────────────
+            if actual_seq != expected_seq:
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"Sequence mismatch at position {expected_seq}: "
+                        f"found sequence={actual_seq}."
+                    ),
+                }
+
+            # ── previous_hash encadena con event_hash anterior ─────────────
+            if row["previous_hash"] != expected_previous_hash:
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"previous_hash mismatch at sequence {actual_seq}."
+                    ),
+                }
+
+            # ── payload_hash recomputado ───────────────────────────────────
+            try:
+                payload_obj = json.loads(row["payload_json"])
+            except json.JSONDecodeError:
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"payload_json is not valid JSON at sequence {actual_seq}."
+                    ),
+                }
+            if not isinstance(payload_obj, dict):
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"payload_json is not a JSON object at sequence {actual_seq}."
+                    ),
+                }
+            recomputed_payload_hash = hashlib.sha256(
+                _canonical_json(payload_obj).encode("utf-8")
+            ).hexdigest()
+            if recomputed_payload_hash != row["payload_hash"]:
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"payload_hash mismatch at sequence {actual_seq}."
+                    ),
+                }
+
+            # ── event_hash recomputado ─────────────────────────────────────
+            recomputed_event_hash = compute_event_hash(
+                previous_hash=row["previous_hash"],
+                sequence=actual_seq,
+                event_type=row["event_type"],
+                actor_advisor_id=row["actor_advisor_id"],
+                actor_role=row["actor_role"],
+                created_at_utc=row["created_at_utc"],
+                payload_hash=row["payload_hash"],
+            )
+            if recomputed_event_hash != row["event_hash"]:
+                return {
+                    "is_intact":             False,
+                    "total_events":          total,
+                    "first_broken_sequence": actual_seq,
+                    "message": (
+                        f"event_hash mismatch at sequence {actual_seq}."
+                    ),
+                }
+
+            expected_previous_hash = row["event_hash"]
+
+        return {
+            "is_intact":             True,
+            "total_events":          total,
+            "first_broken_sequence": None,
+            "message":               f"Chain verified for {total} event(s).",
+        }
+
+    # ── row mapper ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "event_id":         row["event_id"],
+            "case_id":          row["case_id"],
+            "sequence":         int(row["sequence"]),
+            "event_type":       row["event_type"],
+            "actor_advisor_id": row["actor_advisor_id"],
+            "actor_role":       row["actor_role"],
+            "payload":          json.loads(row["payload_json"]),
+            "payload_hash":     row["payload_hash"],
+            "previous_hash":    row["previous_hash"],
+            "event_hash":       row["event_hash"],
+            "created_at_utc":   row["created_at_utc"],
         }

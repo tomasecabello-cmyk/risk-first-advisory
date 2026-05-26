@@ -598,7 +598,89 @@ Los tests usan dos autouse fixtures:
 1. ~~Tokens de advisor configurables (YAML/env, no hard-coded).~~ ✅ Commit 2.
 2. ~~RBAC enforcement en endpoints `/advisor/*` existentes.~~ ✅ Commit 3.
 3. ~~Repositorios `FirmRepository` / `AdvisorRepository` / `ClientRepository` + endpoints CRUD.~~ ✅ Commit 4.
-4. `AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.
-5. AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.
+4. ~~`AdvisoryCase` repo + FSM mínima + endpoints `/cases/*`.~~ ✅ Commit 5.
+5. ~~AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.~~ ✅ Commit 6.
 6. AIRequestLog wrapper alrededor de `OpenAIProfileClient` + redaction de PII.
 7. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+8. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
+9. Firm-level access control sobre `/cases/*` y `/cases/{id}/audit*` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+
+---
+
+## Fase 2 — AuditEvent hash chain ✅ (Commit 6)
+
+### Estado actual
+
+Sexto commit de Fase 2 — append-only audit log por `AdvisoryCase` con encadenamiento determinístico de hashes (SHA-256). Permite verificar integridad de la línea de tiempo sin secretos.
+
+#### Archivos creados / modificados
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `_canonical_json(payload)` — serialización determinística (`sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=False`).
+  - `compute_payload_hash(payload)` — SHA-256 hex digest del canonical JSON. Exportada para que tests y otros módulos puedan recomputar.
+  - `compute_event_hash(*, previous_hash, sequence, event_type, actor_advisor_id, actor_role, created_at_utc, payload_hash)` — SHA-256 hex digest del dict canonical formado por la metadata + el hash del eslabón anterior. `previous_hash` y `actor_advisor_id` se mapean a `""` cuando son `None` para evitar ambigüedad entre `null` y empty string.
+  - `SQLiteAuditEventRepository` — operaciones:
+    - `append(*, case_id, event_type, actor_role, payload, actor_advisor_id=None)` → `dict`. Calcula sequence siguiente (MAX(sequence)+1 por case_id), determina `previous_hash`, computa `payload_hash` + `event_hash`, e inserta en `audit_events`. Lanza `EntityNotFoundError` si el case no existe, `EntityConflictError` en FK/UNIQUE violation.
+    - `list_by_case(case_id)` → lista ordenada por `sequence ASC`.
+    - `verify_chain(case_id)` → `dict` con `is_intact / total_events / first_broken_sequence / message`. Recomputa hashes de todos los eventos, valida que `sequence` sea `1..N` sin gaps y que `previous_hash` encadene con el `event_hash` anterior. Devuelve `is_intact=True / total_events=0` para casos sin eventos.
+  - **No expone `update` ni `delete`** — el log es append-only.
+  - IDs generados con prefijo `audit_event_` (formato `audit_event_000001`).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `AuditEventCreateRequest`: `event_type` (no whitespace), `actor_advisor_id` (opcional, no empty string si se provee), `actor_role` (no whitespace, default `"system"`), `payload: dict[str, Any] = {}`. Un validator `mode="before"` rechaza `payload` como `list`/`str`/`null` con 422.
+  - `AuditEventResponse`: serializa todos los campos del evento incluyendo `payload` como dict, `payload_hash`, `previous_hash`, `event_hash` y `created_at_utc`.
+  - `AuditEventListResponse`: `events: list[AuditEventResponse]` + `count: int`.
+  - `AuditVerifyResponse`: `case_id`, `is_intact`, `total_events`, `first_broken_sequence`, `checked_at_utc` (UTC ISO-8601 generado por el endpoint), `message`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — 3 endpoints nuevos + integración automática en `POST /cases`:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/audit-events` | advisor, admin | Crea audit event manual; 404 si case no existe; 422 si `actor_advisor_id` no existe como advisor entity |
+  | `GET /cases/{case_id}/audit` | admin, advisor, compliance, viewer | Lista eventos ordenados por sequence asc |
+  | `GET /cases/{case_id}/audit/verify` | admin, compliance | Recomputa hashes + valida cadena → `AuditVerifyResponse` |
+
+  Además:
+  - `POST /cases` ahora genera automáticamente un evento `case_created` (sequence 1) con `payload` que contiene `case_id`, `firm_id`, `client_id`, `lead_advisor_id`, `status`, `title`.
+  - Helper `_pick_actor_role(roles)` elige un rol single-valued para `actor_role` siguiendo prioridad `admin > advisor > compliance > viewer` (la tabla guarda un solo string).
+
+- **`tests/integration/test_api_audit_events.py`** — 58 tests nuevos organizados en 8 clases:
+  - `TestAutoCaseCreatedEvent` (10): POST /cases genera evento sequence 1 con `event_type=case_created`, `previous_hash=None`, `actor_role` y `actor_advisor_id` correctos, payload con metadata del case, `payload_hash` recomputable.
+  - `TestAppendAuditEvent` (6): segundo evento con sequence 2, `previous_hash == first.event_hash`, orden por sequence asc, `event_id` con prefijo `audit_event_`, payload round-trip, payload vacío permitido.
+  - `TestHashDeterminism` (4): `payload_hash` = `sha256(canonical)`, mismo payload con keys reordenadas → mismo hash, payloads distintos → event_hashes distintos, `event_hash` recomputable vía `compute_event_hash`.
+  - `TestVerifyChain` (7): intact con 1 / N eventos, mutar `payload_json` directamente en DB → `is_intact=False`, mutar `previous_hash` → false, borrar evento medio (gap) → false con `first_broken_sequence` correcto, response incluye `checked_at_utc`.
+  - `TestRBACAppend` (5): 401 / 403 (compliance, viewer) / 201 (advisor, admin).
+  - `TestRBACVerify` (5): 403 (advisor, viewer) / 200 (admin, compliance) / 401 sin token.
+  - `TestRBACList` (5): 401 sin token / 200 para todos los roles válidos.
+  - `TestValidation` (11): case no existe (3 endpoints) → 404; `event_type`/`actor_role` vacíos o whitespace → 422; `payload` como list/string/null → 422; `actor_advisor_id` inexistente → 422; `actor_advisor_id` omitido → 201.
+  - `TestNoRegression` (4): `/health`, `/auth/me`, `/advisor/profile-approval`, `/ai/filtered-portfolio-demo` siguen funcionando con la misma política de auth.
+
+**Total tests tras este commit:** 2521 (todos pasando). Δ = +58.
+
+#### Decisiones de diseño
+
+1. **Append-only sin update/delete** — `SQLiteAuditEventRepository` no expone API para mutar eventos. Cualquier mutación pasa por SQL directo (fuera del scope del repositorio).
+2. **Sequence calculado en write-time, no via AUTOINCREMENT** — `MAX(sequence)+1` por case_id en la misma transacción del insert. La tabla mantiene `UNIQUE(case_id, sequence)` como guard rail; un race condition extremo entre dos appends concurrentes del mismo case se traduce en `EntityConflictError` (UNIQUE violation) que el endpoint mapea a 409.
+3. **Hash chain por case, no global** — cada `case_id` tiene su propia secuencia 1..N. No hay "merkle root" inter-case en Fase 2.
+4. **Canonical JSON con `ensure_ascii=False`** — preserva caracteres unicode en su forma original (útil para advisor notes en español). El hash es estable porque `sort_keys=True` + `separators` fijos eliminan toda fuente de variabilidad.
+5. **`None` se mapea a `""` en `compute_event_hash`** — evita la ambigüedad entre `{"previous_hash": null}` y `{"previous_hash": ""}` en el JSON canonical (ambos casos hashean al mismo resultado).
+6. **Soft FK lookup para `actor_advisor_id` en el evento `case_created` automático** — el `advisor_id` del token (Phase 1 scaffold, p. ej. `dev-advisor-token` → `ADV-001`) no siempre coincide con un advisor entity (Phase 2). El endpoint hace `adv_repo.get(advisor.advisor_id)` antes del insert; si no existe, deja `actor_advisor_id=None` (FK-safe). La identidad queda igualmente capturada vía `actor_role`.
+7. **`actor_advisor_id` explícito en POST audit-events requiere FK estricta** — si el caller pasa un `actor_advisor_id`, el endpoint exige que exista como advisor entity (422 si no). Política: las referencias colgadas no se aceptan en eventos manuales para mantener trazabilidad. Para "evento sin actor identificado" el caller debe omitir el campo (queda `None`).
+8. **`actor_role` es single-valued** — la tabla `audit_events` tiene una columna `TEXT NOT NULL`. Cuando el token tiene roles compuestos (`["admin", "compliance"]`), `_pick_actor_role` elige uno por prioridad (`admin > advisor > compliance > viewer`). El advisor identity completo se preserva vía `auth.py`; el evento solo guarda el rol "activo" de la operación.
+9. **`payload` validado como dict en el request** — Pydantic acepta cualquier shape por default; un `field_validator(mode="before")` rechaza list/str/null para evitar payloads ambiguos en el hash.
+10. **Limitación documentada: case + audit no son atómicos en `POST /cases`** — el endpoint inserta primero el case (commit) y luego el audit event (otro commit). Si el audit falla (debería ser extremadamente raro: case acaba de existir, hashes determinísticos), el case queda sin su primer evento y el endpoint devuelve 500 con mensaje claro. Una iteración futura puede mover ambos a un `BEGIN ... COMMIT` manual.
+
+#### Tabla de RBAC actualizada (nuevos endpoints AuditEvent)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/audit-events` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/audit` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `GET /cases/{id}/audit/verify` | ❌ 403 | ✅ 200 | ✅ 200 | ❌ 403 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **AuditEvent NO se integra todavía con `/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`** — solo `POST /cases` registra evento automático. La integración completa queda para un commit siguiente.
+- **Firm-level access control sobre `/cases/{id}/audit*`** — cualquier token con el rol adecuado puede leer/escribir audit events de cualquier case. El filtrado por `firm_id` queda pendiente.
+- **AIRequestLog** sigue pendiente (independiente del hash chain de AuditEvent).
+- **Acuse externo / firma digital** — el hash chain no es blockchain: un actor con acceso directo a SQLite puede reescribir coherentemente toda la cadena (incluyendo todos los `event_hash`). `verify_chain` detecta mutaciones puntuales (un payload, un hash, un sequence gap), no una reescritura completa coordinada. Para protección contra DBA malicioso haría falta firma asimétrica por evento o anclaje a una autoridad de timestamping externa.

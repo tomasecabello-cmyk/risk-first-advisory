@@ -7,6 +7,8 @@ Política: exponer solo primitivos. Los objetos de dominio internos
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1090,3 +1092,84 @@ class AdvisoryCaseStatusUpdateRequest(BaseModel):
             valid = sorted(_ALLOWED_CASE_STATUSES)
             raise ValueError(f"status debe ser uno de {valid}.")
         return v
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AuditEvent — Fase 2 Commit 6 (hash chain por AdvisoryCase)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AuditEventCreateRequest(BaseModel):
+    """
+    Request para crear un audit event manual sobre un caso.
+
+    El sistema agrega además eventos automáticos (case_created, ...) sin que
+    el caller los tenga que enviar.
+    """
+
+    event_type:        str               = Field(min_length=1)
+    actor_advisor_id:  str | None        = None
+    actor_role:        str               = "system"
+    payload:           dict[str, Any]    = Field(default_factory=dict)
+
+    @field_validator("event_type")
+    @classmethod
+    def _event_type_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("event_type no puede ser solo espacios.")
+        return v
+
+    @field_validator("actor_role")
+    @classmethod
+    def _actor_role_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("actor_role no puede ser solo espacios.")
+        return v
+
+    @field_validator("actor_advisor_id")
+    @classmethod
+    def _actor_advisor_id_not_empty(cls, v: str | None) -> str | None:
+        if v is not None and (not isinstance(v, str) or not v.strip()):
+            raise ValueError("actor_advisor_id, si se provee, no puede ser cadena vacía.")
+        return v
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _payload_must_be_dict(cls, v: object) -> object:
+        # Pydantic acepta dict-like nativamente; aquí se rechaza list/str/None
+        # para que el caller no mande una lista o string como payload.
+        if v is None:
+            raise ValueError("payload no puede ser null. Usar {} para payload vacío.")
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"payload debe ser un objeto JSON (dict); recibido {type(v).__name__}."
+            )
+        return v
+
+
+class AuditEventResponse(BaseModel):
+    event_id:          str
+    case_id:           str
+    sequence:          int
+    event_type:        str
+    actor_advisor_id:  str | None
+    actor_role:        str
+    payload:           dict[str, Any]
+    payload_hash:      str
+    previous_hash:     str | None
+    event_hash:        str
+    created_at_utc:    str
+
+
+class AuditEventListResponse(BaseModel):
+    events: list[AuditEventResponse]
+    count:  int
+
+
+class AuditVerifyResponse(BaseModel):
+    case_id:               str
+    is_intact:             bool
+    total_events:          int
+    first_broken_sequence: int | None
+    checked_at_utc:        str
+    message:               str
