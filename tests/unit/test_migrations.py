@@ -70,11 +70,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "ai_request_logs",
     # 0002 — case-scoped KYC submissions
     "kyc_submissions",
+    # 0003 — case-scoped AI profile analyses
+    "ai_profile_analyses",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 2
+TOTAL_MIGRATIONS: int = 3
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -92,6 +94,10 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     # 0002 — kyc_submissions indices
     "idx_kyc_submissions_case_id",
     "idx_kyc_submissions_submitted_by_advisor_id",
+    # 0003 — ai_profile_analyses indices
+    "idx_ai_profile_analyses_case_id",
+    "idx_ai_profile_analyses_kyc_submission_id",
+    "idx_ai_profile_analyses_ai_request_log_id",
 })
 
 
@@ -234,6 +240,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version2 == "0002"
     assert "kyc" in description2.lower()
     assert applied_at2.endswith("Z")
+    # La tercera fila debe ser 0003 — ai_profile_analyses.
+    version3, description3, applied_at3 = rows[2]
+    assert version3 == "0003"
+    assert "ai" in description3.lower() or "profile" in description3.lower()
+    assert applied_at3.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

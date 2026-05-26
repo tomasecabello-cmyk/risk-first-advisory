@@ -42,6 +42,9 @@ from risk_first_advisory.api_layer.schemas import (
     AdvisoryCaseListResponse,
     AdvisoryCaseResponse,
     AdvisoryCaseStatusUpdateRequest,
+    AIProfileAnalysisCreateRequest,
+    AIProfileAnalysisListResponse,
+    AIProfileAnalysisResponse,
     AIRequestLogCreateRequest,
     AIRequestLogListResponse,
     AIRequestLogResponse,
@@ -126,6 +129,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     EntityNotFoundError,
     SQLiteAdvisorRepository,
     SQLiteAdvisoryCaseRepository,
+    SQLiteAIProfileAnalysisRepository,
     SQLiteAIRequestLogRepository,
     SQLiteAuditEventRepository,
     SQLiteClientRepository,
@@ -744,6 +748,7 @@ _AI_LOG_ENDPOINT_FILTERED_PORTFOLIO: str = "/ai/filtered-portfolio-demo"
 _AI_LOG_PROMPT_INVESTMENT_PREFS:    str = "investment_preferences_v1"
 _AI_LOG_PROMPT_FILTER_UNIVERSE:     str = "ai_universe_filter_v1"
 _AI_LOG_PROMPT_FILTERED_PORTFOLIO:  str = "ai_filtered_portfolio_v1"
+_AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS: str = "case_profile_analysis_v1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3287,6 +3292,280 @@ def list_case_kyc(
         data = SQLiteKYCSubmissionRepository(store).list_by_case(case_id)
     return KYCSubmissionListResponse(
         submissions=[KYCSubmissionResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — AIProfileAnalysis endpoints (case-scoped)
+#
+# RBAC:
+#   POST /cases/{case_id}/ai/profile-analysis  → advisor, admin
+#   GET  /cases/{case_id}/ai/profile-analysis  → admin, advisor, compliance, viewer
+#
+# Comportamiento de POST:
+#   - 404 si el case no existe.
+#   - 409 si el case está CLOSED (no se aceptan nuevos análisis tras cierre).
+#   - 409 si no hay current_kyc_submission_id y el caller no pasa
+#     kyc_submission_id explícito.
+#   - 422 si kyc_submission_id explícito no existe o no pertenece al case.
+#   - Carga el payload de la KYCSubmission, lo pasa a OpenAIProfileClient.
+#   - Mide latency_ms con time.perf_counter.
+#   - Persiste AIRequestLog (case_id poblado), AIProfileAnalysis con
+#     ai_request_log_id, y AuditEvent ai_profile_analyzed.
+#   - Si la llamada IA falla: persiste AIRequestLog api_error, devuelve 502,
+#     NO crea AIProfileAnalysis ni AuditEvent.
+#
+# Notas:
+#   - El payload original NUNCA se loggea: se redacta vía _persist_ai_request_log.
+#   - input_hash se computa sobre el original; payload_hash es del KYC, no se
+#     duplica.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/ai/profile-analysis",
+    response_model=AIProfileAnalysisResponse,
+    status_code=201,
+)
+def create_case_profile_analysis(
+    case_id: str,
+    req: AIProfileAnalysisCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> AIProfileAnalysisResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 1. Validaciones contra la DB ─────────────────────────────────────────
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        kyc_repo = SQLiteKYCSubmissionRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; AI profile analysis is "
+                    "not accepted after case closure."
+                ),
+            )
+
+        # Resolver KYC submission a usar.
+        if req.kyc_submission_id is not None:
+            sub_data = kyc_repo.get(req.kyc_submission_id)
+            if sub_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"KYC submission not found: {req.kyc_submission_id!r}"
+                    ),
+                )
+            if sub_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"KYC submission {req.kyc_submission_id!r} belongs to "
+                        f"case {sub_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+        else:
+            current_id = case_data["current_kyc_submission_id"]
+            if current_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no KYC submission. "
+                        "Submit a KYC via POST /cases/{case_id}/kyc first."
+                    ),
+                )
+            sub_data = kyc_repo.get(current_id)
+            if sub_data is None:
+                # Inconsistencia interna: el puntero apunta a un row que no
+                # existe. Devolvemos 500 con mensaje claro.
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Case {case_id!r} current_kyc_submission_id "
+                        f"{current_id!r} not found in kyc_submissions."
+                    ),
+                )
+
+        # Soft FK lookup para requested_by_advisor_id (mismo patrón que
+        # case_created / kyc_submitted): si el advisor_id del token existe
+        # como entity, se usa; si no, None.
+        requested_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            requested_by_advisor_id = advisor.advisor_id
+
+    # ── 2. Llamar a OpenAI (fuera del store; usa su propia conexión) ────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "OPENAI_API_KEY is not configured. "
+                "Set the environment variable and retry."
+            ),
+        )
+
+    model_name = _resolve_ai_model_name(ai_client)
+    endpoint_str = f"/cases/{case_id}/ai/profile-analysis"
+
+    # Construir el input para la IA: payload KYC + metadata mínima de case.
+    # client_id se setea con el case_id para que la IA tenga un identificador
+    # opaco; el client_id real del cliente vive en clients/{client_id}.
+    kyc_payload: dict[str, Any] = dict(sub_data["payload"])
+    ai_input_payload: dict[str, Any] = dict(kyc_payload)
+    ai_input_payload["client_id"] = case_id  # opaque ID para la IA
+    ai_input_payload["case_id"] = case_id
+    ai_input_payload["kyc_submission_id"] = sub_data["kyc_submission_id"]
+
+    _start = time.perf_counter()
+    try:
+        ai_result = ai_client.analyze_kyc(ai_input_payload)
+    except ValueError as exc:
+        _persist_ai_request_log(
+            endpoint=endpoint_str,
+            model=model_name,
+            prompt_version=_AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS,
+            input_payload=ai_input_payload,
+            validation_status="api_error",
+            db_path=db_path,
+            case_id=case_id,
+            requested_by_advisor_id=requested_by_advisor_id,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "AI profile analysis failed. "
+                "The AI returned an invalid response."
+            ),
+        )
+    except Exception as exc:
+        _persist_ai_request_log(
+            endpoint=endpoint_str,
+            model=model_name,
+            prompt_version=_AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS,
+            input_payload=ai_input_payload,
+            validation_status="api_error",
+            db_path=db_path,
+            case_id=case_id,
+            requested_by_advisor_id=requested_by_advisor_id,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile analysis failed due to an unexpected error.",
+        )
+
+    latency_ms = int((time.perf_counter() - _start) * 1000)
+
+    # ── 3. Persistir AIRequestLog (parsed_ok) ───────────────────────────────
+    ai_request_log_id = _persist_ai_request_log(
+        endpoint=endpoint_str,
+        model=model_name,
+        prompt_version=_AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS,
+        input_payload=ai_input_payload,
+        validation_status="parsed_ok",
+        db_path=db_path,
+        case_id=case_id,
+        requested_by_advisor_id=requested_by_advisor_id,
+        raw_response=dict(ai_result) if isinstance(ai_result, dict) else None,
+        latency_ms=latency_ms,
+    )
+
+    # ── 4. Persistir AIProfileAnalysis + AuditEvent ─────────────────────────
+    preliminary_profile = (
+        str(ai_result.get("preliminary_profile"))
+        if isinstance(ai_result, dict) and ai_result.get("preliminary_profile") is not None
+        else None
+    )
+    confidence_raw = ai_result.get("confidence") if isinstance(ai_result, dict) else None
+    confidence_val: float | None
+    try:
+        confidence_val = float(confidence_raw) if confidence_raw is not None else None
+    except (TypeError, ValueError):
+        confidence_val = None
+
+    with SQLiteEntityStore(db_path) as store:
+        analysis_repo = SQLiteAIProfileAnalysisRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        try:
+            analysis_data = analysis_repo.create(
+                case_id=case_id,
+                kyc_submission_id=sub_data["kyc_submission_id"],
+                analysis_type=req.analysis_type,
+                result=dict(ai_result) if isinstance(ai_result, dict) else {},
+                preliminary_profile=preliminary_profile,
+                confidence=confidence_val,
+                ai_request_log_id=ai_request_log_id,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # AuditEvent ai_profile_analyzed con metadata mínima.
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="ai_profile_analyzed",
+                actor_advisor_id=requested_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":             case_id,
+                    "analysis_id":         analysis_data["analysis_id"],
+                    "kyc_submission_id":   sub_data["kyc_submission_id"],
+                    "ai_request_log_id":   ai_request_log_id,
+                    "analysis_type":       req.analysis_type,
+                    "preliminary_profile": preliminary_profile,
+                    "confidence":          confidence_val,
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"AI profile analysis {analysis_data['analysis_id']!r} was "
+                    f"persisted but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return AIProfileAnalysisResponse(**analysis_data)
+
+
+@app.get(
+    "/cases/{case_id}/ai/profile-analysis",
+    response_model=AIProfileAnalysisListResponse,
+)
+def list_case_profile_analyses(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> AIProfileAnalysisListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        case_row = SQLiteAdvisoryCaseRepository(store).get(case_id)
+        if case_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteAIProfileAnalysisRepository(store).list_by_case(case_id)
+    return AIProfileAnalysisListResponse(
+        analyses=[AIProfileAnalysisResponse(**d) for d in data],
         count=len(data),
     )
 

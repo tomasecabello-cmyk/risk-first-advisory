@@ -1315,3 +1315,58 @@ class KYCSubmissionResponse(BaseModel):
 class KYCSubmissionListResponse(BaseModel):
     submissions: list[KYCSubmissionResponse]
     count:       int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AIProfileAnalysis — Fase 2 Commit 9 (case-scoped AI profile analysis)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Restringido a "initial" en este commit. "follow_up" queda reservado pero NO
+# implementado todavía: requiere previous_analysis + follow_up_answers (otra
+# llamada a OpenAIProfileClient.analyze_follow_up).
+_ALLOWED_PROFILE_ANALYSIS_TYPES: frozenset[str] = frozenset({"initial", "follow_up"})
+_IMPLEMENTED_PROFILE_ANALYSIS_TYPES: frozenset[str] = frozenset({"initial"})
+
+
+class AIProfileAnalysisCreateRequest(BaseModel):
+    kyc_submission_id: str | None = None
+    analysis_type:     str        = "initial"
+
+    @field_validator("kyc_submission_id", mode="before")
+    @classmethod
+    def _kyc_submission_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("kyc_submission_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("analysis_type")
+    @classmethod
+    def _analysis_type_must_be_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_PROFILE_ANALYSIS_TYPES:
+            raise ValueError(
+                f"analysis_type inválido: {v!r}. "
+                f"Valores permitidos: {sorted(_ALLOWED_PROFILE_ANALYSIS_TYPES)}."
+            )
+        if v not in _IMPLEMENTED_PROFILE_ANALYSIS_TYPES:
+            raise ValueError(
+                f"analysis_type={v!r} aún no está implementado. "
+                f"Implementados: {sorted(_IMPLEMENTED_PROFILE_ANALYSIS_TYPES)}."
+            )
+        return v
+
+
+class AIProfileAnalysisResponse(BaseModel):
+    analysis_id:         str
+    case_id:             str
+    kyc_submission_id:   str
+    ai_request_log_id:   str | None
+    analysis_type:       str
+    preliminary_profile: str | None
+    confidence:          float | None
+    result:              dict[str, Any]
+    created_at_utc:      str
+
+
+class AIProfileAnalysisListResponse(BaseModel):
+    analyses: list[AIProfileAnalysisResponse]
+    count:    int

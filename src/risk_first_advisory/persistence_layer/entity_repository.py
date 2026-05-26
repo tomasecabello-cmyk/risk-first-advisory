@@ -1706,3 +1706,163 @@ class SQLiteKYCSubmissionRepository:
             "payload_hash":            row["payload_hash"],
             "created_at_utc":          row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AIProfileAnalysis — Fase 2 Commit 9 (case-scoped AI profile analysis)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Cada análisis vincula:
+#   - case_id            (AdvisoryCase)
+#   - kyc_submission_id  (KYCSubmission concreta del case)
+#   - ai_request_log_id  (AIRequestLog que registró la llamada — opcional)
+#
+# Limitaciones:
+#   - No expone update / delete: cada análisis nuevo es un nuevo row.
+#   - result_json se persiste en canonical JSON; preliminary_profile y
+#     confidence son extractos denormalizados del result para indexar.
+#   - analysis_type se modela como string libre a nivel DB; la API restringe
+#     a {initial, follow_up} (este commit solo expone "initial").
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+ALLOWED_PROFILE_ANALYSIS_TYPES: frozenset[str] = frozenset({"initial", "follow_up"})
+
+
+class SQLiteAIProfileAnalysisRepository:
+    """
+    Persiste y lee análisis IA de perfil case-scoped sobre la tabla
+    `ai_profile_analyses` (de migration 0003).
+
+    Esquema:
+        ai_profile_analyses(
+            analysis_id TEXT PK,
+            case_id TEXT NOT NULL FK→advisory_cases,
+            kyc_submission_id TEXT NOT NULL FK→kyc_submissions,
+            ai_request_log_id TEXT NULL FK→ai_request_logs,
+            analysis_type TEXT NOT NULL,
+            preliminary_profile TEXT NULL,
+            confidence REAL NULL,
+            result_json TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL
+        )
+
+    Operaciones:
+        create(...)         — inserta un nuevo análisis.
+        get(analysis_id)    — dict | None.
+        list_by_case(...)   — orden `created_at_utc ASC, analysis_id ASC`.
+
+    No expone update ni delete.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        kyc_submission_id: str,
+        analysis_type: str,
+        result: Mapping[str, Any],
+        preliminary_profile: str | None = None,
+        confidence: float | None = None,
+        ai_request_log_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Inserta un nuevo análisis. result se serializa canonical.
+
+        Raises:
+            EntityConflictError: PK collision o FK violation (case_id,
+                kyc_submission_id, ai_request_log_id deben existir).
+            ValueError: si result no es mapping.
+        """
+        if not isinstance(result, Mapping):
+            raise ValueError(
+                f"result debe ser un mapping (dict); recibido {type(result).__name__}."
+            )
+
+        result_dict = dict(result)
+        result_json = _canonical_json(result_dict)
+        now = _now_utc()
+        analysis_id = self._store._next_id("ai_profile_analysis_")
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO ai_profile_analyses
+                        (analysis_id, case_id, kyc_submission_id,
+                         ai_request_log_id, analysis_type,
+                         preliminary_profile, confidence,
+                         result_json, created_at_utc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        analysis_id, case_id, kyc_submission_id,
+                        ai_request_log_id, analysis_type,
+                        preliminary_profile,
+                        float(confidence) if confidence is not None else None,
+                        result_json, now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "analysis_id":          analysis_id,
+            "case_id":              case_id,
+            "kyc_submission_id":    kyc_submission_id,
+            "ai_request_log_id":    ai_request_log_id,
+            "analysis_type":        analysis_type,
+            "preliminary_profile":  preliminary_profile,
+            "confidence":           float(confidence) if confidence is not None else None,
+            "result":               result_dict,
+            "created_at_utc":       now,
+        }
+
+    def get(self, analysis_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT analysis_id, case_id, kyc_submission_id,
+                   ai_request_log_id, analysis_type,
+                   preliminary_profile, confidence,
+                   result_json, created_at_utc
+            FROM ai_profile_analyses WHERE analysis_id = ?
+            """,
+            (analysis_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        """Lista análisis del case ordenados por created_at_utc + analysis_id asc."""
+        rows = self._store._conn.execute(
+            """
+            SELECT analysis_id, case_id, kyc_submission_id,
+                   ai_request_log_id, analysis_type,
+                   preliminary_profile, confidence,
+                   result_json, created_at_utc
+            FROM ai_profile_analyses
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, analysis_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        confidence = row["confidence"]
+        return {
+            "analysis_id":          row["analysis_id"],
+            "case_id":              row["case_id"],
+            "kyc_submission_id":    row["kyc_submission_id"],
+            "ai_request_log_id":    row["ai_request_log_id"],
+            "analysis_type":        row["analysis_type"],
+            "preliminary_profile":  row["preliminary_profile"],
+            "confidence":           float(confidence) if confidence is not None else None,
+            "result":               json.loads(row["result_json"]),
+            "created_at_utc":       row["created_at_utc"],
+        }

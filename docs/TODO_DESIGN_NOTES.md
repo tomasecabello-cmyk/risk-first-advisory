@@ -602,15 +602,16 @@ Los tests usan dos autouse fixtures:
 5. ~~AuditEvent recorder con hash chain + endpoint `/cases/{id}/audit/verify`.~~ ✅ Commit 6.
 6. ~~AIRequestLog wrapper alrededor de los endpoints `/ai/*` + redaction de PII.~~ ✅ Commit 7.
 7. ~~KYCSubmission case-scoped (POST/GET `/cases/{case_id}/kyc`) + auto-event `kyc_submitted` + transición DRAFT → IN_PROGRESS.~~ ✅ Commit 8.
-8. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
-9. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
-10. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
-11. AIRequestLog case-scoped por default — hoy `case_id=None` salvo cuando se setea explícitamente vía POST manual; cuando los endpoints `/ai/*` sean case-scoped, propagar `case_id` automáticamente.
-12. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs` y `kyc_submissions`.
-13. Case-scoped AI profile analysis sobre el `current_kyc_submission_id` del case (en vez del payload anónimo de hoy).
-14. Case-scoped profile approval (formaliza `current_approved_profile_id`).
-15. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
-16. UI Case Workbench (frontend para flujo end-to-end por case).
+8. ~~AIProfileAnalysis case-scoped (POST/GET `/cases/{case_id}/ai/profile-analysis`) sobre la última KYC; vincula `ai_request_log_id`; auto-event `ai_profile_analyzed`.~~ ✅ Commit 9.
+9. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
+10. Integrar AuditEvent automáticamente en los demás endpoints decisorios (profile-approval, override-approval, portfolio-selection, status transitions de case).
+11. Firm-level access control sobre `/cases/*`, `/cases/{id}/audit*`, `/cases/{id}/ai-logs`, `/cases/{id}/kyc`, `/cases/{id}/ai/profile-analysis` — hoy cualquier token con el rol adecuado puede ver/operar sobre cualquier caso.
+12. AIRequestLog case-scoped por default en los endpoints `/ai/*` no case-scoped — hoy `case_id=None`; cuando esos endpoints sean case-scoped, propagar `case_id` automáticamente.
+13. Cifrado at-rest del DB y retention / pruning policy para `ai_request_logs`, `kyc_submissions` y `ai_profile_analyses`.
+14. Case-scoped AI profile follow-up (`analysis_type=follow_up`) — hoy reservado pero NO implementado (rechaza con 422). Requiere wiring de `analyze_follow_up` + previous_analysis selection.
+15. Case-scoped profile approval (formaliza `current_approved_profile_id`).
+16. Case-scoped portfolio proposal (formaliza `current_portfolio_selection_id`).
+17. UI Case Workbench (frontend para flujo end-to-end por case).
 
 ---
 
@@ -875,3 +876,98 @@ Octavo commit de Fase 2 — primer paso del workflow real conectado al `Advisory
 - **No hay UI Case Workbench.** El flujo end-to-end por case solo se puede ejercer via API. Item 16.
 - **No hay firm-level access control sobre `/cases/{id}/kyc`** — un advisor/admin de la firma A puede crear/leer KYC submissions de cualquier case. Mismo gap que en los otros endpoints `/cases/*`.
 - **El `PATCH /cases/{id}/status` no genera audit event automático todavía.** Cuando KYC dispara la transición `DRAFT → IN_PROGRESS`, el audit chain registra solo `case_created` + `kyc_submitted` (no un evento separado de transición). Iteración futura: agregar `status_changed` event en el endpoint PATCH y en el path automático del POST KYC.
+
+---
+
+## Fase 2 — AIProfileAnalysis case-scoped ✅ (Commit 9)
+
+### Estado actual
+
+Noveno commit de Fase 2 — segundo paso del workflow real conectado al `AdvisoryCase`. El análisis IA de perfil ahora vive dentro de un case, anclado a una `KYCSubmission` concreta y vinculado al `AIRequestLog` que registró la llamada.
+
+#### Archivos creados / modificados
+
+- **`migrations/0003_ai_profile_analyses.sql`** — nueva migración:
+  - Tabla `ai_profile_analyses(analysis_id PK, case_id FK→advisory_cases NOT NULL, kyc_submission_id FK→kyc_submissions NOT NULL, ai_request_log_id NULL FK→ai_request_logs, analysis_type, preliminary_profile NULL, confidence REAL NULL, result_json, created_at_utc)`.
+  - Índices `idx_ai_profile_analyses_case_id`, `idx_ai_profile_analyses_kyc_submission_id`, `idx_ai_profile_analyses_ai_request_log_id`.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `ALLOWED_PROFILE_ANALYSIS_TYPES = {"initial", "follow_up"}` constant.
+  - `SQLiteAIProfileAnalysisRepository`:
+    - `create(*, case_id, kyc_submission_id, analysis_type, result, preliminary_profile=None, confidence=None, ai_request_log_id=None)` — IDs con prefijo `ai_profile_analysis_`. `result` se persiste canonical JSON. FK violation → `EntityConflictError`.
+    - `get(analysis_id)` → dict | None.
+    - `list_by_case(case_id)` → orden `created_at_utc ASC, analysis_id ASC`.
+    - Sin `update` / `delete` (append-only).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `AIProfileAnalysisCreateRequest` (`kyc_submission_id: str | None`, `analysis_type: str = "initial"`). Validators: `analysis_type` debe estar en `{initial, follow_up}` (422 si otro); `follow_up` rechaza con 422 explícito (`"aún no está implementado"`).
+  - `AIProfileAnalysisResponse` (campos: `analysis_id`, `case_id`, `kyc_submission_id`, `ai_request_log_id`, `analysis_type`, `preliminary_profile`, `confidence`, `result`, `created_at_utc`).
+  - `AIProfileAnalysisListResponse` (`analyses`, `count`).
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Constante `_AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS = "case_profile_analysis_v1"`.
+  - 2 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/ai/profile-analysis` | advisor, admin | Resuelve KYC → llama OpenAIProfileClient → persiste AIRequestLog + AIProfileAnalysis + AuditEvent. |
+  | `GET /cases/{case_id}/ai/profile-analysis` | admin, advisor, compliance, viewer | Lista análisis ordenados por `created_at_utc` asc. |
+
+  - Reutiliza el helper existente `_persist_ai_request_log` (que ya soporta `case_id` desde Commit 7); el `ai_request_log_id` retornado se persiste en `ai_profile_analyses.ai_request_log_id`.
+  - Mismo patrón de soft FK lookup para `requested_by_advisor_id` (advisor del token solo si existe como entity).
+  - Mismo patrón de `_pick_actor_role` para el `actor_role` del audit event.
+
+- **`tests/integration/test_api_case_ai_profile_analysis.py`** — 48 tests en 8 clases:
+  - `TestCreateAnalysis` (11): 201; `ai_profile_analysis_` prefix; `case_id`/`kyc_submission_id`/`ai_request_log_id` correctos; `analysis_type=initial`; `preliminary_profile`/`confidence` desde la IA; `result` contiene `contradictions`/`follow_up_questions`/`advisor_notes`; GET lista 1 y luego 2.
+  - `TestKYCSelection` (5): default usa `current_kyc_submission_id`; explícito usa el dado; KYC inexistente → 422; KYC de otro case → 422; case sin KYC → 409.
+  - `TestAIRequestLogIntegration` (6): log tiene `case_id`; `input_redacted` NO contiene `open_concerns` ni el texto `xyz123`; `validation_status=parsed_ok`; `prompt_version=case_profile_analysis_v1`; endpoint correcto; el log aparece en `/cases/{id}/ai-logs`.
+  - `TestAuditIntegration` (3): chain contiene `case_created` + `kyc_submitted` + `ai_profile_analyzed`; payload del nuevo evento tiene `analysis_id`/`kyc_submission_id`/`ai_request_log_id`/`analysis_type`/`preliminary_profile`; `verify_chain` sigue `is_intact=true`.
+  - `TestRBACPost` (5): 401 / 403 (compliance, viewer) / 201 (advisor, admin).
+  - `TestRBACGet` (5): 401 / 200 para los 4 roles válidos.
+  - `TestValidation` (5): case inexistente (POST y GET) → 404; CLOSED → 409; `analysis_type=bogus` → 422; `analysis_type=follow_up` → 422 (no implementado).
+  - `TestOpenAIFailure` (4): falla OpenAI → 502; AIRequestLog con `validation_status=api_error` y `error_message` poblado; NO se crea `AIProfileAnalysis`; NO se crea audit event `ai_profile_analyzed`.
+  - `TestNoRegression` (4): `/health`, `/auth/me`, `/advisor/profile-approval`, `/ai/filtered-portfolio-demo` siguen funcionando.
+
+- **`tests/unit/test_migrations.py`** — actualizado:
+  - `PHASE2_TABLES` incluye `ai_profile_analyses`.
+  - `REQUIRED_INDEXES` incluye los tres nuevos índices.
+  - `TOTAL_MIGRATIONS = 3`.
+  - `test_schema_migrations_records_0001_with_metadata` ahora valida también la fila `0003`.
+
+**Total tests tras este commit:** 2687 (todos pasando). Δ = +48 integration.
+
+#### Decisiones de diseño
+
+1. **KYC selection: default a `current_kyc_submission_id` del case, override explícito vía body**. Si el caller no pasa `kyc_submission_id`, se usa el más reciente (el puntero que actualiza Commit 8). Si pasa uno explícito, debe (a) existir y (b) pertenecer al mismo case. Esto soporta dos casos de uso: "analiza el KYC actual" (default) y "re-analiza una versión histórica" (override).
+2. **`kyc_submission_id` es NOT NULL en la tabla**. Cada análisis se hace sobre una KYC concreta, no anonymous. Trazabilidad versión → análisis es central para auditoría.
+3. **`ai_request_log_id` es NULL-able**. El camino productivo (endpoint POST) siempre lo vincula, pero el repo permite análisis sin log para backfill / scripts internos. Es FK opcional, no requerida por design.
+4. **`preliminary_profile` y `confidence` son denormalizados del `result_json`**. Sirven para indexar (e.g., "lista de análisis del case con confidence < 0.5") sin parsear JSON. `result` siempre contiene el JSON completo de la IA por si se necesita más detalle.
+5. **`result_json` en canonical JSON** (mismo formato que `payload_json` de KYC y `payload_json` de audit events). Determinismo y reproducibilidad si se necesita re-hashear.
+6. **`analysis_type` restringido a `{initial, follow_up}` a nivel API, libre a nivel DB.** Permite futuras extensiones sin migración. `follow_up` rechaza con 422 + mensaje explícito ("aún no está implementado") para que el cliente sepa que no es un typo de validation.
+7. **CLOSED case rechaza con 409** (mismo patrón que KYC). Tras cierre formal no se aceptan más análisis.
+8. **Caso sin KYC rechaza con 409**, no 422. Decisión: la condición ("el case no tiene KYC todavía") es de estado del recurso, no de validación del payload. El caller debe POSTear un KYC primero.
+9. **KYC de otro case rechaza con 422** (validación cross-resource). El payload está bien formado pero referencia un recurso inválido para este context.
+10. **El `client_id` que se pasa a la IA es el `case_id`** (opaque identifier), no el `client_id` real del cliente. Esto evita exponer el client_id del CRM a la IA y mantiene el log redactado correctamente (`case_id` no es PII).
+11. **El input a la IA incluye metadata mínima** (`case_id`, `kyc_submission_id`, además del payload KYC). Esto permite que la IA contextualice el análisis (futuro: prompt podría usar esta metadata) y el `input_hash` cambia si la KYC version cambia.
+12. **Si OpenAI falla, NO se crea AIProfileAnalysis NI AuditEvent**. Política: el análisis solo existe si la llamada IA tuvo éxito. El AIRequestLog con `validation_status=api_error` queda como evidencia auditable de que se intentó, pero el evento `ai_profile_analyzed` solo se emite si hay análisis real. Esto mantiene el audit chain consistente con la realidad.
+13. **El AIRequestLog se persiste ANTES del AIProfileAnalysis**. Necesario porque `ai_profile_analyses.ai_request_log_id` es FK a `ai_request_logs.request_id`. Si el log falla (silenciosamente, helper es fail-safe), `ai_request_log_id` queda en `None` pero el análisis igual se crea.
+14. **El AIRequestLog se persiste en una segunda apertura del store**. Razón: `_persist_ai_request_log` abre su propio `SQLiteEntityStore`. Para no romper esa contrato y mantener el helper reusable, el endpoint cierra el primer store (donde validó las precondiciones), llama al helper, y abre un segundo store para persistir el análisis + audit. Trade-off entre simplicidad del helper y atomicidad estricta — se eligió simplicidad (consistente con AIRequestLog en Commits 7).
+15. **Reusa `_persist_ai_request_log` sin modificación**. El helper de Commit 7 ya soportaba `case_id` y `requested_by_advisor_id`. Aprovecha esa generalidad y evita drift entre logging case-scoped y non-case-scoped.
+16. **`time.perf_counter()` para latency_ms** (mismo patrón que Commit 7).
+
+#### Tabla de RBAC actualizada (nuevos endpoints AIProfileAnalysis)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/ai/profile-analysis` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/ai/profile-analysis` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **`analysis_type=follow_up` NO está implementado.** Pydantic acepta el valor en `_ALLOWED_PROFILE_ANALYSIS_TYPES` (para futuros) pero el endpoint lo rechaza con 422 explícito ("aún no está implementado"). Item 14 del pending list. Implementarlo requiere: seleccionar un `previous_analysis_id`, pedirle al cliente `follow_up_answers`, llamar a `OpenAIProfileClient.analyze_follow_up`.
+- **No hay case-scoped profile approval todavía.** El análisis IA no se aprueba ni rechaza por el advisor en este commit. `advisory_cases.current_approved_profile_id` sigue en `None`. Item 15.
+- **No hay case-scoped universe filter ni portfolio proposal.** Items 16 y similar.
+- **Firm-level access control sigue pendiente** (item 11).
+- **No hay UI Case Workbench** (item 17).
+- **Latency_ms se mide solo de la llamada IA, no del round-trip total del endpoint** (consistente con AIRequestLog en Commit 7). El tiempo de validación previa + persistence posterior no se incluye.
+- **Cross-firm scoping**: el endpoint no valida que el `kyc_submission_id` explícito provenga de un case de la misma firma que el del token. Como el firm-level scoping general sigue pendiente, esto es coherente con el resto del sistema.
