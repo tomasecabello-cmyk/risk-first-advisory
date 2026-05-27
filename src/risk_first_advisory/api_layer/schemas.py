@@ -1799,3 +1799,77 @@ class CaseOverrideApprovalResponse(BaseModel):
 class CaseOverrideApprovalListResponse(BaseModel):
     override_approvals: list[CaseOverrideApprovalResponse]
     count:              int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CasePortfolioSelection — Fase 2 Commit 14 (selección final case-scoped)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_SELECTION_VARIANTS: frozenset[str] = frozenset(
+    {"DEFENSIVE", "BALANCED", "GROWTH"}
+)
+
+
+class CasePortfolioSelectionCreateRequest(BaseModel):
+    proposal_id:          str | None = None
+    selected_variant:     str
+    override_approval_id: str | None = None
+    rationale:            str        = Field(min_length=1)
+    source:               str        = "manual"
+
+    @field_validator("proposal_id", mode="before")
+    @classmethod
+    def _proposal_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("proposal_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("override_approval_id", mode="before")
+    @classmethod
+    def _override_approval_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("override_approval_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("selected_variant")
+    @classmethod
+    def _selected_variant_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_SELECTION_VARIANTS:
+            raise ValueError(
+                f"selected_variant inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_SELECTION_VARIANTS)}."
+            )
+        return v
+
+    @field_validator("rationale")
+    @classmethod
+    def _rationale_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale no puede ser solo espacios.")
+        return v
+
+    @field_validator("source")
+    @classmethod
+    def _source_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("source no puede estar vacío.")
+        return v
+
+
+class CasePortfolioSelectionResponse(BaseModel):
+    selection_id:          str
+    case_id:               str
+    proposal_id:           str
+    override_approval_id:  str | None
+    selected_variant:      str
+    selected_candidate:    dict[str, Any]
+    rationale:             str
+    source:                str
+    advisor_id:            str | None
+    is_current:            bool
+    created_at_utc:        str
+
+
+class CasePortfolioSelectionListResponse(BaseModel):
+    selections: list[CasePortfolioSelectionResponse]
+    count:      int

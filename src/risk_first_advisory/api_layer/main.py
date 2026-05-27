@@ -71,6 +71,9 @@ from risk_first_advisory.api_layer.schemas import (
     CasePortfolioProposalCreateRequest,
     CasePortfolioProposalListResponse,
     CasePortfolioProposalResponse,
+    CasePortfolioSelectionCreateRequest,
+    CasePortfolioSelectionListResponse,
+    CasePortfolioSelectionResponse,
     CaseUniverseFilterRunCreateRequest,
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
@@ -151,6 +154,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteCaseInvestmentPreferenceRepository,
     SQLiteCaseOverrideApprovalRepository,
     SQLiteCasePortfolioProposalRepository,
+    SQLiteCasePortfolioSelectionRepository,
     SQLiteCaseUniverseFilterRunRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
@@ -4953,6 +4957,313 @@ def list_case_override_approvals(
         data = SQLiteCaseOverrideApprovalRepository(store).list_by_case(case_id)
     return CaseOverrideApprovalListResponse(
         override_approvals=[CaseOverrideApprovalResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CasePortfolioSelection endpoints
+#
+# RBAC:
+#   POST /cases/{case_id}/portfolio-selection  → advisor, admin
+#   GET  /cases/{case_id}/portfolio-selection  → admin, advisor, compliance, viewer
+#
+# Comportamiento POST:
+#   - 404 si case no existe.
+#   - 409 si case está CLOSED.
+#   - Resuelve proposal (current o explícito); 409 si no hay; 422 si de otro case.
+#   - 409 si proposal.status != "completed".
+#   - 422 si selected_variant no está en proposal.candidates.
+#   - Si candidate requiere override:
+#       - Si override_approval_id viene: debe pertenecer al case + al proposal +
+#         al variant + decision=approve.
+#       - Si no viene: usa current override approval del case; mismas validaciones.
+#       - Si no hay override válido: 409.
+#   - Si candidate NO requiere override:
+#       - 422 si override_approval_id se pasa explícito (rechazo: no debe usarse).
+#   - Persiste selection + mark_previous_not_current + actualiza
+#     advisory_cases.current_portfolio_selection_id + transiciona status a
+#     PORTFOLIO_SELECTED (si la FSM lo permite desde el status actual).
+#   - AuditEvent portfolio_selected.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/portfolio-selection",
+    response_model=CasePortfolioSelectionResponse,
+    status_code=201,
+)
+def create_case_portfolio_selection(
+    case_id: str,
+    req: CasePortfolioSelectionCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CasePortfolioSelectionResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        proposal_repo = SQLiteCasePortfolioProposalRepository(store)
+        override_repo = SQLiteCaseOverrideApprovalRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        selection_repo = SQLiteCasePortfolioSelectionRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # ── 1. case ───────────────────────────────────────────────────────
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; portfolio selections are "
+                    "not accepted after case closure."
+                ),
+            )
+
+        # ── 2. resolver proposal ──────────────────────────────────────────
+        proposal_data: dict[str, Any] | None
+        if req.proposal_id is not None:
+            proposal_data = proposal_repo.get(req.proposal_id)
+            if proposal_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Portfolio proposal not found: {req.proposal_id!r}",
+                )
+            if proposal_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Portfolio proposal {req.proposal_id!r} belongs to "
+                        f"case {proposal_data['case_id']!r}, not {case_id!r}."
+                    ),
+                )
+        else:
+            proposal_data = proposal_repo.get_current_for_case(case_id)
+            if proposal_data is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no portfolio proposal. "
+                        "POST a portfolio-proposal first."
+                    ),
+                )
+
+        if proposal_data["status"] != "completed":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Portfolio proposal {proposal_data['proposal_id']!r} has "
+                    f"status {proposal_data['status']!r}; selection requires "
+                    "a completed proposal with candidates."
+                ),
+            )
+
+        # ── 3. resolver candidate ─────────────────────────────────────────
+        candidates_by_variant: dict[str, dict[str, Any]] = {
+            c.get("variant"): c
+            for c in proposal_data["candidates"]
+            if isinstance(c, dict) and "variant" in c
+        }
+        if req.selected_variant not in candidates_by_variant:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Selected variant {req.selected_variant!r} not found in "
+                    f"proposal {proposal_data['proposal_id']!r}. Available: "
+                    f"{sorted(candidates_by_variant.keys())}."
+                ),
+            )
+        chosen_candidate = candidates_by_variant[req.selected_variant]
+        requires_override = _candidate_requires_override(chosen_candidate)
+
+        # ── 4. resolver override (si aplica) ──────────────────────────────
+        resolved_override_id: str | None = None
+        if requires_override:
+            # candidate requiere override → override es obligatorio
+            override_data: dict[str, Any] | None
+            if req.override_approval_id is not None:
+                override_data = override_repo.get(req.override_approval_id)
+                if override_data is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Override approval not found: {req.override_approval_id!r}"
+                        ),
+                    )
+                if override_data["case_id"] != case_id:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Override approval {req.override_approval_id!r} "
+                            f"belongs to case {override_data['case_id']!r}, "
+                            f"not {case_id!r}."
+                        ),
+                    )
+                if override_data["proposal_id"] != proposal_data["proposal_id"]:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Override approval {req.override_approval_id!r} "
+                            f"belongs to proposal {override_data['proposal_id']!r}, "
+                            f"not {proposal_data['proposal_id']!r}."
+                        ),
+                    )
+                if override_data["candidate_variant"] != req.selected_variant:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Override approval {req.override_approval_id!r} "
+                            f"is for candidate "
+                            f"{override_data['candidate_variant']!r}, "
+                            f"not {req.selected_variant!r}."
+                        ),
+                    )
+                if override_data["decision"] != "approve":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Override approval {req.override_approval_id!r} "
+                            f"has decision {override_data['decision']!r}; "
+                            "selection requires decision='approve'."
+                        ),
+                    )
+                resolved_override_id = override_data["override_approval_id"]
+            else:
+                # Sin override explícito: buscar el current del case que
+                # coincida con proposal + variant + decision=approve.
+                current_override = override_repo.get_current_for_case(case_id)
+                if (
+                    current_override is None
+                    or current_override["proposal_id"] != proposal_data["proposal_id"]
+                    or current_override["candidate_variant"] != req.selected_variant
+                    or current_override["decision"] != "approve"
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Candidate {req.selected_variant!r} requires an "
+                            "approved override; no matching override approval "
+                            f"found for proposal "
+                            f"{proposal_data['proposal_id']!r}."
+                        ),
+                    )
+                resolved_override_id = current_override["override_approval_id"]
+        else:
+            # Candidate NO requiere override → no debe pasar override_approval_id
+            if req.override_approval_id is not None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Candidate {req.selected_variant!r} does not require "
+                        "advisor override; do not pass override_approval_id."
+                    ),
+                )
+
+        # ── 5. soft FK lookup advisor_id ──────────────────────────────────
+        advisor_id_for_row: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            advisor_id_for_row = advisor.advisor_id
+
+        # ── 6. persistir selection ────────────────────────────────────────
+        try:
+            selection_data = selection_repo.create(
+                case_id=case_id,
+                proposal_id=proposal_data["proposal_id"],
+                selected_variant=req.selected_variant,
+                selected_candidate=chosen_candidate,
+                rationale=req.rationale,
+                source=req.source,
+                override_approval_id=resolved_override_id,
+                advisor_id=advisor_id_for_row,
+                is_current=True,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 7. mark previous + actualizar puntero + transicionar status ───
+        selection_repo.mark_previous_not_current(
+            case_id, exclude_id=selection_data["selection_id"]
+        )
+        try:
+            case_repo.update_current_portfolio_selection(
+                case_id, selection_data["selection_id"]
+            )
+        except EntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        # Transición de status: IN_PROGRESS → PORTFOLIO_SELECTED. Si el
+        # case ya estaba en PORTFOLIO_SELECTED (re-selección), mantener.
+        # CLOSED ya fue rechazado arriba. DRAFT requiere KYC primero (caso
+        # edge que no debería ocurrir en el flow productivo); aceptamos
+        # DRAFT como "salto" defensivo, pero no genera evento de status.
+        current_status = case_data["status"]
+        if current_status == "IN_PROGRESS":
+            try:
+                case_repo.update_status(case_id, "PORTFOLIO_SELECTED")
+            except CaseTransitionError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Selection persisted but case status transition "
+                        f"failed: {exc}"
+                    ),
+                ) from exc
+        # current_status == "PORTFOLIO_SELECTED" → no-op (idempotente).
+        # current_status == "DRAFT" → no transicionamos (no es path productivo).
+
+        # ── 8. AuditEvent ─────────────────────────────────────────────────
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="portfolio_selected",
+                actor_advisor_id=advisor_id_for_row,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":              case_id,
+                    "selection_id":         selection_data["selection_id"],
+                    "proposal_id":          selection_data["proposal_id"],
+                    "override_approval_id": selection_data["override_approval_id"],
+                    "selected_variant":     selection_data["selected_variant"],
+                    "advisor_id":           selection_data["advisor_id"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Selection {selection_data['selection_id']!r} was "
+                    f"persisted but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CasePortfolioSelectionResponse(**selection_data)
+
+
+@app.get(
+    "/cases/{case_id}/portfolio-selection",
+    response_model=CasePortfolioSelectionListResponse,
+)
+def list_case_portfolio_selections(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CasePortfolioSelectionListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCasePortfolioSelectionRepository(store).list_by_case(case_id)
+    return CasePortfolioSelectionListResponse(
+        selections=[CasePortfolioSelectionResponse(**d) for d in data],
         count=len(data),
     )
 

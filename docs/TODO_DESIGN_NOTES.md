@@ -607,7 +607,7 @@ Los tests usan dos autouse fixtures:
 10. ~~CaseInvestmentPreference + CaseUniverseFilterRun case-scoped (POST/GET `/cases/{case_id}/investment-preferences`, POST/GET `/cases/{case_id}/universe-filter`); preferencias manuales o AI-extracted; filter engine sobre CSV; auto-events `investment_preferences_recorded` + `universe_filtered`; AIRequestLog cuando se usa IA.~~ ✅ Commit 11.
 11. ~~CasePortfolioProposal case-scoped (POST/GET `/cases/{case_id}/portfolio-proposal`); reconstruye instrumentos desde el filter run, corre PortfolioGenerationCoordinator con RiskBudget del approved profile; persiste snapshot completo (risk_budget + snapshots + candidates + warnings + status); auto-event `portfolio_proposal_generated`.~~ ✅ Commit 12.
 12. ~~CaseOverrideApproval case-scoped (POST/GET `/cases/{case_id}/override-approval`); ancla decisión a `(case_id, proposal_id, candidate_variant)`; valida que el candidate exista y requiera override; auto-events `advisor_override_approved` / `_rejected`.~~ ✅ Commit 13.
-13. Case-scoped portfolio selection (formaliza `current_portfolio_selection_id` con la variant elegida por el advisor).
+13. ~~CasePortfolioSelection case-scoped (POST/GET `/cases/{case_id}/portfolio-selection`); vincula proposal + override_approval cuando aplica; actualiza `current_portfolio_selection_id`; transiciona status a `PORTFOLIO_SELECTED`; auto-event `portfolio_selected`.~~ ✅ Commit 14.
 14. Case-scoped report generation (markdown / PDF audit-ready).
 15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
@@ -1370,3 +1370,104 @@ Decimotercer commit de Fase 2 — decisión humana del asesor sobre una variante
 - **No se valida que `reason_codes` / `exceeded_constraints` coincidan con el candidate**. El advisor puede declarar reason codes que NO aparecen en `candidate.reason_codes` (uso intencional: documentación adicional del advisor). Si compliance requiere validación cruzada, se agrega en una iteración futura.
 - **No hay endpoint detail** `/cases/{id}/override-approval/{override_approval_id}`. GET list devuelve todos; filtrar en cliente.
 - **No hay actor_role explícito en el payload** del response (solo `advisor_id`). El `actor_role` se preserva en el audit event vía `_pick_actor_role`. Si el caller necesita el rol en el response, se agrega en una iteración futura.
+
+---
+
+## Fase 2 — CasePortfolioSelection case-scoped ✅ (Commit 14)
+
+### Estado actual
+
+Decimocuarto commit de Fase 2 — decisión final del asesor sobre qué variant del proposal se presenta al cliente. Cierra el loop entre `CasePortfolioProposal`, `CaseOverrideApproval` y `advisory_cases.current_portfolio_selection_id` + status `PORTFOLIO_SELECTED`.
+
+#### Archivos creados / modificados
+
+- **`migrations/0008_case_portfolio_selections.sql`** — nueva migración:
+  - Tabla `case_portfolio_selections(selection_id PK, case_id NOT NULL FK→advisory_cases, proposal_id NOT NULL FK→case_portfolio_proposals, override_approval_id NULL FK→case_override_approvals, selected_variant NOT NULL, selected_candidate_json, rationale, source, advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1)` + 4 índices.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `SQLiteAdvisoryCaseRepository.update_current_portfolio_selection(case_id, selection_id | None)` — setter directo del puntero (mismo patrón que `update_current_approved_profile` y `update_current_kyc_submission`).
+  - `SQLiteCasePortfolioSelectionRepository` con `create`, `get`, `list_by_case`, `get_current_for_case`, `mark_previous_not_current`. IDs `case_portfolio_selection_NNNNNN`. `selected_candidate_json` como dict canonical (snapshot completo del candidate elegido al momento de la selección).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `_ALLOWED_SELECTION_VARIANTS = {DEFENSIVE, BALANCED, GROWTH}`.
+  - `CasePortfolioSelectionCreateRequest` (`proposal_id` opt, `selected_variant`, `override_approval_id` opt, `rationale`, `source="manual"`) con validators (variant allowlist, rationale/source no whitespace, IDs no empty).
+  - `CasePortfolioSelectionResponse`, `CasePortfolioSelectionListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - 2 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/portfolio-selection` | advisor, admin | Resuelve proposal + candidate. Si requires_override: exige override aprobado válido (matching proposal + variant + decision=approve). Si no requires_override: rechaza override_approval_id explícito. Persiste selection + mark_previous + actualiza puntero + transiciona status (IN_PROGRESS → PORTFOLIO_SELECTED). AuditEvent `portfolio_selected`. |
+  | `GET /cases/{case_id}/portfolio-selection` | admin, advisor, compliance, viewer | Lista selections ordenadas por `created_at_utc` asc. |
+
+- **`tests/integration/test_api_case_portfolio_selection.py`** — 45 tests en 8 clases:
+  - `TestCreateNoOverride` (11): variant que no requiere override; selection_id prefix; proposal_id/selected_variant correctos; selected_candidate con weights y expected_return; override_approval_id=None; advisor_id desde entity; is_current=true; GET cuenta 1; case.current_portfolio_selection_id actualizado; case.status=PORTFOLIO_SELECTED.
+  - `TestCreateWithOverride` (3): variant que requiere override sin override → 409 ("requires an approved override"); con override explícito → 201; con current approved override (id omitido) → 201.
+  - `TestCurrent` (2): segunda selection marca primera `is_current=false`; puntero del case apunta a la última.
+  - `TestValidation` (15): missing case (POST/GET) → 404; CLOSED → 409; sin proposal → 409; proposal de otro case → 422; selected_variant ausente en proposal → 422; override con decision=reject → 409; override de otro case → 422; override de otro proposal → 422; override para otro variant → 422; non-override variant con override_approval_id → 422; rationale/source whitespace → 422; selected_variant inválido (allowlist) → 422; proposal_id unknown → 422.
+  - `TestRBACPost` (5): 401, 403 (compliance/viewer), 201 (advisor/admin).
+  - `TestRBACGet` (3): 401, 200 (compliance/viewer).
+  - `TestAudit` (2): `portfolio_selected` con payload metadata; `verify_chain` intact.
+  - `TestNoRegression` (4): `/advisor/portfolio-selection` legacy, `/ai/filtered-portfolio-demo`, `/health`, `/auth/me`.
+
+- **`tests/unit/test_migrations.py`** — actualizado: `PHASE2_TABLES += case_portfolio_selections`; `REQUIRED_INDEXES += 4 nuevos`; `TOTAL_MIGRATIONS = 8`; assert fila `0008`.
+
+**Total tests tras este commit:** 2913 (todos pasando). Δ = +45 integration.
+
+#### Decisiones de diseño
+
+1. **`proposal_id` NOT NULL** en la tabla. Una selection sin proposal no tiene sentido — el candidate vive en el proposal.
+
+2. **`override_approval_id` NULL-able** porque solo aplica para variants que requieren override. Variants dentro del budget no necesitan override.
+
+3. **Validación cross-resource de override en 3 dimensiones**: case_id + proposal_id + candidate_variant + decision=approve. Cualquier mismatch → 422 (excepto reject que es 409: el override existe y es válido, pero su decision no permite la selección).
+
+4. **Si el candidate NO requiere override y el caller pasa `override_approval_id` → 422**. Política estricta: el caller debe ser explícito sobre que sabe que el variant no requiere override. Evita usos incorrectos.
+
+5. **Si el candidate requiere override y NO se pasa `override_approval_id`**: el endpoint busca el `current` override approval del case y exige que coincida (proposal + variant + decision=approve). Si no encuentra → 409. Permite flujos donde el advisor aprobó override antes y ahora selecciona sin re-pasar el ID explícitamente.
+
+6. **`selected_candidate_json` persiste el candidate completo** al momento de la selección. Snapshot independiente del proposal: si el proposal se regenera (nuevo proposal_id, candidates cambian), la selection conserva la foto del candidate original. Trazabilidad clave para compliance.
+
+7. **Status transition explícita**: `IN_PROGRESS → PORTFOLIO_SELECTED` vía `update_status` (FSM). Si ya está en `PORTFOLIO_SELECTED` (re-selección), no-op (idempotente). Si está en `DRAFT` (path no productivo), no transicionamos. `CLOSED` ya rechazado al inicio.
+
+8. **`is_current` a nivel case**. Cada nueva selection invalida las previas. Política simple: una selection vigente por case. Granularidad fina (por proposal o por variant) queda para futuro si compliance lo pide.
+
+9. **`current_portfolio_selection_id` se actualiza vía setter directo** (no FSM). Mismo patrón que `current_kyc_submission_id` y `current_approved_profile_id` (commits 8 y 10).
+
+10. **CLOSED case → 409** (patrón consistente con todos los endpoints case-scoped previos).
+
+11. **Reusa `_candidate_requires_override` helper** (definido en Commit 13). Misma fuente de verdad para "este candidate requiere override".
+
+12. **AuditEvent payload solo metadata** (selection_id, proposal_id, override_approval_id, selected_variant, advisor_id). El `selected_candidate` completo vive en la tabla; auditor navega por `selection_id`.
+
+13. **Soft FK lookup para `advisor_id`** (patrón consistente).
+
+14. **Tabla coexiste con `records` legacy** (`record_type='advisor_portfolio_selection'`, client-scoped, Phase 1) sin conflicto. Deprecación queda para iteración futura.
+
+15. **Distinción 409 vs 422 en validaciones de override**:
+   - `proposal_id` / `candidate_variant` no encuentran un match → 422 (request payload tiene una referencia inválida).
+   - `decision='reject'` o "no hay override válido current" → 409 (el recurso existe pero no permite la selección por estado).
+   - Mismo principio: 422 para "request payload roto", 409 para "estado del recurso no compatible".
+
+16. **`get_current_for_case` agregado a `SQLiteCasePortfolioSelectionRepository`** para futuro (e.g., report generation pickeará la selection current).
+
+17. **Test fixture usa `moderado`** (consistente con Commit 13) para garantizar que GROWTH requiera override y poder testear ambos paths (con y sin override).
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/portfolio-selection` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/portfolio-selection` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No hay case-scoped report generation** (item 14). La selection define la cartera final pero no se genera markdown / PDF audit-ready desde el case flow todavía.
+- **No hay case summary endpoint** (e.g., `GET /cases/{id}/summary` con KYC + analysis + approval + preferences + filter + proposal + override + selection en un solo response). Cada recurso se consulta separado.
+- **No hay validación de lifecycle formal**. El advisor puede hacer POST a `/portfolio-selection` en un case que está `DRAFT` (sin KYC, sin proposal, etc.) — el endpoint rechazará por "no proposal" (409), pero no hay un validator que diga "el case no está listo para selection". La FSM de status implícita lo cubre parcialmente.
+- **Re-selección sobre proposal viejo**: si el advisor cambia de opinión y quiere seleccionar otro variant del MISMO proposal, basta con un nuevo POST (mark_previous_not_current). Si quiere usar otro proposal, debe pasar `proposal_id` explícito. No hay UX guidance todavía.
+- **`current_portfolio_selection_id` apunta solo al último**; el caller debe filtrar el listado por `is_current=true` si quiere ese subset. Simplificación: no agregamos un endpoint dedicated `/current` ya que `GET /cases/{id}` ya expone el puntero.
+- **No hay endpoint detail** `/cases/{id}/portfolio-selection/{selection_id}`. GET list devuelve todos; filtrar en cliente.
+- **No reconciliación con `/advisor/portfolio-selection` legacy** (Phase 1, client-scoped). Coexisten sin conflicto.
+- **No reconciliación con override approvals huérfanos**: si una override approval queda referenciada por una selection vieja (is_current=false) y luego se genera un nuevo proposal sin override, la selection vieja sigue válida en su snapshot. El nuevo flow debe re-aprobar override si quiere mantener una selection vigente con override.

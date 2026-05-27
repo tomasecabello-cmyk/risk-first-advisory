@@ -81,11 +81,13 @@ PHASE2_TABLES: frozenset[str] = frozenset({
     "case_portfolio_proposals",
     # 0007 — case-scoped advisor override approvals
     "case_override_approvals",
+    # 0008 — case-scoped portfolio selections
+    "case_portfolio_selections",
 })
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 7
+TOTAL_MIGRATIONS: int = 8
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -128,6 +130,11 @@ REQUIRED_INDEXES: frozenset[str] = frozenset({
     "idx_case_override_approvals_case_id",
     "idx_case_override_approvals_proposal_id",
     "idx_case_override_approvals_advisor_id",
+    # 0008 — case_portfolio_selections indices
+    "idx_case_portfolio_selections_case_id",
+    "idx_case_portfolio_selections_proposal_id",
+    "idx_case_portfolio_selections_override_approval_id",
+    "idx_case_portfolio_selections_advisor_id",
 })
 
 
@@ -299,6 +306,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version7 == "0007"
     assert "override" in description7.lower() or "approval" in description7.lower()
     assert applied_at7.endswith("Z")
+    # La octava fila debe ser 0008 — case_portfolio_selections.
+    version8, description8, applied_at8 = rows[7]
+    assert version8 == "0008"
+    assert "selection" in description8.lower() or "portfolio" in description8.lower()
+    assert applied_at8.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

@@ -675,6 +675,34 @@ class SQLiteAdvisoryCaseRepository:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def update_current_portfolio_selection(
+        self, case_id: str, selection_id: str | None
+    ) -> dict[str, Any]:
+        """
+        Setea advisory_cases.current_portfolio_selection_id = selection_id.
+
+        Pasar None lo limpia. No valida que el selection_id exista en
+        case_portfolio_selections — ese contrato lo cumple el endpoint.
+
+        Raises:
+            EntityNotFoundError: si el case no existe.
+        """
+        current = self.get(case_id)
+        if current is None:
+            raise EntityNotFoundError(f"Case not found: {case_id!r}")
+        with self._store._conn:
+            self._store._conn.execute(
+                """
+                UPDATE advisory_cases
+                SET current_portfolio_selection_id = ?
+                WHERE case_id = ?
+                """,
+                (selection_id, case_id),
+            )
+        updated = dict(current)
+        updated["current_portfolio_selection_id"] = selection_id
+        return updated
+
     def update_current_approved_profile(
         self, case_id: str, approval_id: str | None
     ) -> dict[str, Any]:
@@ -2881,4 +2909,183 @@ class SQLiteCaseOverrideApprovalRepository:
             "advisor_id":           row["advisor_id"],
             "is_current":           bool(row["is_current"]),
             "created_at_utc":       row["created_at_utc"],
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CasePortfolioSelection — Fase 2 Commit 14 (selección final case-scoped)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Decisión final del asesor: cuál variant del proposal se presenta al cliente.
+# Cambia el status del case a PORTFOLIO_SELECTED y materializa el puntero
+# advisory_cases.current_portfolio_selection_id.
+#
+# is_current a nivel case (una selección vigente por case). El endpoint
+# valida la coherencia override / candidate-requires-override antes del insert.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteCasePortfolioSelectionRepository:
+    """
+    Persiste y lee selections case-scoped sobre `case_portfolio_selections`
+    (migration 0008).
+
+    Operaciones:
+        create(...)                       — inserta nueva selection.
+        get(selection_id)                 — dict | None.
+        list_by_case(case_id)             — orden created_at_utc asc, id asc.
+        get_current_for_case(case_id)     — is_current=1 más reciente o None.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                          — bulk is_current=0.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        proposal_id: str,
+        selected_variant: str,
+        selected_candidate: Mapping[str, Any],
+        rationale: str,
+        source: str = "manual",
+        override_approval_id: str | None = None,
+        advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        if not isinstance(selected_candidate, Mapping):
+            raise ValueError(
+                "selected_candidate debe ser un mapping (dict); recibido "
+                f"{type(selected_candidate).__name__}."
+            )
+
+        selection_id = self._store._next_id("case_portfolio_selection_")
+        now = _now_utc()
+        candidate_dict = dict(selected_candidate)
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_portfolio_selections
+                        (selection_id, case_id, proposal_id,
+                         override_approval_id, selected_variant,
+                         selected_candidate_json, rationale, source,
+                         advisor_id, created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        selection_id, case_id, proposal_id,
+                        override_approval_id, selected_variant,
+                        _canonical_json(candidate_dict),
+                        rationale, source,
+                        advisor_id, now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "selection_id":          selection_id,
+            "case_id":               case_id,
+            "proposal_id":           proposal_id,
+            "override_approval_id":  override_approval_id,
+            "selected_variant":      selected_variant,
+            "selected_candidate":    candidate_dict,
+            "rationale":             rationale,
+            "source":                source,
+            "advisor_id":            advisor_id,
+            "is_current":            bool(is_current),
+            "created_at_utc":        now,
+        }
+
+    def get(self, selection_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT selection_id, case_id, proposal_id,
+                   override_approval_id, selected_variant,
+                   selected_candidate_json, rationale, source,
+                   advisor_id, created_at_utc, is_current
+            FROM case_portfolio_selections WHERE selection_id = ?
+            """,
+            (selection_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT selection_id, case_id, proposal_id,
+                   override_approval_id, selected_variant,
+                   selected_candidate_json, rationale, source,
+                   advisor_id, created_at_utc, is_current
+            FROM case_portfolio_selections
+            WHERE case_id = ?
+            ORDER BY created_at_utc ASC, selection_id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT selection_id, case_id, proposal_id,
+                   override_approval_id, selected_variant,
+                   selected_candidate_json, rationale, source,
+                   advisor_id, created_at_utc, is_current
+            FROM case_portfolio_selections
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, selection_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_portfolio_selections
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_portfolio_selections
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND selection_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "selection_id":          row["selection_id"],
+            "case_id":               row["case_id"],
+            "proposal_id":           row["proposal_id"],
+            "override_approval_id":  row["override_approval_id"],
+            "selected_variant":      row["selected_variant"],
+            "selected_candidate":    json.loads(row["selected_candidate_json"]),
+            "rationale":             row["rationale"],
+            "source":                row["source"],
+            "advisor_id":            row["advisor_id"],
+            "is_current":            bool(row["is_current"]),
+            "created_at_utc":        row["created_at_utc"],
         }
