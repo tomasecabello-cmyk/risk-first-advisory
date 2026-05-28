@@ -629,6 +629,42 @@ Si algún paso falla, el script imprime `FAIL` con la razón y termina con exit 
 
 ---
 
+## Case workflow smoke check (Fase 2)
+
+Valida end-to-end **todo el flujo case-scoped** de Fase 2 (firm → advisor → client → case → KYC → AI profile analysis → profile approval → investment preferences → universe filter → portfolio proposal → override approval → portfolio selection → report → summary → audit verify) sin OpenAI real ni servidor uvicorn corriendo. Sirve como candado de cierre antes de levantar el frontend Case Workbench.
+
+```powershell
+python scripts/run_case_workflow_smoke_check.py
+```
+
+Output esperado al final:
+
+```
+PASS — case workflow smoke check completed
+    case_id          : case_000001
+    report_id        : case_report_000001
+    audit intact     : True
+    completion ratio : 1.0
+    next action      : ready_for_review
+```
+
+Opciones:
+
+```powershell
+# Preservar la DB temporal para inspección:
+python scripts/run_case_workflow_smoke_check.py --keep-db
+
+# DB en path específico (no se borra al terminar):
+python scripts/run_case_workflow_smoke_check.py --db-path data/smoke_inspection.db
+
+# Traceback completo en fallas:
+python scripts/run_case_workflow_smoke_check.py --debug
+```
+
+El script aplica todas las migrations (`0001..0009`) sobre una DB SQLite temporal, monkeypatchea `OpenAIProfileClient` con un mock determinístico (sin red), usa FastAPI TestClient (sin uvicorn) y valida 14 pasos del workflow. Exit code 0 si pasa, 1 si falla.
+
+---
+
 ## Demo local — inicio rápido
 
 ### Backend

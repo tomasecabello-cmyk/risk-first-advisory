@@ -610,10 +610,11 @@ Los tests usan dos autouse fixtures:
 13. ~~CasePortfolioSelection case-scoped (POST/GET `/cases/{case_id}/portfolio-selection`); vincula proposal + override_approval cuando aplica; actualiza `current_portfolio_selection_id`; transiciona status a `PORTFOLIO_SELECTED`; auto-event `portfolio_selected`.~~ ✅ Commit 14.
 14. ~~CaseReport case-scoped (POST/GET `/cases/{case_id}/reports`, GET `/cases/{case_id}/reports/{report_id}`); markdown determinístico vía `CaseMarkdownReportGenerator`; versionado monotónico por case_id; auto-event `report_generated`.~~ ✅ Commit 15.
 15. ~~Case summary endpoint (`GET /cases/{id}/summary`) que devuelve case + firm/client/advisor + todos los `current_*` + audit integrity + AI logs count + workflow progress + next_recommended_action en un solo response.~~ ✅ Commit 16.
-16. PDF rendering del case report (hoy solo markdown).
-17. Case report branding (firm logo, colores, header customizable).
-18. Lifecycle formal de reports (workflow draft → reviewed → final → sent, con AuditEvents de cada transición).
-19. Frontend Case Workbench (UI que consume `/cases/{id}/summary` para hidratar la vista completa del caso sin múltiples round-trips).
+16. ~~Case workflow smoke check script (`scripts/run_case_workflow_smoke_check.py`) — candado de cierre de Fase 2. Valida end-to-end firm → … → report → summary → audit verify sin OpenAI ni uvicorn, en DB temporal.~~ ✅ Commit 17.
+17. PDF rendering del case report (hoy solo markdown).
+18. Case report branding (firm logo, colores, header customizable).
+19. Lifecycle formal de reports (workflow draft → reviewed → final → sent, con AuditEvents de cada transición).
+20. Frontend Case Workbench (UI que consume `/cases/{id}/summary` para hidratar la vista completa del caso sin múltiples round-trips).
 15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
 17. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
@@ -1671,3 +1672,96 @@ Decimosexto commit de Fase 2 — endpoint sintetizador que devuelve el estado co
 - **No streaming / pagination**. El response puede ser grande (especialmente con `current_portfolio_proposal.candidates` que incluye snapshots completos). Si esto se vuelve un problema operativo, se puede agregar `?fields=` o response slim sin cambiar el endpoint principal.
 - **No diff entre versions**. El summary solo expone los `current_*`. Si compliance pide ver "qué cambió" entre dos snapshots, se agrega un endpoint dedicado (no entra en el scope del summary).
 - **No KPIs agregados** (e.g., volatilidad histórica del case, latencia AI promedio, etc.). El summary es estado, no analítica. Métricas agregadas quedan para un dashboard dedicado.
+
+---
+
+## Fase 2 — Case workflow smoke check ✅ (Commit 17)
+
+### Estado actual
+
+Decimoséptimo commit de Fase 2 — **candado de cierre**. Script ejecutable que valida end-to-end el workflow case-scoped completo, sin necesidad de servidor uvicorn ni OpenAI real. Sirve como verificación final antes de levantar el frontend Case Workbench (item 20).
+
+#### Archivos creados / modificados
+
+- **`scripts/run_case_workflow_smoke_check.py`** — nuevo script:
+  - Usa FastAPI TestClient (no requiere uvicorn).
+  - Crea DB temporal vía `tempfile.mkdtemp` (`--db-path` permite override; `--keep-db` evita cleanup).
+  - Aplica migrations 0001..0009 automáticamente.
+  - Stubea `OpenAIProfileClient` con un mock determinístico (`preliminary_profile=moderado`, `confidence=0.82`, sin contradicciones).
+  - Stubea `DEFAULT_DB_PATH` y `ADVISOR_TOKENS_FILE` para no tocar dev DB / tokens locales.
+  - Ejecuta 14 pasos en orden: migrate → install stubs → entities → KYC → analysis → approval → preferences → universe filter → proposal → override → selection → report → summary → audit verify.
+  - Reconfigura `sys.stdout`/`sys.stderr` a UTF-8 con `errors='replace'` (mismo patrón que `scripts/migrate.py`) para evitar UnicodeEncodeError en consolas Windows cp1252.
+  - Expone función pública `run_case_workflow_smoke_check(db_path=None, debug=False) → SmokeCheckResult` para tests programáticos y `main(argv=None) → int` para uso CLI / pytest.
+  - Imprime cada paso con header `==` y check ✓/✗ por aserción.
+  - Validaciones explícitas: status codes 201, IDs con prefijos correctos, version=1 para KYC/report, `proposal.status="completed"`, `universe filter eligible_count > 0`, transición a `PORTFOLIO_SELECTED`, `completion_ratio=1.0`, `next_action="ready_for_review"`, `audit.is_intact=True`, `total_events >= 7`.
+  - Exit 0 si todo pasa; exit 1 si al menos una aserción falla.
+
+- **`tests/integration/test_case_workflow_smoke_check_script.py`** — 19 tests en 5 clases:
+  - `TestRunFunction` (8): `run_case_workflow_smoke_check(db_path=...)` devuelve PASS, `case_id` + `report_id` con prefijos, audit intact, `completion_ratio=1.0`, `next_action=ready_for_review`, sin failures, usa el `db_path` dado.
+  - `TestMainEntrypoint` (2): `main(['--db-path', ...])` exit 0; `--keep-db` preserva la DB.
+  - `TestOutput` (4): stdout contiene "PASS", el case_id, el report_id, palabras "audit"/"intact".
+  - `TestNoExternalDeps` (2): sin `OPENAI_API_KEY` en el entorno pasa igual; NO toca `data/demo_api.db` (mtime no cambia).
+  - `TestImportable` (3): función + main + dataclass disponibles para import.
+
+- **`docs/TODO_DESIGN_NOTES.md`** — esta sección + pending list actualizado (item 16 hecho, items 17-20 renumerados).
+
+**Total tests tras este commit:** 3016 (todos pasando). Δ = +19 integration.
+
+#### Decisiones de diseño
+
+1. **TestClient + temp DB, no uvicorn**. El script es candado de testing, no smoke test de deploy. Usar TestClient elimina toda la complejidad de orquestar uvicorn + esperar al puerto + cleanup de procesos.
+
+2. **`tempfile.mkdtemp` por default; `--db-path` override**. El usuario casual ejecuta sin args y obtiene una DB throwaway; el debugger pasa `--db-path` para inspeccionar. Cleanup automático solo si no se pasó `--db-path` y no se pasó `--keep-db`.
+
+3. **OpenAI stubeado via `_get_openai_profile_client` monkeypatch directo**. Mismo patrón que los tests integration. El stub es estructuralmente válido para `OpenAIProfileClient.analyze_kyc` (campo `choices[0].message.content` con JSON parseable que pasa los validators).
+
+4. **Profile `moderado`** en el mock → bajo el fixture universe, GROWTH típicamente requiere override. El smoke check **prefiere el variant que requiere override** cuando existe, para ejercitar el path completo (override approval + selection con override_approval_id).
+
+5. **Política override-first**: si el proposal tiene cualquier candidate con `requires_advisor_override=True`, el script aprueba override sobre ese variant y lo selecciona. Razón: el summary computa `has_override_requirement` a nivel proposal; para alcanzar `completion_ratio=1.0` y `next_action=ready_for_review` con el smoke check, hay que cerrar el override loop aunque podamos elegir un variant más conservador. Además ejercita el path productivo más interesante.
+
+6. **Función pública + `main()` separados**. `run_case_workflow_smoke_check()` devuelve `SmokeCheckResult` (dataclass) para que los tests asserten sobre campos. `main()` envuelve la función + parsea CLI args + maneja exit code + cleanup de tempdir.
+
+7. **Stubs aplicados via setting de atributo + env var**, NO monkeypatch (que requeriría fixture). Trade-off: el script muta state global (env var, atributos del módulo). Aceptable porque corre como proceso aislado o, en tests, dentro de su propio tmp_path con cleanup automático.
+
+8. **`sys.stdout.reconfigure(encoding='utf-8', errors='replace')`** al inicio. Sin esto el script crashea en consolas Windows default cp1252 al imprimir ▶ ✓ ✗. Mismo patrón ya usado en `scripts/migrate.py`.
+
+9. **14 pasos numerados** en el output. Facilita identificar dónde falla cuando falla.
+
+10. **Aserciones inline via `_expect(failures, condition, label, expected, actual)`**. No usa `assert` (que rompe en el primer fallo); acumula failures y al final imprime todos. Esto permite ver el primer fallo + cuántos más vinieron, sin re-correr.
+
+11. **Tests del script via función directa, no subprocess**. Razón: subprocess agrega complejidad (env, path, encoding) y los CI a veces no liberan el handle de la DB SQLite al terminar el proceso. Function-direct es más simple, más rápido y suficiente para validar la lógica.
+
+12. **`TestNoExternalDeps.test_does_not_touch_dev_db`** valida un invariante crítico: ningún test/script debe modificar `data/demo_api.db`. Si el smoke check accidentalmente importara algo que escribiera a esa ruta, este test rompe.
+
+13. **`SmokeCheckResult` dataclass público** — los campos (`passed`, `case_id`, `report_id`, `audit_intact`, `completion_ratio`, `next_action`, `db_path`, `failures`) son lo que el caller necesita para construir su propio reporting/dashboard si quiere wrapping del script.
+
+#### Cómo correrlo
+
+```
+# Smoke check end-to-end (sin args = DB temporal con cleanup auto):
+python scripts/run_case_workflow_smoke_check.py
+
+# Preservar DB para inspección:
+python scripts/run_case_workflow_smoke_check.py --keep-db
+
+# DB en path específico (no se borra al terminar):
+python scripts/run_case_workflow_smoke_check.py --db-path data/smoke_inspection.db
+
+# Con traceback completo en fallas:
+python scripts/run_case_workflow_smoke_check.py --debug
+```
+
+Exit code:
+- `0` = PASS — el flujo case-scoped funciona end-to-end.
+- `1` = FAIL — al menos una aserción no se cumplió; revisar las líneas con ✗.
+
+#### Lo que NO está en este commit
+
+- **No reemplaza el test suite completo.** El smoke check valida el happy path; los tests integration cubren edge cases, RBAC, validation y regresiones puntuales.
+- **No valida frontend** (item 20 — UI Case Workbench).
+- **No valida live market data** ni live OpenAI; ambos siguen mockeados.
+- **No mide latencia / performance**. Es funcional, no benchmark.
+- **No corre como parte de CI automáticamente** (queda como invocación manual o se agrega a un workflow GH Actions en un commit futuro).
+- **No instala el paquete ni gestiona venv**: asume que `python scripts/run_case_workflow_smoke_check.py` se invoca desde el repo root con dependencies ya instaladas (mismo supuesto que los otros scripts).
+- **No valida concurrencia** (multiple cases en paralelo). El smoke check es secuencial.
+- **No emite métricas**: solo PASS/FAIL + counts. Si Phase 3 quiere telemetría más rica, se puede serializar `SmokeCheckResult` a JSON sin cambiar la lógica.
