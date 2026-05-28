@@ -1873,3 +1873,64 @@ class CasePortfolioSelectionResponse(BaseModel):
 class CasePortfolioSelectionListResponse(BaseModel):
     selections: list[CasePortfolioSelectionResponse]
     count:      int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseReport — Fase 2 Commit 15 (case-scoped markdown reports)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_REPORT_TYPES:    frozenset[str] = frozenset({"portfolio_recommendation"})
+_ALLOWED_REPORT_STATUSES: frozenset[str] = frozenset({"draft", "final"})
+
+
+class CaseReportCreateRequest(BaseModel):
+    portfolio_selection_id: str | None = None
+    report_type:            str        = "portfolio_recommendation"
+    status:                 str        = "draft"
+
+    @field_validator("portfolio_selection_id", mode="before")
+    @classmethod
+    def _selection_id_not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("portfolio_selection_id no puede ser cadena vacía.")
+        return v
+
+    @field_validator("report_type")
+    @classmethod
+    def _report_type_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_REPORT_TYPES:
+            raise ValueError(
+                f"report_type inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_REPORT_TYPES)}."
+            )
+        return v
+
+    @field_validator("status")
+    @classmethod
+    def _status_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_REPORT_STATUSES:
+            raise ValueError(
+                f"status inválido: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_REPORT_STATUSES)}."
+            )
+        return v
+
+
+class CaseReportResponse(BaseModel):
+    report_id:                str
+    case_id:                  str
+    portfolio_selection_id:   str | None
+    portfolio_proposal_id:    str | None
+    report_type:              str
+    status:                   str
+    version:                  int
+    markdown:                 str
+    metadata:                 dict[str, Any]
+    generated_by_advisor_id:  str | None
+    is_current:               bool
+    created_at_utc:           str
+
+
+class CaseReportListResponse(BaseModel):
+    reports: list[CaseReportResponse]
+    count:   int

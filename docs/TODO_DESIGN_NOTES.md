@@ -608,7 +608,11 @@ Los tests usan dos autouse fixtures:
 11. ~~CasePortfolioProposal case-scoped (POST/GET `/cases/{case_id}/portfolio-proposal`); reconstruye instrumentos desde el filter run, corre PortfolioGenerationCoordinator con RiskBudget del approved profile; persiste snapshot completo (risk_budget + snapshots + candidates + warnings + status); auto-event `portfolio_proposal_generated`.~~ ✅ Commit 12.
 12. ~~CaseOverrideApproval case-scoped (POST/GET `/cases/{case_id}/override-approval`); ancla decisión a `(case_id, proposal_id, candidate_variant)`; valida que el candidate exista y requiera override; auto-events `advisor_override_approved` / `_rejected`.~~ ✅ Commit 13.
 13. ~~CasePortfolioSelection case-scoped (POST/GET `/cases/{case_id}/portfolio-selection`); vincula proposal + override_approval cuando aplica; actualiza `current_portfolio_selection_id`; transiciona status a `PORTFOLIO_SELECTED`; auto-event `portfolio_selected`.~~ ✅ Commit 14.
-14. Case-scoped report generation (markdown / PDF audit-ready).
+14. ~~CaseReport case-scoped (POST/GET `/cases/{case_id}/reports`, GET `/cases/{case_id}/reports/{report_id}`); markdown determinístico vía `CaseMarkdownReportGenerator`; versionado monotónico por case_id; auto-event `report_generated`.~~ ✅ Commit 15.
+15. PDF rendering del case report (hoy solo markdown).
+16. Case report branding (firm logo, colores, header customizable).
+17. Lifecycle formal de reports (workflow draft → reviewed → final → sent, con AuditEvents de cada transición).
+18. Case summary endpoint (`GET /cases/{id}/summary`) que devuelva KYC + analysis + approval + preferences + filter + proposal + override + selection + report en un solo response.
 15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
 17. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
@@ -1471,3 +1475,113 @@ Decimocuarto commit de Fase 2 — decisión final del asesor sobre qué variant 
 - **No hay endpoint detail** `/cases/{id}/portfolio-selection/{selection_id}`. GET list devuelve todos; filtrar en cliente.
 - **No reconciliación con `/advisor/portfolio-selection` legacy** (Phase 1, client-scoped). Coexisten sin conflicto.
 - **No reconciliación con override approvals huérfanos**: si una override approval queda referenciada por una selection vieja (is_current=false) y luego se genera un nuevo proposal sin override, la selection vieja sigue válida en su snapshot. El nuevo flow debe re-aprobar override si quiere mantener una selection vigente con override.
+
+---
+
+## Fase 2 — CaseReport case-scoped ✅ (Commit 15)
+
+### Estado actual
+
+Decimoquinto commit de Fase 2 — cierra el flujo case-scoped end-to-end. El asesor puede generar un reporte Markdown determinístico que consolida la selección final del case, listo para presentar al cliente (o exportar a PDF en un commit futuro).
+
+#### Archivos creados / modificados
+
+- **`migrations/0009_case_reports.sql`** — nueva migración:
+  - Tabla `case_reports(report_id PK, case_id NOT NULL FK→advisory_cases, portfolio_selection_id NULL FK→case_portfolio_selections, portfolio_proposal_id NULL FK→case_portfolio_proposals, report_type NOT NULL, status NOT NULL, version INT NOT NULL, markdown TEXT, metadata_json, generated_by_advisor_id NULL FK→advisors, created_at_utc, is_current INTEGER DEFAULT 1, UNIQUE(case_id, version))` + 4 índices.
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — `SQLiteCaseReportRepository` con `create`, `get`, `list_by_case`, `get_current_for_case`, `mark_previous_not_current`. IDs `case_report_NNNNNN`. `version = MAX(version)+1` por case (mismo patrón que KYC submissions). `markdown` se persiste como TEXT plano; `metadata_json` en canonical JSON.
+
+- **`src/risk_first_advisory/reporting_layer/case_markdown_report.py`** — nuevo módulo:
+  - `CaseMarkdownReportGenerator.generate(case_data, selection_data, proposal_data=None, approval_data=None, override_data=None, generated_at_utc=None) → (markdown, metadata)`.
+  - Sin side-effects (puro). Devuelve tuple para que el endpoint persista ambos.
+  - Secciones: título, metadata, perfil aprobado, variante seleccionada, métricas, distribución de pesos (ordenada determinísticamente), override approval (si aplica), disclaimers.
+  - 4 disclaimers explícitos: NO es recomendación automática, requiere revisión advisor, datos pueden ser proxy/demo, IA NO aprueba la recomendación final.
+
+- **`src/risk_first_advisory/reporting_layer/__init__.py`** — exporta `CaseMarkdownReportGenerator`.
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `_ALLOWED_REPORT_TYPES = {portfolio_recommendation}`, `_ALLOWED_REPORT_STATUSES = {draft, final}`.
+  - `CaseReportCreateRequest` (`portfolio_selection_id` opt, `report_type="portfolio_recommendation"`, `status="draft"`).
+  - `CaseReportResponse` (incluye `markdown` completo + `metadata` dict).
+  - `CaseReportListResponse`.
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Import `CaseMarkdownReportGenerator` desde reporting_layer.
+  - 3 endpoints:
+
+  | Endpoint | RBAC | Descripción |
+  |---|---|---|
+  | `POST /cases/{case_id}/reports` | advisor, admin | Resuelve selection (explícita o current), carga proposal/approval/override, genera markdown, persiste con version siguiente, mark_previous_not_current, AuditEvent `report_generated`. |
+  | `GET /cases/{case_id}/reports` | admin, advisor, compliance, viewer | Lista reports ordenados por version asc. |
+  | `GET /cases/{case_id}/reports/{report_id}` | admin, advisor, compliance, viewer | Detalle; 404 si reporte no existe O pertenece a otro case (no exponemos IDs cross-case). |
+
+- **`tests/integration/test_api_case_reports.py`** — 45 tests en 7 clases:
+  - `TestCreate` (18): 201; prefix `case_report_`; version=1; case_id/selection_id/proposal_id correctos; report_type default + status draft + status=final supported; markdown no vacío + contiene case_id + selected_variant + disclaimer IA/advisor; metadata dict con campos clave; is_current=true; GET list 1; GET single OK; segundo POST → version 2 + previous is_current=false.
+  - `TestValidation` (11): missing case POST/GET-list/GET-single → 404; sin selection → 409; selection de otro case → 422; selection unknown → 422; report_type/status inválidos → 422; CLOSED → 409; report missing → 404; report de otro case → 404.
+  - `TestRBACPost` (5): 401, 403 (compliance/viewer), 201 (advisor/admin).
+  - `TestRBACGet` (6): 401 list y single; compliance/viewer 200 en ambos.
+  - `TestAudit` (2): `report_generated` con payload (report_id, version); `verify_chain` intact.
+  - `TestNoRegression` (3): `/ai/filtered-portfolio-demo`, `/health`, `/auth/me`.
+
+- **`tests/unit/test_migrations.py`** — actualizado: `PHASE2_TABLES += case_reports`; `REQUIRED_INDEXES += 4 nuevos`; `TOTAL_MIGRATIONS = 9`; assert fila `0009`.
+
+**Total tests tras este commit:** 2958 (todos pasando). Δ = +45 integration.
+
+#### Decisiones de diseño
+
+1. **Nuevo generator en `reporting_layer`** (`CaseMarkdownReportGenerator`), no se reusan los existentes (`MarkdownReportGenerator` espera `AdvisoryWorkflowResult` legacy; `AIFilteredPortfolioReportGenerator` espera un payload distinto). Ventaja: el generator case-scoped trabaja con dicts plain del repo layer sin tener que mapear a/desde domain objects.
+
+2. **Generator es puro** (sin IO, sin DB). El endpoint arma el contexto (case + selection + proposal + approval + override), invoca `generate`, y persiste. Esto hace al generator testeable directamente sin DB.
+
+3. **`generate` devuelve `(markdown, metadata)` tuple**. El metadata dict captura IDs y atributos clave (selection_id, proposal_id, approved_profile, selected_variant, expected_return_annual, volatility_annual, asset_count, generated_at_utc) para que el endpoint los persista sin re-derivar.
+
+4. **`version` monotónica por `case_id` (UNIQUE(case_id, version))**. Cada POST nuevo incrementa `version`. Mismo patrón que `kyc_submissions` (Commit 8). Race condition concurrente → `EntityConflictError` (UNIQUE) → 409.
+
+5. **`markdown` como TEXT plano**, NO en canonical JSON. Razón: es texto ya formateado; envolverlo en JSON agregaría una capa innecesaria. `metadata_json` sí en canonical JSON (es un dict estructurado).
+
+6. **Política de resolución de `portfolio_selection_id`**:
+   - Explícito en request → debe pertenecer al case (422 si no).
+   - Omitido → usa `case.current_portfolio_selection_id` (puntero materializado en Commit 14).
+   - Si no hay current → 409 con mensaje "POST a portfolio-selection first".
+
+7. **proposal/approval/override son enrichments opcionales**. El endpoint los carga "best effort" para enriquecer el markdown: si la FK del proposal está rota (caso edge defensivo), el report igual se genera con el snapshot `selected_candidate` que vive en la selection.
+
+8. **CLOSED case → 409** (patrón consistente con todos los endpoints case-scoped previos).
+
+9. **GET single con cross-case isolation**: si el `report_id` pertenece a otro `case_id`, devolvemos **404** (no 403). Razón: no exponer la existencia de IDs entre cases. Mismo principio que la mayoría de APIs REST con scope multi-tenant.
+
+10. **`portfolio_selection_id` y `portfolio_proposal_id` NULL-able en la tabla** (FK opcional). Aunque el endpoint productivo siempre los puebla, el repo permite reports sin esos vínculos (e.g., backfill / scripts internos). Defensa contra over-coupling.
+
+11. **AuditEvent payload solo metadata** (report_id, version, type, status, IDs vinculados). El markdown completo NO se duplica en el audit chain; auditor navega por `report_id` para inspeccionar.
+
+12. **Soft FK lookup para `generated_by_advisor_id`** (patrón consistente con todos los commits previos).
+
+13. **Disclaimers como constante module-level** (`_DISCLAIMERS`). Cambiarlos requiere edit explícito, lo que es bueno: son compliance-relevant. Si una iteración futura quiere disclaimers por firm o por jurisdiction, se parametriza vía argumento al `generate`.
+
+14. **`generated_at_utc` inyectable** en `generate()` (default = `datetime.now(timezone.utc)`). Útil para tests que quieran determinismo total; el endpoint productivo no lo inyecta.
+
+15. **Distribución de pesos ordenada determinísticamente**: `(-weight desc, ticker asc)`. Hace el markdown reproducible byte-a-byte si los inputs son idénticos.
+
+16. **`status` enum mínimo `{draft, final}`**. Workflow más rico (e.g., `draft → reviewed → final → sent`) queda como item 17 del pending list.
+
+17. **No PDF en este commit** (item 15). El markdown es el formato canónico; PDF rendering es una transformación separada (futuro: WeasyPrint, mdpdf, o un servicio externo).
+
+#### Tabla de RBAC actualizada (nuevos endpoints)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `POST /cases/{id}/reports` | ✅ 201 | ✅ 201 | ❌ 403 | ❌ 403 | ❌ 401 |
+| `GET /cases/{id}/reports` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+| `GET /cases/{id}/reports/{report_id}` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No PDF** (item 15). El reporte solo se entrega en markdown.
+- **No branding/customization** (item 16). Disclaimers y estructura del markdown son fijos.
+- **No lifecycle formal de reports** (item 17). `status` solo distingue `draft` vs `final`; no hay workflow `reviewed → sent → archived` con AuditEvents por transición.
+- **No case summary endpoint** (item 18). Cada recurso del case se consulta separado.
+- **No download endpoint** (`GET /cases/{id}/reports/{report_id}/download`). El markdown viene en el response JSON; si crece la necesidad de descarga directa con `Content-Type: text/markdown`, se agrega sin cambios de schema.
+- **El report NO actualiza el case status**. Generar el reporte no cambia `advisory_cases.status` (sigue en `PORTFOLIO_SELECTED`). La transición a `CLOSED` queda como decisión explícita del advisor vía `PATCH /cases/{id}/status`.
+- **No reconciliación con `records` legacy** (`record_type='markdown_report'`, client_id-scoped). Coexisten sin conflicto; deprecación queda para iteración futura.
+- **No hay endpoint para regenerar reporte automáticamente** cuando la selection cambia. El advisor debe POST manual a `/reports` para generar la version nueva.
+- **No firm-level scoping** sobre estos endpoints (consistente con el resto del sistema).

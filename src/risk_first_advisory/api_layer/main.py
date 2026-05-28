@@ -74,6 +74,9 @@ from risk_first_advisory.api_layer.schemas import (
     CasePortfolioSelectionCreateRequest,
     CasePortfolioSelectionListResponse,
     CasePortfolioSelectionResponse,
+    CaseReportCreateRequest,
+    CaseReportListResponse,
+    CaseReportResponse,
     CaseUniverseFilterRunCreateRequest,
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
@@ -155,6 +158,7 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteCaseOverrideApprovalRepository,
     SQLiteCasePortfolioProposalRepository,
     SQLiteCasePortfolioSelectionRepository,
+    SQLiteCaseReportRepository,
     SQLiteCaseUniverseFilterRunRepository,
     SQLiteClientRepository,
     SQLiteEntityStore,
@@ -175,6 +179,7 @@ from risk_first_advisory.persistence_layer.sqlite_repository import (
 )
 from risk_first_advisory.reporting_layer import (
     AIFilteredPortfolioReportGenerator,
+    CaseMarkdownReportGenerator,
     MarkdownReport,
     MarkdownReportGenerator,
 )
@@ -5266,6 +5271,251 @@ def list_case_portfolio_selections(
         selections=[CasePortfolioSelectionResponse(**d) for d in data],
         count=len(data),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — CaseReport endpoints (markdown reports)
+#
+# RBAC:
+#   POST /cases/{case_id}/reports                → advisor, admin
+#   GET  /cases/{case_id}/reports                → admin, advisor, compliance, viewer
+#   GET  /cases/{case_id}/reports/{report_id}    → admin, advisor, compliance, viewer
+#
+# Comportamiento POST:
+#   - 404 si case no existe.
+#   - 409 si case está CLOSED.
+#   - Resuelve portfolio_selection_id explícito (debe pertenecer al case) o
+#     usa case.current_portfolio_selection_id. Si no hay selection → 409.
+#   - Carga proposal y approval para enriquecer el reporte; override si aplica.
+#   - Genera markdown con CaseMarkdownReportGenerator.
+#   - Persiste report con version siguiente; mark_previous_not_current.
+#   - AuditEvent "report_generated".
+#
+# GET /cases/{case_id}/reports/{report_id}:
+#   - 404 si case no existe.
+#   - 404 si report no existe.
+#   - 404 si report pertenece a otro case (no exponemos IDs cross-case).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/reports",
+    response_model=CaseReportResponse,
+    status_code=201,
+)
+def create_case_report(
+    case_id: str,
+    req: CaseReportCreateRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> CaseReportResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        selection_repo = SQLiteCasePortfolioSelectionRepository(store)
+        proposal_repo = SQLiteCasePortfolioProposalRepository(store)
+        approval_repo = SQLiteAdvisorProfileApprovalCaseRepository(store)
+        override_repo = SQLiteCaseOverrideApprovalRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        report_repo = SQLiteCaseReportRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        # ── 1. case ───────────────────────────────────────────────────────
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; new reports are not "
+                    "accepted after case closure."
+                ),
+            )
+
+        # ── 2. resolver portfolio_selection ───────────────────────────────
+        selection_data: dict[str, Any] | None
+        if req.portfolio_selection_id is not None:
+            selection_data = selection_repo.get(req.portfolio_selection_id)
+            if selection_data is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Portfolio selection not found: "
+                        f"{req.portfolio_selection_id!r}"
+                    ),
+                )
+            if selection_data["case_id"] != case_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Portfolio selection {req.portfolio_selection_id!r} "
+                        f"belongs to case {selection_data['case_id']!r}, not "
+                        f"{case_id!r}."
+                    ),
+                )
+        else:
+            current_id = case_data.get("current_portfolio_selection_id")
+            if current_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Case {case_id!r} has no current portfolio selection. "
+                        "POST a portfolio-selection first."
+                    ),
+                )
+            selection_data = selection_repo.get(current_id)
+            if selection_data is None:
+                # Inconsistencia interna: puntero hacia row inexistente.
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Case {case_id!r} current_portfolio_selection_id "
+                        f"{current_id!r} not found in case_portfolio_selections."
+                    ),
+                )
+
+        # ── 3. cargar proposal y override / approval para enriquecer ──────
+        proposal_data: dict[str, Any] | None = proposal_repo.get(
+            selection_data["proposal_id"]
+        )
+        # proposal_data podría ser None solo si la FK se rompió manualmente;
+        # se tolera y se reporta sin el detail. El advisor verá un report
+        # con métricas del selected_candidate (snapshot) intacto.
+
+        override_data: dict[str, Any] | None = None
+        if selection_data.get("override_approval_id") is not None:
+            override_data = override_repo.get(selection_data["override_approval_id"])
+
+        approval_data: dict[str, Any] | None = None
+        approval_id = case_data.get("current_approved_profile_id")
+        if approval_id is not None:
+            approval_data = approval_repo.get(approval_id)
+
+        # ── 4. soft FK lookup advisor_id ──────────────────────────────────
+        generated_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            generated_by_advisor_id = advisor.advisor_id
+
+        # ── 5. generar markdown ───────────────────────────────────────────
+        try:
+            markdown, metadata = CaseMarkdownReportGenerator().generate(
+                case_data=case_data,
+                selection_data=selection_data,
+                proposal_data=proposal_data,
+                approval_data=approval_data,
+                override_data=override_data,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Report generation failed: {exc}",
+            ) from exc
+
+        # ── 6. persistir report ───────────────────────────────────────────
+        try:
+            report_data = report_repo.create(
+                case_id=case_id,
+                report_type=req.report_type,
+                status=req.status,
+                markdown=markdown,
+                metadata=metadata,
+                portfolio_selection_id=selection_data["selection_id"],
+                portfolio_proposal_id=selection_data["proposal_id"],
+                generated_by_advisor_id=generated_by_advisor_id,
+                is_current=True,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        # ── 7. mark previous not current ──────────────────────────────────
+        report_repo.mark_previous_not_current(
+            case_id, exclude_id=report_data["report_id"]
+        )
+
+        # ── 8. AuditEvent ─────────────────────────────────────────────────
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="report_generated",
+                actor_advisor_id=generated_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":                case_id,
+                    "report_id":              report_data["report_id"],
+                    "portfolio_selection_id": report_data["portfolio_selection_id"],
+                    "portfolio_proposal_id":  report_data["portfolio_proposal_id"],
+                    "report_type":            report_data["report_type"],
+                    "status":                 report_data["status"],
+                    "version":                report_data["version"],
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Report {report_data['report_id']!r} was persisted but "
+                    f"the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    return CaseReportResponse(**report_data)
+
+
+@app.get(
+    "/cases/{case_id}/reports",
+    response_model=CaseReportListResponse,
+)
+def list_case_reports(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseReportListResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        data = SQLiteCaseReportRepository(store).list_by_case(case_id)
+    return CaseReportListResponse(
+        reports=[CaseReportResponse(**d) for d in data],
+        count=len(data),
+    )
+
+
+@app.get(
+    "/cases/{case_id}/reports/{report_id}",
+    response_model=CaseReportResponse,
+)
+def get_case_report(
+    case_id: str,
+    report_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseReportResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    with SQLiteEntityStore(db_path) as store:
+        if SQLiteAdvisoryCaseRepository(store).get(case_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+        report_data = SQLiteCaseReportRepository(store).get(report_id)
+
+    # 404 si no existe OR pertenece a otro case (no exponemos IDs cross-case).
+    if report_data is None or report_data["case_id"] != case_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Report not found: {report_id!r}",
+        )
+    return CaseReportResponse(**report_data)
 
 
 @app.post(

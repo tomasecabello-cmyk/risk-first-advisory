@@ -3089,3 +3089,192 @@ class SQLiteCasePortfolioSelectionRepository:
             "is_current":            bool(row["is_current"]),
             "created_at_utc":        row["created_at_utc"],
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseReport — Fase 2 Commit 15 (case-scoped markdown reports)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Reportes markdown generados por el asesor para presentar al cliente.
+# Versionados por case_id (UNIQUE(case_id, version)). Append-only:
+# cada POST crea una version nueva con is_current=1 y marca las previas =0.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SQLiteCaseReportRepository:
+    """
+    Persiste y lee reportes case-scoped sobre `case_reports` (migration 0009).
+
+    Operaciones:
+        create(...)                       — inserta version siguiente del case.
+        get(report_id)                    — dict | None.
+        list_by_case(case_id)             — orden version asc.
+        get_current_for_case(case_id)     — is_current=1 más reciente o None.
+        mark_previous_not_current(case_id, exclude_id=None)
+                                          — bulk is_current=0.
+    """
+
+    def __init__(self, store: SQLiteEntityStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        *,
+        case_id: str,
+        report_type: str,
+        status: str,
+        markdown: str,
+        metadata: Mapping[str, Any],
+        portfolio_selection_id: str | None = None,
+        portfolio_proposal_id: str | None = None,
+        generated_by_advisor_id: str | None = None,
+        is_current: bool = True,
+    ) -> dict[str, Any]:
+        if not isinstance(metadata, Mapping):
+            raise ValueError(
+                "metadata debe ser un mapping (dict); recibido "
+                f"{type(metadata).__name__}."
+            )
+
+        # version = MAX(version)+1 por case_id.
+        last_row = self._store._conn.execute(
+            "SELECT MAX(version) FROM case_reports WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        last_version = last_row[0] if last_row and last_row[0] is not None else 0
+        new_version = int(last_version) + 1
+
+        report_id = self._store._next_id("case_report_")
+        now = _now_utc()
+        meta_dict = dict(metadata)
+
+        try:
+            with self._store._conn:
+                self._store._conn.execute(
+                    """
+                    INSERT INTO case_reports
+                        (report_id, case_id,
+                         portfolio_selection_id, portfolio_proposal_id,
+                         report_type, status, version,
+                         markdown, metadata_json,
+                         generated_by_advisor_id, created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        report_id, case_id,
+                        portfolio_selection_id, portfolio_proposal_id,
+                        report_type, status, new_version,
+                        markdown, _canonical_json(meta_dict),
+                        generated_by_advisor_id, now, 1 if is_current else 0,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise EntityConflictError(str(exc)) from exc
+
+        return {
+            "report_id":               report_id,
+            "case_id":                 case_id,
+            "portfolio_selection_id":  portfolio_selection_id,
+            "portfolio_proposal_id":   portfolio_proposal_id,
+            "report_type":             report_type,
+            "status":                  status,
+            "version":                 new_version,
+            "markdown":                markdown,
+            "metadata":                meta_dict,
+            "generated_by_advisor_id": generated_by_advisor_id,
+            "is_current":              bool(is_current),
+            "created_at_utc":          now,
+        }
+
+    def get(self, report_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT report_id, case_id,
+                   portfolio_selection_id, portfolio_proposal_id,
+                   report_type, status, version,
+                   markdown, metadata_json,
+                   generated_by_advisor_id, created_at_utc, is_current
+            FROM case_reports WHERE report_id = ?
+            """,
+            (report_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def list_by_case(self, case_id: str) -> list[dict[str, Any]]:
+        rows = self._store._conn.execute(
+            """
+            SELECT report_id, case_id,
+                   portfolio_selection_id, portfolio_proposal_id,
+                   report_type, status, version,
+                   markdown, metadata_json,
+                   generated_by_advisor_id, created_at_utc, is_current
+            FROM case_reports
+            WHERE case_id = ?
+            ORDER BY version ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        row = self._store._conn.execute(
+            """
+            SELECT report_id, case_id,
+                   portfolio_selection_id, portfolio_proposal_id,
+                   report_type, status, version,
+                   markdown, metadata_json,
+                   generated_by_advisor_id, created_at_utc, is_current
+            FROM case_reports
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY version DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    def mark_previous_not_current(
+        self, case_id: str, exclude_id: str | None = None
+    ) -> int:
+        if exclude_id is None:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_reports
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1
+                    """,
+                    (case_id,),
+                )
+        else:
+            with self._store._conn:
+                cur = self._store._conn.execute(
+                    """
+                    UPDATE case_reports
+                    SET is_current = 0
+                    WHERE case_id = ? AND is_current = 1 AND report_id != ?
+                    """,
+                    (case_id, exclude_id),
+                )
+        return cur.rowcount if cur.rowcount is not None else 0
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "report_id":               row["report_id"],
+            "case_id":                 row["case_id"],
+            "portfolio_selection_id":  row["portfolio_selection_id"],
+            "portfolio_proposal_id":   row["portfolio_proposal_id"],
+            "report_type":             row["report_type"],
+            "status":                  row["status"],
+            "version":                 int(row["version"]),
+            "markdown":                row["markdown"],
+            "metadata":                json.loads(row["metadata_json"]),
+            "generated_by_advisor_id": row["generated_by_advisor_id"],
+            "is_current":              bool(row["is_current"]),
+            "created_at_utc":          row["created_at_utc"],
+        }
