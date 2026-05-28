@@ -85,6 +85,10 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | **Case Dashboard (Phase 2)** | `GET`/`POST` | `/clients` | Lista/crea clients |
 | **Case Dashboard (Phase 2)** | `GET`/`POST` | `/cases` | Lista/crea cases |
 | **Case Dashboard (Phase 2)** | `GET` | `/cases/{case_id}/summary` | Estado completo del case seleccionado |
+| **Case Workbench (profile steps)** | `GET` | `/cases/{case_id}/summary` | Refresh del state después de cada paso |
+| **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/kyc` | Submit KYC submission para el case |
+| **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/ai/profile-analysis` | Análisis IA sobre el current KYC |
+| **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/profile-approval` | Decisión del advisor (approve/modify/reject) |
 
 ---
 
@@ -126,6 +130,60 @@ La sección usa por default `dev-advisor-token` (fallback hard-coded del backend
 - "NOT production-ready"
 - "case-scoped flow"
 - "full workbench pending"
+
+---
+
+## Case Workbench — Profile Steps
+
+Nueva sección al final del index (después del Case Dashboard) con la **primera iteración del Case Workbench**. Cubre solo los pasos iniciales del workflow case-scoped:
+
+1. **Cargar summary** del `case_id` activo (`GET /cases/{case_id}/summary`).
+2. **Submit KYC** con formulario completo (`POST /cases/{case_id}/kyc`).
+3. **Run AI Profile Analysis** (`POST /cases/{case_id}/ai/profile-analysis`).
+4. **Advisor Profile Approval** (`POST /cases/{case_id}/profile-approval`) con decisión approve/modify/reject.
+
+### Qué permite hoy
+
+- Tomar el `case_id` activo del Case Dashboard (botón "Use selected case from Dashboard") o tipearlo manualmente.
+- Submit KYC con formulario rico: age, jurisdiction, currency, scores (risk_tolerance / risk_capacity / liquidity_need), horizon, drawdown, experience, income stability, net worth + liquid net worth, annual income, investment objective, y los 4 campos open-text (`open_investment_goal`, `open_risk_reaction`, `open_past_experience`, `open_concerns`).
+- Run AI analysis con `kyc_submission_id` opcional (usa current si vacío) y `analysis_type` (solo `initial` implementado; `follow_up` queda para futuro).
+- Profile approval con `proposed_profile` auto-prefilled desde el último análisis, `approved_profile` opcional según decision (vacío para approve/reject, requerido para modify), `rationale` libre.
+- **Auto-refresh del summary** después de cada POST exitoso (KYC / análisis / approval).
+- Tabla compacta de highlights: `case_id`, `status`, `completion_ratio`, `next_recommended_action`, los 3 flags clave (`has_kyc`, `has_ai_profile_analysis`, `has_profile_approval`), `kyc_submission_id`, `analysis_id`, `preliminary_profile`, `approval_id`, `approved_profile`, `audit.is_intact`.
+- JSON completo del summary debajo de la tabla.
+
+### Qué NO permite todavía (próximas iteraciones del Workbench)
+
+- POST `/cases/{id}/investment-preferences`
+- POST `/cases/{id}/universe-filter`
+- POST `/cases/{id}/portfolio-proposal`
+- POST `/cases/{id}/override-approval`
+- POST `/cases/{id}/portfolio-selection`
+- POST `/cases/{id}/reports`
+- GET `/cases/{id}/audit` y `/audit/verify` (panel dedicado)
+- GET `/cases/{id}/ai-logs` (panel dedicado)
+
+Para ejercitar el workflow completo hoy:
+
+```powershell
+python scripts/run_case_workflow_smoke_check.py
+```
+
+o usar Swagger UI directamente: `http://127.0.0.1:8000/docs`.
+
+### Manejo de errores
+
+Cada panel renderiza mensajes específicos por status:
+- **400**: típicamente `OPENAI_API_KEY` no configurada (solo aplica al análisis IA).
+- **403**: el token actual no tiene rol `admin` o `advisor`.
+- **404**: `case_id` inexistente.
+- **409**: case `CLOSED`, o se intenta correr análisis sin KYC.
+- **422**: validation fail (rangos out-of-bounds en KYC; coherencia decision/approved_profile en approval).
+- **502**: la llamada IA falló — ver `/admin/ai-logs` para el log `api_error`.
+
+### Token
+
+Reusa el mismo input `Bearer token` del Case Dashboard (no hay un segundo campo). Cambios al token en el Dashboard afectan automáticamente al Workbench.
 
 ---
 

@@ -1396,6 +1396,251 @@
     </div>
   </div>
 
+  <!-- ── 10. CASE WORKBENCH — PROFILE STEPS ───────────────── -->
+  <!--
+    Primera iteración del Case Workbench (Fase 3). Cubre solo:
+      KYC → AI Profile Analysis → Advisor Profile Approval.
+    Las acciones downstream (preferences, universe filter, portfolio proposal,
+    override, selection, reports, audit panel, AI logs panel) quedan para
+    iteraciones siguientes del Workbench. Reusa el token de Case Dashboard.
+  -->
+  <div class="card" id="card-case-workbench">
+    <div class="card-header">
+      <h2>Case Workbench — Profile Steps</h2>
+      <span class="pill pill-blue" style="font-size:10px;">case-scoped workflow · dev UI</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#eff6ff;border-color:#93c5fd;color:#1e40af;">
+        <strong>Phase 2 case-scoped workflow — primera iteración del Workbench.</strong>
+        <ul>
+          <li>Este workbench inicial cubre solo <strong>KYC → AI Profile Analysis → Profile Approval</strong>. Preferences / universe filter / portfolio proposal / override / selection / reports / audit / AI logs panels quedan para el próximo commit.</li>
+          <li>El <code>case_id</code> debe existir previamente — crear vía Case Dashboard (sección 6 "Quick demo seed") o vía <code>POST /cases</code> directo.</li>
+          <li>Reusa el token del Case Dashboard (input <code>cd-token</code>); cambiar ahí afecta también acá.</li>
+          <li><strong>NOT production-ready.</strong> Sin firm-level access control, sin JWT, sin firma digital del advisor.</li>
+        </ul>
+      </div>
+
+      <!-- ── Section 1: Workbench case_id + summary ───────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">1. Workbench case_id</div>
+        <div class="form-grid cols-3">
+          <div class="field full-span">
+            <label>case_id <span class="hint">case que se va a trabajar; los inputs downstream usan este valor</span></label>
+            <input type="text" id="cw-case-id" placeholder="case_000001" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-load-summary" onclick="cwLoadSummary()">Load Summary</button>
+          <button class="btn-secondary" onclick="cwPullFromDashboard()">Use selected case from Dashboard</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-summary-result')">Clear</button>
+        </div>
+        <div id="cw-summary-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 2: KYC submission ────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">2. KYC Submission — <code>POST /cases/{case_id}/kyc</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Defaults demo razonables. Todos los campos editables. El backend valida rangos (age 18–120, scores 1–10, horizon &gt; 0, etc.).
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>age <span class="hint">18–120</span></label>
+            <input type="number" id="cw-kyc-age" value="40" min="18" max="120" />
+          </div>
+          <div class="field">
+            <label>jurisdiction</label>
+            <input type="text" id="cw-kyc-jurisdiction" value="AR" />
+          </div>
+          <div class="field">
+            <label>preferred_currency</label>
+            <input type="text" id="cw-kyc-currency" value="USD" />
+          </div>
+          <div class="field">
+            <label>investment_objective</label>
+            <select id="cw-kyc-objective">
+              <option value="capital_preservation">capital_preservation</option>
+              <option value="income">income</option>
+              <option value="balanced" selected>balanced</option>
+              <option value="growth">growth</option>
+              <option value="aggressive_growth">aggressive_growth</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>risk_tolerance_score <span class="hint">1–10</span></label>
+            <input type="number" id="cw-kyc-rtol" value="6" min="1" max="10" />
+          </div>
+          <div class="field">
+            <label>risk_capacity_score <span class="hint">1–10</span></label>
+            <input type="number" id="cw-kyc-rcap" value="7" min="1" max="10" />
+          </div>
+          <div class="field">
+            <label>liquidity_need_score <span class="hint">1–10</span></label>
+            <input type="number" id="cw-kyc-lneed" value="3" min="1" max="10" />
+          </div>
+          <div class="field">
+            <label>investment_horizon_years <span class="hint">&gt; 0</span></label>
+            <input type="number" id="cw-kyc-horizon" value="10" min="1" />
+          </div>
+          <div class="field">
+            <label>max_acceptable_drawdown_pct</label>
+            <input type="number" id="cw-kyc-drawdown" value="20" min="0" max="100" step="0.5" />
+          </div>
+          <div class="field">
+            <label>investment_experience</label>
+            <select id="cw-kyc-experience">
+              <option value="ninguna">ninguna</option>
+              <option value="basica">basica</option>
+              <option value="moderada" selected>moderada</option>
+              <option value="avanzada">avanzada</option>
+              <option value="experto">experto</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>income_stability</label>
+            <select id="cw-kyc-income-stab">
+              <option value="stable" selected>stable</option>
+              <option value="variable">variable</option>
+              <option value="unstable">unstable</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>annual_income_usd <span class="hint">opcional</span></label>
+            <input type="number" id="cw-kyc-income" value="80000" min="0" />
+          </div>
+          <div class="field">
+            <label>net_worth (USD)</label>
+            <input type="number" id="cw-kyc-net-worth" value="500000" min="0" />
+          </div>
+          <div class="field">
+            <label>liquid_net_worth (USD)</label>
+            <input type="number" id="cw-kyc-liquid" value="150000" min="0" />
+          </div>
+        </div>
+        <div class="form-grid cols-2" style="margin-top:10px;">
+          <div class="field full-span">
+            <label>open_investment_goal <span class="hint">texto libre</span></label>
+            <textarea id="cw-kyc-goal" rows="2" style="font-size:13px;line-height:1.5;">Ahorro de largo plazo con horizonte 10 años.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>open_risk_reaction</label>
+            <textarea id="cw-kyc-risk-reaction" rows="2" style="font-size:13px;line-height:1.5;">Tolerancia moderada — drawdowns ≤ 20% son aceptables si se recuperan en mediano plazo.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>open_past_experience</label>
+            <textarea id="cw-kyc-past" rows="2" style="font-size:13px;line-height:1.5;">Inversiones previas en ETFs y bonos USD.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>open_concerns</label>
+            <textarea id="cw-kyc-concerns" rows="2" style="font-size:13px;line-height:1.5;">Volatilidad cambiaria y riesgo de duración en renta fija.</textarea>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-submit-kyc" onclick="cwSubmitKYC()">Submit KYC</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-kyc-result')">Clear</button>
+        </div>
+        <div id="cw-kyc-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 3: AI Profile Analysis ───────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">3. AI Profile Analysis — <code>POST /cases/{case_id}/ai/profile-analysis</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Si no se especifica <code>kyc_submission_id</code>, el backend usa <code>case.current_kyc_submission_id</code>.
+          Requiere <code>OPENAI_API_KEY</code> en el entorno del backend; si no está configurada, devuelve 400.
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>kyc_submission_id <span class="hint">opcional</span></label>
+            <input type="text" id="cw-ai-kyc-id" placeholder="(usa current si vacío)" />
+          </div>
+          <div class="field">
+            <label>analysis_type</label>
+            <select id="cw-ai-type">
+              <option value="initial" selected>initial</option>
+              <option value="follow_up">follow_up (not implemented yet)</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-run-analysis" onclick="cwRunAnalysis()">Run AI Profile Analysis</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-ai-result')">Clear</button>
+        </div>
+        <div id="cw-ai-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 4: Advisor Profile Approval ──────────── -->
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">4. Advisor Profile Approval — <code>POST /cases/{case_id}/profile-approval</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          <code>proposed_profile</code> se prellena con el último análisis si existe.
+          <code>approved_profile</code>: vacío en <code>approve</code> (backend auto-completa) y <code>reject</code>; requerido en <code>modify</code>.
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>decision</label>
+            <select id="cw-pa-decision">
+              <option value="approve" selected>approve</option>
+              <option value="modify">modify</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>proposed_profile <span class="hint">opcional si hay análisis</span></label>
+            <select id="cw-pa-proposed">
+              <option value="">(derive from analysis)</option>
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado">moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>approved_profile <span class="hint">requerido para modify</span></label>
+            <select id="cw-pa-approved">
+              <option value="">(none / auto for approve)</option>
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado">moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="cw-pa-source" value="manual" />
+          </div>
+          <div class="field">
+            <label>ai_profile_analysis_id <span class="hint">opcional — usa último si vacío</span></label>
+            <input type="text" id="cw-pa-analysis-id" placeholder="(latest analysis)" />
+          </div>
+          <div class="field">
+            <label>kyc_submission_id <span class="hint">opcional</span></label>
+            <input type="text" id="cw-pa-kyc-id" placeholder="(inherited from analysis)" />
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:10px;">
+          <label>rationale</label>
+          <textarea id="cw-pa-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor reviewed the AI analysis and approved the profile for demo purposes.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-submit-approval" onclick="cwSubmitApproval()">Submit Profile Approval</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-pa-result')">Clear</button>
+        </div>
+        <div id="cw-pa-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Footer: next steps ───────────────────────────── -->
+      <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
+        <strong>Próximo:</strong> investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, reports, audit panel. Endpoints case-scoped ya existen en backend; ejercitar mientras tanto via
+        <code>python scripts/run_case_workflow_smoke_check.py</code> o Swagger <code>/docs</code>.
+      </div>
+
+    </div>
+  </div>
+
 </div><!-- /page -->
 
 
@@ -4288,6 +4533,397 @@
     }
     const highlights = cdSummaryHighlights(res.json);
     cdRenderJson("cd-summary-result", res.json, highlights);
+  }
+
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CASE WORKBENCH — PROFILE STEPS  (prefijo cw-* / cw* para evitar colisiones)
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Cubre solo KYC → AI Profile Analysis → Profile Approval.
+  // Reusa el token del Case Dashboard (cdToken()) y los helpers
+  // cdApiFetch / cdParseResponse / cdNullIfBlank. Auto-refresca el summary
+  // después de cada POST exitoso.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // ── State: cache del último summary cargado (para autocompletar inputs) ─
+  let cwLastSummary = null;
+
+  // ── Helpers de render (compactos, en línea con cd*) ─────────────────────
+
+  function cwClearResult(elId) {
+    const target = el(elId);
+    if (target) target.innerHTML = "";
+  }
+
+  function cwRenderJson(elId, data, prefixHtml = "") {
+    const target = el(elId);
+    if (!target) return;
+    target.innerHTML = prefixHtml + `<pre class="json-block">${escapeHTML(formatJSON(data))}</pre>`;
+  }
+
+  function cwRenderError(elId, msgHtml) {
+    const target = el(elId);
+    if (!target) return;
+    target.innerHTML = `<div class="msg msg-error">${msgHtml}</div>`;
+  }
+
+  function cwRenderSuccess(elId, msgHtml, data) {
+    const target = el(elId);
+    if (!target) return;
+    const head = `<div class="msg msg-success">${msgHtml}</div>`;
+    const body = data !== undefined
+      ? `<pre class="json-block" style="margin-top:8px;">${escapeHTML(formatJSON(data))}</pre>`
+      : "";
+    target.innerHTML = head + body;
+  }
+
+  function cwRenderLoading(elId, msg = "Loading…") {
+    const target = el(elId);
+    if (target) target.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>${msg}</div>`;
+  }
+
+  // ── 1. Workbench case_id + summary ─────────────────────────────────────
+
+  function cwGetCaseId() {
+    return (el("cw-case-id").value || "").trim();
+  }
+
+  function cwPullFromDashboard() {
+    // Tomar el case_id seleccionado en la sección 7 del Case Dashboard.
+    const dashCase = (el("cd-summary-case-id").value || "").trim();
+    if (!dashCase) {
+      cwRenderError("cw-summary-result",
+        "<strong>Dashboard sin case_id seleccionado.</strong> Crear/seleccionar un case en la card de arriba primero.");
+      return;
+    }
+    el("cw-case-id").value = dashCase;
+    cwLoadSummary();
+  }
+
+  function cwSummaryHighlights(s) {
+    if (!s || typeof s !== "object") return "";
+    const c   = s.case || {};
+    const p   = s.progress || {};
+    const a   = s.audit || {};
+    const kyc = s.latest_kyc || null;
+    const an  = s.latest_ai_profile_analysis || null;
+    const ap  = s.current_profile_approval || null;
+
+    const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
+    const flagPill = (v) => v ? '<span class="pill pill-green">yes</span>' : '<span class="pill pill-grey">no</span>';
+    const statusBadge = (st) => st ? `<span class="pill pill-blue">${escapeHTML(st)}</span>` : "—";
+    const intactBadge = (v) => v ? '<span class="pill pill-green">intact</span>' : '<span class="pill pill-red">broken</span>';
+
+    return `
+      <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;margin-bottom:10px;background:#fafbfd;">
+        <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Workbench overview</div>
+        <table style="width:100%;border-collapse:collapse;">
+          ${row("case_id",                 `<code>${escapeHTML(c.case_id || "—")}</code>`)}
+          ${row("status",                  statusBadge(c.status))}
+          ${row("completion_ratio",        `<strong>${(p.completion_ratio !== undefined ? p.completion_ratio : "—")}</strong>`)}
+          ${row("next_recommended_action", `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+          ${row("has_kyc",                 flagPill(p.has_kyc))}
+          ${row("has_ai_profile_analysis", flagPill(p.has_ai_profile_analysis))}
+          ${row("has_profile_approval",    flagPill(p.has_profile_approval))}
+          ${row("latest_kyc.kyc_submission_id",
+                kyc && kyc.kyc_submission_id ? `<code>${escapeHTML(kyc.kyc_submission_id)}</code>` : "—")}
+          ${row("latest_ai_profile_analysis.analysis_id",
+                an && an.analysis_id ? `<code>${escapeHTML(an.analysis_id)}</code>` : "—")}
+          ${row("latest_ai_profile_analysis.preliminary_profile",
+                an && an.preliminary_profile ? `<code>${escapeHTML(an.preliminary_profile)}</code>` : "—")}
+          ${row("current_profile_approval.approval_id",
+                ap && ap.approval_id ? `<code>${escapeHTML(ap.approval_id)}</code>` : "—")}
+          ${row("current_profile_approval.approved_profile",
+                ap && ap.approved_profile ? `<code>${escapeHTML(ap.approved_profile)}</code>` : "—")}
+          ${row("audit.is_intact",         intactBadge(a.is_intact))}
+        </table>
+      </div>
+    `;
+  }
+
+  // Prellena los inputs downstream con los IDs derivados del summary.
+  function cwAutofillFromSummary(s) {
+    if (!s || typeof s !== "object") return;
+    cwLastSummary = s;
+    const kyc = s.latest_kyc || null;
+    const an  = s.latest_ai_profile_analysis || null;
+    if (kyc && kyc.kyc_submission_id) {
+      // El input del análisis es opcional; lo dejamos vacío para que el
+      // backend use el current. Sí ofrecemos el ID al usuario en el panel
+      // de approval por trazabilidad.
+      el("cw-pa-kyc-id").value = kyc.kyc_submission_id;
+    }
+    if (an && an.analysis_id) {
+      el("cw-pa-analysis-id").value = an.analysis_id;
+    }
+    if (an && an.preliminary_profile) {
+      // Sincronizar el dropdown de proposed_profile si el valor coincide
+      // con una opción válida.
+      const sel = el("cw-pa-proposed");
+      const opts = Array.from(sel.options).map(o => o.value);
+      if (opts.includes(an.preliminary_profile)) {
+        sel.value = an.preliminary_profile;
+      }
+    }
+  }
+
+  async function cwLoadSummary(silent = false) {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      if (!silent) {
+        cwRenderError("cw-summary-result", "<strong>case_id requerido.</strong>");
+      }
+      return null;
+    }
+    if (!silent) {
+      cwRenderLoading("cw-summary-result", `Loading summary for ${escapeHTML(caseId)}…`);
+    }
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/summary`, {
+      headers: cdAuthHeaders(),
+    });
+    if (!res.ok) {
+      if (!silent) {
+        if (res.status === 404) {
+          cwRenderError("cw-summary-result",
+            `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+        } else if (res.status === 401) {
+          cwRenderError("cw-summary-result",
+            `<strong>401:</strong> token inválido o ausente — verificar input del Case Dashboard.`);
+        } else if (res.networkError) {
+          el("cw-summary-result").innerHTML = apiError(res.err);
+        } else {
+          cwRenderError("cw-summary-result",
+            `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+        }
+      }
+      return null;
+    }
+    if (!silent) {
+      const highlights = cwSummaryHighlights(res.json);
+      cwRenderJson("cw-summary-result", res.json, highlights);
+    }
+    cwAutofillFromSummary(res.json);
+    return res.json;
+  }
+
+  // ── 2. KYC submission ──────────────────────────────────────────────────
+
+  function cwNumber(elId, fallback = 0) {
+    const v = parseFloat(el(elId).value);
+    return Number.isFinite(v) ? v : fallback;
+  }
+
+  function cwInt(elId, fallback = 0) {
+    const v = parseInt(el(elId).value, 10);
+    return Number.isFinite(v) ? v : fallback;
+  }
+
+  function cwBuildKycPayload() {
+    return {
+      age:                         cwInt("cw-kyc-age", 40),
+      risk_tolerance_score:        cwInt("cw-kyc-rtol", 6),
+      risk_capacity_score:         cwInt("cw-kyc-rcap", 7),
+      liquidity_need_score:        cwInt("cw-kyc-lneed", 3),
+      investment_horizon_years:    cwInt("cw-kyc-horizon", 10),
+      investment_experience:       el("cw-kyc-experience").value,
+      income_stability:            el("cw-kyc-income-stab").value,
+      net_worth:                   cwNumber("cw-kyc-net-worth", 0),
+      liquid_net_worth:            cwNumber("cw-kyc-liquid", 0),
+      max_acceptable_drawdown_pct: cwNumber("cw-kyc-drawdown", 20),
+      jurisdiction:                (el("cw-kyc-jurisdiction").value || "").trim(),
+      preferred_currency:          (el("cw-kyc-currency").value || "").trim(),
+      investment_objective:        el("cw-kyc-objective").value,
+      annual_income_usd:           cwNumber("cw-kyc-income", 0),
+      open_investment_goal:        (el("cw-kyc-goal").value || "").trim() || null,
+      open_risk_reaction:          (el("cw-kyc-risk-reaction").value || "").trim() || null,
+      open_past_experience:        (el("cw-kyc-past").value || "").trim() || null,
+      open_concerns:               (el("cw-kyc-concerns").value || "").trim() || null,
+    };
+  }
+
+  async function cwSubmitKYC() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-kyc-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const body = cwBuildKycPayload();
+    cwRenderLoading("cw-kyc-result", "Submitting KYC…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/kyc`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) {
+        cwRenderError("cw-kyc-result", `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+        return;
+      }
+      if (res.status === 409) {
+        cwRenderError("cw-kyc-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿El case está CLOSED?`);
+        return;
+      }
+      if (res.status === 422) {
+        cwRenderError("cw-kyc-result",
+          `<strong>422 validation</strong>: ${escapeHTML(res.detail)}. Verificar rangos de scores / horizon / drawdown.`);
+        return;
+      }
+      if (res.status === 403) {
+        cwRenderError("cw-kyc-result", `<strong>403:</strong> requiere rol <code>admin</code> o <code>advisor</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cw-kyc-result").innerHTML = apiError(res.err); return; }
+      cwRenderError("cw-kyc-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const subId  = res.json && res.json.kyc_submission_id ? res.json.kyc_submission_id : "(unknown)";
+    const ver    = res.json && res.json.version !== undefined ? res.json.version : "?";
+    cwRenderSuccess("cw-kyc-result",
+      `KYC submitted: <code>${escapeHTML(subId)}</code> (version ${ver}). Refreshing summary…`,
+      res.json);
+    await cwLoadSummary(true);
+    // Re-renderizar el summary visible si el usuario lo había cargado antes.
+    if (el("cw-summary-result").innerHTML.length > 0) {
+      await cwLoadSummary();
+    }
+  }
+
+  // ── 3. AI Profile Analysis ─────────────────────────────────────────────
+
+  async function cwRunAnalysis() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-ai-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const body = {
+      analysis_type: el("cw-ai-type").value,
+    };
+    const kycId = cdNullIfBlank(el("cw-ai-kyc-id").value);
+    if (kycId) body.kyc_submission_id = kycId;
+
+    cwRenderLoading("cw-ai-result", "Running AI profile analysis…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/ai/profile-analysis`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 400) {
+        cwRenderError("cw-ai-result",
+          `<strong>400:</strong> ${escapeHTML(res.detail)}. Probablemente <code>OPENAI_API_KEY</code> no está configurada en el backend.`);
+        return;
+      }
+      if (res.status === 404) {
+        cwRenderError("cw-ai-result", `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+        return;
+      }
+      if (res.status === 409) {
+        cwRenderError("cw-ai-result",
+          `<strong>409:</strong> ${escapeHTML(res.detail)}. El case no tiene KYC submission todavía — submitir KYC primero.`);
+        return;
+      }
+      if (res.status === 422) {
+        cwRenderError("cw-ai-result",
+          `<strong>422</strong>: ${escapeHTML(res.detail)}. Verificar <code>kyc_submission_id</code> (¿es de otro case?) o <code>analysis_type</code> (<code>follow_up</code> no implementado).`);
+        return;
+      }
+      if (res.status === 502) {
+        cwRenderError("cw-ai-result",
+          `<strong>502:</strong> ${escapeHTML(res.detail)}. La llamada IA falló; ver <code>/admin/ai-logs</code> para el log <code>api_error</code>.`);
+        return;
+      }
+      if (res.status === 403) {
+        cwRenderError("cw-ai-result", `<strong>403:</strong> requiere rol <code>admin</code> o <code>advisor</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cw-ai-result").innerHTML = apiError(res.err); return; }
+      cwRenderError("cw-ai-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const j = res.json || {};
+    const aId   = j.analysis_id || "(unknown)";
+    const prof  = j.preliminary_profile || "—";
+    const conf  = j.confidence !== undefined ? j.confidence : "—";
+    const logId = j.ai_request_log_id || "—";
+    cwRenderSuccess("cw-ai-result",
+      `Analysis OK: <code>${escapeHTML(aId)}</code> · preliminary_profile <code>${escapeHTML(prof)}</code> · confidence <code>${escapeHTML(String(conf))}</code> · ai_request_log_id <code>${escapeHTML(logId)}</code>. Refreshing summary…`,
+      j);
+    await cwLoadSummary(true);
+    if (el("cw-summary-result").innerHTML.length > 0) {
+      await cwLoadSummary();
+    }
+  }
+
+  // ── 4. Advisor Profile Approval ────────────────────────────────────────
+
+  async function cwSubmitApproval() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-pa-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const decision = el("cw-pa-decision").value;
+    const proposed = cdNullIfBlank(el("cw-pa-proposed").value);
+    const approved = cdNullIfBlank(el("cw-pa-approved").value);
+    const rationale = (el("cw-pa-rationale").value || "").trim();
+    if (!rationale) {
+      cwRenderError("cw-pa-result", "<strong>rationale requerido</strong> (no puede estar vacío).");
+      return;
+    }
+
+    const body = {
+      decision: decision,
+      rationale: rationale,
+      source: (el("cw-pa-source").value || "").trim() || "manual",
+    };
+    if (proposed) body.proposed_profile = proposed;
+    if (approved) body.approved_profile = approved;
+    const aId = cdNullIfBlank(el("cw-pa-analysis-id").value);
+    if (aId) body.ai_profile_analysis_id = aId;
+    const kId = cdNullIfBlank(el("cw-pa-kyc-id").value);
+    if (kId) body.kyc_submission_id = kId;
+
+    cwRenderLoading("cw-pa-result", "Submitting profile approval…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/profile-approval`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) {
+        cwRenderError("cw-pa-result", `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+        return;
+      }
+      if (res.status === 409) {
+        cwRenderError("cw-pa-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿El case está CLOSED?`);
+        return;
+      }
+      if (res.status === 422) {
+        cwRenderError("cw-pa-result",
+          `<strong>422 validation</strong>: ${escapeHTML(res.detail)}. Verificar coherencia decision/approved_profile (approve→ igual o vacío; modify→ requerido; reject→ vacío).`);
+        return;
+      }
+      if (res.status === 403) {
+        cwRenderError("cw-pa-result", `<strong>403:</strong> requiere rol <code>admin</code> o <code>advisor</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cw-pa-result").innerHTML = apiError(res.err); return; }
+      cwRenderError("cw-pa-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const j = res.json || {};
+    const apprId  = j.approval_id || "(unknown)";
+    const dec     = j.decision || "—";
+    const approvedOut = j.approved_profile || "—";
+    cwRenderSuccess("cw-pa-result",
+      `Approval OK: <code>${escapeHTML(apprId)}</code> · decision <code>${escapeHTML(dec)}</code> · approved_profile <code>${escapeHTML(approvedOut)}</code>. Refreshing summary…`,
+      j);
+    await cwLoadSummary(true);
+    if (el("cw-summary-result").innerHTML.length > 0) {
+      await cwLoadSummary();
+    }
   }
 
 </script>
