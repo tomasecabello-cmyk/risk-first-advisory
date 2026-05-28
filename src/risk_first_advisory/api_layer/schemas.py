@@ -1934,3 +1934,54 @@ class CaseReportResponse(BaseModel):
 class CaseReportListResponse(BaseModel):
     reports: list[CaseReportResponse]
     count:   int
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CaseSummary — Fase 2 Commit 16 (full case state en un solo response)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CaseWorkflowProgressResponse(BaseModel):
+    has_kyc:                     bool
+    has_ai_profile_analysis:     bool
+    has_profile_approval:        bool
+    has_investment_preferences:  bool
+    has_universe_filter:         bool
+    has_portfolio_proposal:      bool
+    has_override_approval:       bool
+    has_portfolio_selection:     bool
+    has_report:                  bool
+    next_recommended_action:     str
+    completion_ratio:            float
+
+
+class CaseAuditSummaryResponse(BaseModel):
+    is_intact:             bool
+    total_events:          int
+    first_broken_sequence: int | None
+    message:               str
+
+
+class CaseAISummaryResponse(BaseModel):
+    ai_logs_count:           int
+    latest_ai_log_id:        str | None
+    latest_validation_status: str | None
+
+
+class CaseSummaryResponse(BaseModel):
+    case:                            AdvisoryCaseResponse
+    firm:                            FirmResponse | None
+    client:                          ClientResponse | None
+    lead_advisor:                    AdvisorResponse | None
+    latest_kyc:                      KYCSubmissionResponse | None
+    latest_ai_profile_analysis:      AIProfileAnalysisResponse | None
+    current_profile_approval:        CaseAdvisorProfileApprovalResponse | None
+    current_investment_preferences:  CaseInvestmentPreferenceResponse | None
+    current_universe_filter:         CaseUniverseFilterRunResponse | None
+    current_portfolio_proposal:      CasePortfolioProposalResponse | None
+    current_override_approval:       CaseOverrideApprovalResponse | None
+    current_portfolio_selection:     CasePortfolioSelectionResponse | None
+    current_report:                  CaseReportResponse | None
+    audit:                           CaseAuditSummaryResponse
+    ai:                              CaseAISummaryResponse
+    progress:                        CaseWorkflowProgressResponse

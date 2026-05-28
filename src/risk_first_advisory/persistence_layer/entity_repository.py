@@ -2084,6 +2084,30 @@ class SQLiteAdvisorProfileApprovalCaseRepository:
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def get_current_for_case(self, case_id: str) -> dict[str, Any] | None:
+        """
+        Devuelve el approval `is_current=1` más reciente del case, o None.
+
+        Útil para el summary endpoint, donde `case.current_approved_profile_id`
+        puede no estar materializado (e.g., el último approval fue reject).
+        """
+        row = self._store._conn.execute(
+            """
+            SELECT approval_id, case_id,
+                   ai_profile_analysis_id, kyc_submission_id, advisor_id,
+                   proposed_profile, decision, approved_profile,
+                   rationale, source, is_current, created_at_utc
+            FROM advisor_profile_approvals
+            WHERE case_id = ? AND is_current = 1
+            ORDER BY created_at_utc DESC, approval_id DESC
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
     def mark_previous_not_current(
         self, case_id: str, exclude_id: str | None = None
     ) -> int:

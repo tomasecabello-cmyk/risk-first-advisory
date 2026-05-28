@@ -609,10 +609,11 @@ Los tests usan dos autouse fixtures:
 12. ~~CaseOverrideApproval case-scoped (POST/GET `/cases/{case_id}/override-approval`); ancla decisión a `(case_id, proposal_id, candidate_variant)`; valida que el candidate exista y requiera override; auto-events `advisor_override_approved` / `_rejected`.~~ ✅ Commit 13.
 13. ~~CasePortfolioSelection case-scoped (POST/GET `/cases/{case_id}/portfolio-selection`); vincula proposal + override_approval cuando aplica; actualiza `current_portfolio_selection_id`; transiciona status a `PORTFOLIO_SELECTED`; auto-event `portfolio_selected`.~~ ✅ Commit 14.
 14. ~~CaseReport case-scoped (POST/GET `/cases/{case_id}/reports`, GET `/cases/{case_id}/reports/{report_id}`); markdown determinístico vía `CaseMarkdownReportGenerator`; versionado monotónico por case_id; auto-event `report_generated`.~~ ✅ Commit 15.
-15. PDF rendering del case report (hoy solo markdown).
-16. Case report branding (firm logo, colores, header customizable).
-17. Lifecycle formal de reports (workflow draft → reviewed → final → sent, con AuditEvents de cada transición).
-18. Case summary endpoint (`GET /cases/{id}/summary`) que devuelva KYC + analysis + approval + preferences + filter + proposal + override + selection + report en un solo response.
+15. ~~Case summary endpoint (`GET /cases/{id}/summary`) que devuelve case + firm/client/advisor + todos los `current_*` + audit integrity + AI logs count + workflow progress + next_recommended_action en un solo response.~~ ✅ Commit 16.
+16. PDF rendering del case report (hoy solo markdown).
+17. Case report branding (firm logo, colores, header customizable).
+18. Lifecycle formal de reports (workflow draft → reviewed → final → sent, con AuditEvents de cada transición).
+19. Frontend Case Workbench (UI que consume `/cases/{id}/summary` para hidratar la vista completa del caso sin múltiples round-trips).
 15. Auto-migrate en startup de FastAPI (opcional, behind feature flag).
 16. Integrar AuditEvent automáticamente en los demás endpoints decisorios legacy (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
 17. Firm-level access control sobre `/cases/*` (todos los sub-endpoints case-scoped).
@@ -1585,3 +1586,88 @@ Decimoquinto commit de Fase 2 — cierra el flujo case-scoped end-to-end. El ase
 - **No reconciliación con `records` legacy** (`record_type='markdown_report'`, client_id-scoped). Coexisten sin conflicto; deprecación queda para iteración futura.
 - **No hay endpoint para regenerar reporte automáticamente** cuando la selection cambia. El advisor debe POST manual a `/reports` para generar la version nueva.
 - **No firm-level scoping** sobre estos endpoints (consistente con el resto del sistema).
+
+---
+
+## Fase 2 — Case Summary endpoint ✅ (Commit 16)
+
+### Estado actual
+
+Decimosexto commit de Fase 2 — endpoint sintetizador que devuelve el estado completo de un `AdvisoryCase` en un solo response. Pensado como base para el futuro Case Workbench frontend (item 19): hidratar la vista del caso sin múltiples round-trips.
+
+#### Archivos creados / modificados
+
+- **`src/risk_first_advisory/persistence_layer/entity_repository.py`** — ampliado con:
+  - `SQLiteAdvisorProfileApprovalCaseRepository.get_current_for_case(case_id)` (era el único repo case-scoped que NO lo tenía; ahora los 7 lo exponen).
+
+- **`src/risk_first_advisory/api_layer/schemas.py`** — ampliado con:
+  - `CaseWorkflowProgressResponse` (9 flags `has_*` + `next_recommended_action` + `completion_ratio`).
+  - `CaseAuditSummaryResponse` (`is_intact`, `total_events`, `first_broken_sequence`, `message`).
+  - `CaseAISummaryResponse` (`ai_logs_count`, `latest_ai_log_id`, `latest_validation_status`).
+  - `CaseSummaryResponse` (case + firm/client/advisor + 9 `current_*` entities + audit + ai + progress).
+
+- **`src/risk_first_advisory/api_layer/main.py`** — agregado:
+  - Constantes `_PROGRESS_STEPS_TOTAL = 9`, `_PROGRESS_STEPS_BASE = 8`.
+  - Helpers puros: `_proposal_has_override_required`, `_compute_next_recommended_action`, `_compute_completion_ratio`.
+  - Endpoint `GET /cases/{case_id}/summary` con resolución best-effort de cada entidad relacionada.
+
+- **`tests/integration/test_api_case_summary.py`** — 39 tests en 6 clases:
+  - `TestEmptyCase` (11): case recién creado; case/firm/client/advisor presentes; todos `current_*` None; flags `has_*` False; `next_action=submit_kyc`; `completion_ratio=0.0`; audit con `case_created` intact; `ai_logs_count=0`.
+  - `TestFullWorkflow` (10): pipeline completo (KYC → analysis → approval → prefs → filter → proposal → override → selection → report); todos `current_*` presentes; `version=1` en report; `has_report=True`; `next_action=ready_for_review`; `completion_ratio=1.0`; audit intact; AI logs > 0; CLOSED transition cambia `next_action` a `"closed"`.
+  - `TestIntermediateStates` (7): después de cada paso del workflow, `next_recommended_action` apunta al siguiente paso correcto (`submit_kyc → run_ai_profile_analysis → approve_profile → record_investment_preferences → run_universe_filter → generate_portfolio_proposal → review_override OR select_portfolio → generate_report`).
+  - `TestAuditBroken` (1): mutar `payload_json` directamente en DB → `summary.audit.is_intact=false` + `first_broken_sequence` poblado.
+  - `TestRBAC` (5): 401 sin token; 200 para los 4 roles válidos (incluye viewer).
+  - `TestValidation` (1): case inexistente → 404.
+  - `TestNoRegression` (4): `/reports`, `/portfolio-selection`, `/health`, `/auth/me` siguen funcionando.
+
+**Total tests tras este commit:** 2997 (todos pasando). Δ = +39 integration.
+
+#### Decisiones de diseño
+
+1. **Single store / single connection**. Todas las queries se ejecutan dentro de un único `with SQLiteEntityStore(db_path) as store`. Esto evita N round-trips al filesystem y mantiene el endpoint rápido incluso con full workflow.
+
+2. **Best-effort loading**: si una entidad relacionada no existe (e.g., FK colgada por inconsistencia, o el flow está incompleto), se devuelve `None` en lugar de fallar. La única condición que rompe el endpoint es `case_id` inexistente (404).
+
+3. **Fallback chain para `current_*`**: por cada entidad case-scoped, el endpoint intenta primero el puntero materializado (`case.current_kyc_submission_id`, etc.), luego `get_current_for_case` (busca `is_current=1`), y finalmente "último por created_at/version" del listado completo. Esto cubre casos edge donde el puntero no está sincronizado o el flag `is_current` no se mantuvo.
+
+4. **9 pasos en el workflow** (kyc, ai_profile, approval, prefs, filter, proposal, override*, selection, report). El override es **condicional**: solo cuenta hacia el denominator cuando el proposal contiene candidates que requieren override. `completion_ratio` se ajusta dinámicamente — un case sin candidates que requieran override puede llegar a 1.0 con 8 pasos completados.
+
+5. **`next_recommended_action` determinístico**: cascade de `if/elif` que sigue el orden natural del workflow. CLOSED tiene prioridad absoluta sobre todo lo demás.
+
+6. **`_proposal_has_override_required` reusa `_candidate_requires_override`** (definido en Commit 13). Misma fuente de verdad para "candidate requires override".
+
+7. **AI logs count vía `len(list_by_case)`**, no un `count(*)` SQL. A esta escala el overhead es despreciable; mantenerlo en el repo sin agregar un método nuevo simplifica.
+
+8. **`latest_ai_log_id` = último por orden ascendente** (la repo devuelve `created_at_utc ASC, request_id ASC`; el último elemento es el más reciente).
+
+9. **`audit.message` se exporta tal cual viene del verificador**. Útil para debugging desde el frontend; no se sanitiza.
+
+10. **RBAC abierto a los 4 roles válidos** (admin/advisor/compliance/viewer). El summary es read-only y no expone datos sensibles más allá de lo que cada endpoint individual ya expone. El frontend Case Workbench lo usará desde cualquier rol autorizado.
+
+11. **No nuevas migrations**. Reutiliza todas las tablas existentes (0001..0009). El único cambio en el persistence layer es agregar `get_current_for_case` a `SQLiteAdvisorProfileApprovalCaseRepository` (paridad con los demás case-scoped repos).
+
+12. **Helpers extraídos como funciones puras** (`_compute_next_recommended_action`, `_compute_completion_ratio`, `_proposal_has_override_required`). Testeable directo sin DB; reusable si una iteración futura quiere generar progress badges en otros endpoints (e.g., `GET /cases` con flags por case en el listado).
+
+13. **`completion_ratio` redondeado a 2 decimales** (`round(x, 2)`). Lo suficiente para mostrar en UI sin oscilaciones de punto flotante.
+
+14. **`CaseAuditSummaryResponse` NO incluye `checked_at_utc`** (el listado `audit/verify` sí lo expone). Decisión: el summary es snapshot del momento de la request; el caller puede usar la hora del HTTP response. Si el frontend lo necesita explícito, se agrega sin cambios de schema mayores.
+
+15. **No `warnings` en el response**. Si una entidad relacionada falta por inconsistencia, queda `None` silenciosamente. Decisión simple: el frontend puede inferir el estado del workflow desde `progress.*`; warnings agregarían ruido sin ganar info accionable. Si compliance pide explícito, se agrega.
+
+16. **AdvisorIdentity del token NO se incluye en el response** (eso lo da `/auth/me`). El summary es del case, no del caller.
+
+#### Tabla de RBAC actualizada (nuevo endpoint)
+
+| Endpoint | `advisor` | `admin` | `compliance` | `viewer` | sin token |
+|---|---|---|---|---|---|
+| `GET /cases/{id}/summary` | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 | ❌ 401 |
+
+#### Lo que NO está en este commit
+
+- **No UI Case Workbench** (item 19). El endpoint existe; queda implementar el frontend que lo consume.
+- **No reemplaza lifecycle enforcement formal**. `next_recommended_action` es una recomendación al UI, no un check del backend. El backend sigue aceptando POST a cualquier endpoint case-scoped si las precondiciones de cada uno se cumplen.
+- **No firm-level access control**. Cualquier token válido con rol adecuado puede ver el summary de cualquier case (consistente con el resto de los endpoints case-scoped).
+- **No cacheo del response**. Cada GET dispara queries frescas. A esta escala (SQLite local, 1-7 entidades case-scoped) el costo es despreciable; si Phase 3 requiere optimización, se puede agregar un cache con invalidation por AuditEvent.
+- **No streaming / pagination**. El response puede ser grande (especialmente con `current_portfolio_proposal.candidates` que incluye snapshots completos). Si esto se vuelve un problema operativo, se puede agregar `?fields=` o response slim sin cambiar el endpoint principal.
+- **No diff entre versions**. El summary solo expone los `current_*`. Si compliance pide ver "qué cambió" entre dos snapshots, se agrega un endpoint dedicado (no entra en el scope del summary).
+- **No KPIs agregados** (e.g., volatilidad histórica del case, latencia AI promedio, etc.). El summary es estado, no analítica. Métricas agregadas quedan para un dashboard dedicado.

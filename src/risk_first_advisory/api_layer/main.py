@@ -74,9 +74,13 @@ from risk_first_advisory.api_layer.schemas import (
     CasePortfolioSelectionCreateRequest,
     CasePortfolioSelectionListResponse,
     CasePortfolioSelectionResponse,
+    CaseAISummaryResponse,
+    CaseAuditSummaryResponse,
     CaseReportCreateRequest,
     CaseReportListResponse,
     CaseReportResponse,
+    CaseSummaryResponse,
+    CaseWorkflowProgressResponse,
     CaseUniverseFilterRunCreateRequest,
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
@@ -5516,6 +5520,328 @@ def get_case_report(
             detail=f"Report not found: {report_id!r}",
         )
     return CaseReportResponse(**report_data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 — Case Summary endpoint (full case state en una sola request)
+#
+# RBAC:
+#   GET /cases/{case_id}/summary  → admin, advisor, compliance, viewer
+#
+# Cargado en un único store (conexión SQLite compartida). Cada entidad
+# relacionada se carga "best effort": si no existe, queda None. Esto evita
+# que una inconsistencia puntual (e.g., FK rota) rompa el endpoint.
+#
+# El próximo Case Workbench frontend usará este endpoint para hidratar la
+# vista completa de un caso sin múltiples round-trips.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_PROGRESS_STEPS_TOTAL: int = 9  # kyc, analysis, approval, prefs, filter, proposal, override*, selection, report
+_PROGRESS_STEPS_BASE: int = 8   # sin override (override es condicional)
+
+
+def _proposal_has_override_required(proposal_data: dict[str, Any] | None) -> bool:
+    """True si algún candidate del proposal requiere advisor override."""
+    if proposal_data is None:
+        return False
+    for c in proposal_data.get("candidates") or []:
+        if _candidate_requires_override(c):
+            return True
+    return False
+
+
+def _compute_next_recommended_action(
+    *,
+    case_status: str,
+    has_kyc: bool,
+    has_ai_profile_analysis: bool,
+    has_profile_approval: bool,
+    has_investment_preferences: bool,
+    has_universe_filter: bool,
+    has_portfolio_proposal: bool,
+    has_override_requirement: bool,
+    has_override_approval: bool,
+    has_portfolio_selection: bool,
+    has_report: bool,
+) -> str:
+    """
+    Calcula la siguiente acción recomendada en el workflow. Determinístico,
+    sin side-effects. CLOSED tiene prioridad sobre el progreso.
+    """
+    if case_status == "CLOSED":
+        return "closed"
+    if not has_kyc:
+        return "submit_kyc"
+    if not has_ai_profile_analysis:
+        return "run_ai_profile_analysis"
+    if not has_profile_approval:
+        return "approve_profile"
+    if not has_investment_preferences:
+        return "record_investment_preferences"
+    if not has_universe_filter:
+        return "run_universe_filter"
+    if not has_portfolio_proposal:
+        return "generate_portfolio_proposal"
+    if has_override_requirement and not has_override_approval:
+        return "review_override"
+    if not has_portfolio_selection:
+        return "select_portfolio"
+    if not has_report:
+        return "generate_report"
+    return "ready_for_review"
+
+
+def _compute_completion_ratio(
+    *,
+    has_kyc: bool,
+    has_ai_profile_analysis: bool,
+    has_profile_approval: bool,
+    has_investment_preferences: bool,
+    has_universe_filter: bool,
+    has_portfolio_proposal: bool,
+    has_override_requirement: bool,
+    has_override_approval: bool,
+    has_portfolio_selection: bool,
+    has_report: bool,
+) -> float:
+    """
+    Ratio de completitud 0.0 a 1.0, redondeado a 2 decimales.
+
+    Denominator se ajusta dinámicamente: si el proposal NO tiene candidates
+    que requieran override, override no penaliza (8 pasos en vez de 9).
+    """
+    completed = sum([
+        has_kyc,
+        has_ai_profile_analysis,
+        has_profile_approval,
+        has_investment_preferences,
+        has_universe_filter,
+        has_portfolio_proposal,
+        has_portfolio_selection,
+        has_report,
+    ])
+    denominator = _PROGRESS_STEPS_BASE
+    if has_override_requirement:
+        denominator = _PROGRESS_STEPS_TOTAL
+        if has_override_approval:
+            completed += 1
+    return round(completed / denominator, 2)
+
+
+@app.get(
+    "/cases/{case_id}/summary",
+    response_model=CaseSummaryResponse,
+)
+def get_case_summary(
+    case_id: str,
+    _: AdvisorIdentity = Depends(
+        require_roles("admin", "advisor", "compliance", "viewer")
+    ),
+) -> CaseSummaryResponse:
+    db_path: Path = DEFAULT_DB_PATH
+
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(
+                status_code=404, detail=f"Case not found: {case_id!r}"
+            )
+
+        # ── Entidades relacionadas (best effort) ──────────────────────────
+        firm_data = SQLiteFirmRepository(store).get(case_data["firm_id"])
+        client_data = SQLiteClientRepository(store).get(case_data["client_id"])
+        lead_advisor_data = SQLiteAdvisorRepository(store).get(
+            case_data["lead_advisor_id"]
+        )
+
+        # ── latest_kyc ────────────────────────────────────────────────────
+        kyc_repo = SQLiteKYCSubmissionRepository(store)
+        latest_kyc: dict[str, Any] | None = None
+        current_kyc_id = case_data.get("current_kyc_submission_id")
+        if current_kyc_id is not None:
+            latest_kyc = kyc_repo.get(current_kyc_id)
+        if latest_kyc is None:
+            # Fallback: último por versión.
+            all_kyc = kyc_repo.list_by_case(case_id)
+            if all_kyc:
+                latest_kyc = all_kyc[-1]
+
+        # ── latest_ai_profile_analysis ────────────────────────────────────
+        analyses = SQLiteAIProfileAnalysisRepository(store).list_by_case(case_id)
+        latest_ai_analysis: dict[str, Any] | None = analyses[-1] if analyses else None
+
+        # ── current_profile_approval ──────────────────────────────────────
+        approval_repo = SQLiteAdvisorProfileApprovalCaseRepository(store)
+        current_approval: dict[str, Any] | None = None
+        current_approval_id = case_data.get("current_approved_profile_id")
+        if current_approval_id is not None:
+            current_approval = approval_repo.get(current_approval_id)
+        if current_approval is None:
+            current_approval = approval_repo.get_current_for_case(case_id)
+        if current_approval is None:
+            # Último por created_at_utc como fallback.
+            all_approvals = approval_repo.list_by_case(case_id)
+            if all_approvals:
+                current_approval = all_approvals[-1]
+
+        # ── current_investment_preferences ────────────────────────────────
+        pref_repo = SQLiteCaseInvestmentPreferenceRepository(store)
+        current_pref = pref_repo.get_current_for_case(case_id)
+        if current_pref is None:
+            all_prefs = pref_repo.list_by_case(case_id)
+            if all_prefs:
+                current_pref = all_prefs[-1]
+
+        # ── current_universe_filter ───────────────────────────────────────
+        filter_repo = SQLiteCaseUniverseFilterRunRepository(store)
+        current_filter = filter_repo.get_current_for_case(case_id)
+        if current_filter is None:
+            all_filters = filter_repo.list_by_case(case_id)
+            if all_filters:
+                current_filter = all_filters[-1]
+
+        # ── current_portfolio_proposal ────────────────────────────────────
+        proposal_repo = SQLiteCasePortfolioProposalRepository(store)
+        current_proposal = proposal_repo.get_current_for_case(case_id)
+        if current_proposal is None:
+            all_proposals = proposal_repo.list_by_case(case_id)
+            if all_proposals:
+                current_proposal = all_proposals[-1]
+
+        # ── current_override_approval ─────────────────────────────────────
+        override_repo = SQLiteCaseOverrideApprovalRepository(store)
+        current_override = override_repo.get_current_for_case(case_id)
+        if current_override is None:
+            all_overrides = override_repo.list_by_case(case_id)
+            if all_overrides:
+                current_override = all_overrides[-1]
+
+        # ── current_portfolio_selection ───────────────────────────────────
+        selection_repo = SQLiteCasePortfolioSelectionRepository(store)
+        current_selection: dict[str, Any] | None = None
+        current_selection_id = case_data.get("current_portfolio_selection_id")
+        if current_selection_id is not None:
+            current_selection = selection_repo.get(current_selection_id)
+        if current_selection is None:
+            current_selection = selection_repo.get_current_for_case(case_id)
+
+        # ── current_report ────────────────────────────────────────────────
+        report_repo = SQLiteCaseReportRepository(store)
+        current_report = report_repo.get_current_for_case(case_id)
+        if current_report is None:
+            all_reports = report_repo.list_by_case(case_id)
+            if all_reports:
+                current_report = all_reports[-1]
+
+        # ── audit summary ─────────────────────────────────────────────────
+        audit_result = SQLiteAuditEventRepository(store).verify_chain(case_id)
+
+        # ── AI logs summary ───────────────────────────────────────────────
+        ai_logs = SQLiteAIRequestLogRepository(store).list_by_case(case_id)
+        ai_logs_count = len(ai_logs)
+        latest_ai_log_id: str | None = None
+        latest_validation_status: str | None = None
+        if ai_logs:
+            latest_log = ai_logs[-1]
+            latest_ai_log_id = latest_log["request_id"]
+            latest_validation_status = latest_log["validation_status"]
+
+    # ── Progress flags ───────────────────────────────────────────────────────
+    has_kyc                    = latest_kyc is not None
+    has_ai_profile_analysis    = latest_ai_analysis is not None
+    has_profile_approval       = current_approval is not None
+    has_investment_preferences = current_pref is not None
+    has_universe_filter        = current_filter is not None
+    has_portfolio_proposal     = current_proposal is not None
+    has_override_approval      = current_override is not None
+    has_portfolio_selection    = current_selection is not None
+    has_report                 = current_report is not None
+    has_override_requirement   = _proposal_has_override_required(current_proposal)
+
+    next_action = _compute_next_recommended_action(
+        case_status=case_data["status"],
+        has_kyc=has_kyc,
+        has_ai_profile_analysis=has_ai_profile_analysis,
+        has_profile_approval=has_profile_approval,
+        has_investment_preferences=has_investment_preferences,
+        has_universe_filter=has_universe_filter,
+        has_portfolio_proposal=has_portfolio_proposal,
+        has_override_requirement=has_override_requirement,
+        has_override_approval=has_override_approval,
+        has_portfolio_selection=has_portfolio_selection,
+        has_report=has_report,
+    )
+    completion_ratio = _compute_completion_ratio(
+        has_kyc=has_kyc,
+        has_ai_profile_analysis=has_ai_profile_analysis,
+        has_profile_approval=has_profile_approval,
+        has_investment_preferences=has_investment_preferences,
+        has_universe_filter=has_universe_filter,
+        has_portfolio_proposal=has_portfolio_proposal,
+        has_override_requirement=has_override_requirement,
+        has_override_approval=has_override_approval,
+        has_portfolio_selection=has_portfolio_selection,
+        has_report=has_report,
+    )
+
+    # ── Construir response ───────────────────────────────────────────────────
+    return CaseSummaryResponse(
+        case=AdvisoryCaseResponse(**case_data),
+        firm=FirmResponse(**firm_data) if firm_data else None,
+        client=ClientResponse(**client_data) if client_data else None,
+        lead_advisor=AdvisorResponse(**lead_advisor_data) if lead_advisor_data else None,
+        latest_kyc=KYCSubmissionResponse(**latest_kyc) if latest_kyc else None,
+        latest_ai_profile_analysis=(
+            AIProfileAnalysisResponse(**latest_ai_analysis) if latest_ai_analysis else None
+        ),
+        current_profile_approval=(
+            CaseAdvisorProfileApprovalResponse(**current_approval) if current_approval else None
+        ),
+        current_investment_preferences=(
+            CaseInvestmentPreferenceResponse(**current_pref) if current_pref else None
+        ),
+        current_universe_filter=(
+            CaseUniverseFilterRunResponse(**current_filter) if current_filter else None
+        ),
+        current_portfolio_proposal=(
+            CasePortfolioProposalResponse(**current_proposal) if current_proposal else None
+        ),
+        current_override_approval=(
+            CaseOverrideApprovalResponse(**current_override) if current_override else None
+        ),
+        current_portfolio_selection=(
+            CasePortfolioSelectionResponse(**current_selection) if current_selection else None
+        ),
+        current_report=(
+            CaseReportResponse(**current_report) if current_report else None
+        ),
+        audit=CaseAuditSummaryResponse(
+            is_intact=audit_result["is_intact"],
+            total_events=audit_result["total_events"],
+            first_broken_sequence=audit_result["first_broken_sequence"],
+            message=audit_result["message"],
+        ),
+        ai=CaseAISummaryResponse(
+            ai_logs_count=ai_logs_count,
+            latest_ai_log_id=latest_ai_log_id,
+            latest_validation_status=latest_validation_status,
+        ),
+        progress=CaseWorkflowProgressResponse(
+            has_kyc=has_kyc,
+            has_ai_profile_analysis=has_ai_profile_analysis,
+            has_profile_approval=has_profile_approval,
+            has_investment_preferences=has_investment_preferences,
+            has_universe_filter=has_universe_filter,
+            has_portfolio_proposal=has_portfolio_proposal,
+            has_override_approval=has_override_approval,
+            has_portfolio_selection=has_portfolio_selection,
+            has_report=has_report,
+            next_recommended_action=next_action,
+            completion_ratio=completion_ratio,
+        ),
+    )
 
 
 @app.post(
