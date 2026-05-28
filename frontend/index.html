@@ -1197,6 +1197,205 @@
     </div>
   </div>
 
+  <!-- ── 9. CASE DASHBOARD — PHASE 2 ───────────────────────── -->
+  <!--
+    Entrada inicial al workflow case-scoped de Fase 2. NO es el Case Workbench
+    completo — solo lista/crea entidades base y carga summary. Las acciones
+    case-scoped del workflow (KYC, AI analysis, profile approval, preferences,
+    universe filter, portfolio proposal, override, selection, reports) NO se
+    invocan desde esta UI todavía — esos endpoints existen en el backend
+    (Fase 2 ✅) y se ejercitan vía smoke check:
+      python scripts/run_case_workflow_smoke_check.py
+    o vía Swagger UI en http://127.0.0.1:8000/docs
+  -->
+  <div class="card" id="card-case-dashboard">
+    <div class="card-header">
+      <h2>Case Dashboard — Phase 2</h2>
+      <span class="pill pill-blue" style="font-size:10px;">case-scoped · dev UI</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#eff6ff;border-color:#93c5fd;color:#1e40af;">
+        <strong>Phase 2 backend workflow — local/dev UI.</strong>
+        <ul>
+          <li><strong>NOT production-ready.</strong> Tokens son strings opacos en YAML; sin JWT, sin IdP, sin firm-level access control.</li>
+          <li>Esta vista expone solo el <strong>case-scoped flow</strong> básico: lista/crea firms, advisors, clients, cases y carga summary. <strong>Full Case Workbench pendiente</strong> (Fase 3).</li>
+          <li>Las acciones del workflow case-scoped (KYC, AI analysis, approval, preferences, universe filter, proposal, override, selection, report) están <strong>solo en el backend</strong>. Para ejercitarlas hoy: <code>python scripts/run_case_workflow_smoke_check.py</code> o Swagger UI <code>/docs</code>.</li>
+          <li>RBAC: POSTs de firms requieren <code>admin</code>; advisors/clients/cases requieren <code>admin</code> o <code>advisor</code> según endpoint. GETs son lectura abierta a cualquier rol válido.</li>
+        </ul>
+      </div>
+
+      <!-- ── Section 1: Auth / token ──────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">1. Auth — token activo</div>
+        <div class="form-grid cols-3">
+          <div class="field full-span">
+            <label>Bearer token <span class="hint">enviado como <code>Authorization: Bearer &lt;token&gt;</code> en todas las requests del dashboard</span></label>
+            <input type="text" id="cd-token" value="dev-advisor-token" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-auth" onclick="cdCheckAuth()">Check /auth/me</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-auth-result')">Clear</button>
+        </div>
+        <div id="cd-auth-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 2: Firms ─────────────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">2. Firms — <code>GET / POST /firms</code></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>display_name</label>
+            <input type="text" id="cd-firm-name" value="Firm Demo Local" />
+          </div>
+          <div class="field">
+            <label>country</label>
+            <input type="text" id="cd-firm-country" value="AR" />
+          </div>
+          <div class="field">
+            <label>firm_id <span class="hint">opcional — auto si vacío</span></label>
+            <input type="text" id="cd-firm-id" placeholder="firm_demo_local" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-create-firm" onclick="cdCreateFirm()">Create Firm <span class="hint" style="color:#fff;">admin required</span></button>
+          <button class="btn-secondary" id="cd-btn-list-firms" onclick="cdListFirms()">List Firms</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-firms-result')">Clear</button>
+        </div>
+        <div id="cd-firms-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 3: Advisors ──────────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">3. Advisors — <code>GET / POST /advisors</code></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>firm_id</label>
+            <input type="text" id="cd-advisor-firm-id" placeholder="firm_000001" />
+          </div>
+          <div class="field">
+            <label>display_name</label>
+            <input type="text" id="cd-advisor-name" value="Advisor Demo Local" />
+          </div>
+          <div class="field">
+            <label>email</label>
+            <input type="text" id="cd-advisor-email" value="advisor@demo.local" />
+          </div>
+          <div class="field">
+            <label>roles <span class="hint">CSV</span></label>
+            <input type="text" id="cd-advisor-roles" value="advisor" />
+          </div>
+          <div class="field">
+            <label>advisor_id <span class="hint">opcional</span></label>
+            <input type="text" id="cd-advisor-id" placeholder="advisor_demo_local" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-create-advisor" onclick="cdCreateAdvisor()">Create Advisor <span class="hint" style="color:#fff;">admin required</span></button>
+          <button class="btn-secondary" id="cd-btn-list-advisors" onclick="cdListAdvisors()">List Advisors</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-advisors-result')">Clear</button>
+        </div>
+        <div id="cd-advisors-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 4: Clients ───────────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">4. Clients — <code>GET / POST /clients</code></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>firm_id</label>
+            <input type="text" id="cd-client-firm-id" placeholder="firm_000001" />
+          </div>
+          <div class="field">
+            <label>primary_advisor_id</label>
+            <input type="text" id="cd-client-advisor-id" placeholder="advisor_000001" />
+          </div>
+          <div class="field">
+            <label>display_name</label>
+            <input type="text" id="cd-client-name" value="Client Demo Local" />
+          </div>
+          <div class="field">
+            <label>client_id <span class="hint">opcional</span></label>
+            <input type="text" id="cd-client-id" placeholder="client_demo_local" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-create-client" onclick="cdCreateClient()">Create Client <span class="hint" style="color:#fff;">admin / advisor</span></button>
+          <button class="btn-secondary" id="cd-btn-list-clients" onclick="cdListClients()">List Clients</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-clients-result')">Clear</button>
+        </div>
+        <div id="cd-clients-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 5: Cases ─────────────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">5. Advisory Cases — <code>GET / POST /cases</code></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>firm_id</label>
+            <input type="text" id="cd-case-firm-id" placeholder="firm_000001" />
+          </div>
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="cd-case-client-id" placeholder="client_000001" />
+          </div>
+          <div class="field">
+            <label>lead_advisor_id</label>
+            <input type="text" id="cd-case-advisor-id" placeholder="advisor_000001" />
+          </div>
+          <div class="field full-span">
+            <label>title</label>
+            <input type="text" id="cd-case-title" value="Demo advisory case" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-create-case" onclick="cdCreateCase()">Create Case <span class="hint" style="color:#fff;">admin / advisor</span></button>
+          <button class="btn-secondary" id="cd-btn-list-cases" onclick="cdListCases()">List Cases</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-cases-result')">Clear</button>
+        </div>
+        <div id="cd-cases-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 6: Quick demo seed ───────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">6. Quick demo seed <span class="hint">requiere admin token</span></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Crea en cascada firm → advisor → client → case demo. Si alguno ya existe (409 duplicate), se reusa el row existente y se prosigue con los IDs encontrados.
+          Al finalizar, popula los inputs de las secciones anteriores con los IDs creados y los del summary.
+        </p>
+        <div class="actions">
+          <button class="btn-primary" id="cd-btn-seed" onclick="cdSeedDemo()">Create demo firm + advisor + client + case</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-seed-result')">Clear</button>
+        </div>
+        <div id="cd-seed-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 7: Case Summary ──────────────────────── -->
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">7. Case Summary — <code>GET /cases/{case_id}/summary</code></div>
+        <div class="form-grid cols-3">
+          <div class="field full-span">
+            <label>Selected case_id <span class="hint">poblado automáticamente al crear/seed; editable manualmente</span></label>
+            <input type="text" id="cd-summary-case-id" placeholder="case_000001" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cd-btn-summary" onclick="cdLoadSummary()">Load Summary</button>
+          <button class="btn-secondary" onclick="cdClearResult('cd-summary-result')">Clear</button>
+        </div>
+        <div id="cd-summary-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Footer: next steps ───────────────────────────── -->
+      <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
+        <strong>Next steps (Fase 3 pendiente):</strong> Case Workbench con tabs para KYC / AI profile analysis / profile approval / preferences / universe filter / portfolio proposal / override / selection / report. Endpoints case-scoped ya existen en backend — ver
+        <code>docs/TODO_DESIGN_NOTES.md</code> y <code>docs/ARCHITECTURE.md</code>.
+      </div>
+
+    </div>
+  </div>
+
 </div><!-- /page -->
 
 
@@ -3549,6 +3748,546 @@
 
   function clearPortfolioSelectionResult() {
     el("adv-sel-result").innerHTML = "";
+  }
+
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CASE DASHBOARD — PHASE 2  (prefijo cd-* para evitar colisiones)
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Reusa helpers existentes: el(), formatJSON(), apiError(), escapeHTML().
+  // Endpoints: /auth/me, /firms, /advisors, /clients, /cases,
+  //            /cases/{id}/summary.
+  // No usa los endpoints workflow case-scoped (KYC, analysis, approval, etc.)
+  // — esos quedan para Case Workbench en Fase 3.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // ── helpers ────────────────────────────────────────────────────────────
+
+  function cdToken() {
+    return (el("cd-token").value || "").trim();
+  }
+
+  function cdAuthHeaders(includeContentType = false) {
+    const token = cdToken();
+    const headers = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (includeContentType) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  function cdClearResult(elId) {
+    const target = el(elId);
+    if (target) target.innerHTML = "";
+  }
+
+  function cdRenderJson(elId, data, prefixHtml = "") {
+    const target = el(elId);
+    if (!target) return;
+    target.innerHTML = prefixHtml + `<pre class="json-block">${escapeHTML(formatJSON(data))}</pre>`;
+  }
+
+  function cdRenderError(elId, msgHtml) {
+    const target = el(elId);
+    if (!target) return;
+    target.innerHTML = `<div class="msg msg-error">${msgHtml}</div>`;
+  }
+
+  function cdRenderSuccess(elId, msgHtml, data) {
+    const target = el(elId);
+    if (!target) return;
+    const head = `<div class="msg msg-success">${msgHtml}</div>`;
+    const body = data !== undefined
+      ? `<pre class="json-block" style="margin-top:8px;">${escapeHTML(formatJSON(data))}</pre>`
+      : "";
+    target.innerHTML = head + body;
+  }
+
+  function cdRenderLoading(elId, msg = "Loading…") {
+    const target = el(elId);
+    if (target) target.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>${msg}</div>`;
+  }
+
+  // Parsea response: si !ok, devuelve {ok:false, status, detail, json}; si ok, {ok:true, json}.
+  async function cdParseResponse(r) {
+    let json = null;
+    try { json = await r.json(); } catch (_) { /* not json */ }
+    if (!r.ok) {
+      const detail = json && (json.detail || json.message)
+        ? (typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail))
+        : `HTTP ${r.status}`;
+      return { ok: false, status: r.status, detail, json };
+    }
+    return { ok: true, status: r.status, json };
+  }
+
+  function cdNullIfBlank(v) {
+    const s = (v || "").trim();
+    return s.length > 0 ? s : null;
+  }
+
+  // Wrapper genérico de fetch que centraliza el manejo de errores de red.
+  async function cdApiFetch(path, options = {}) {
+    try {
+      const r = await fetch(`${API}${path}`, options);
+      return await cdParseResponse(r);
+    } catch (err) {
+      return { ok: false, status: 0, detail: err.message || String(err), networkError: true, err };
+    }
+  }
+
+  // ── 1. Auth ────────────────────────────────────────────────────────────
+
+  async function cdCheckAuth() {
+    cdRenderLoading("cd-auth-result", "Calling GET /auth/me…");
+    const headers = cdAuthHeaders();
+    if (!headers["Authorization"]) {
+      cdRenderError("cd-auth-result", "<strong>Token vacío.</strong> Ingresar un Bearer token primero.");
+      return;
+    }
+    const res = await cdApiFetch("/auth/me", { headers });
+    if (!res.ok) {
+      if (res.networkError) {
+        el("cd-auth-result").innerHTML = apiError(res.err);
+      } else {
+        cdRenderError("cd-auth-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      }
+      return;
+    }
+    const id = res.json && res.json.advisor_id ? res.json.advisor_id : "(unknown)";
+    const roles = res.json && Array.isArray(res.json.roles) ? res.json.roles.join(", ") : "—";
+    const firm = res.json && res.json.firm_id ? res.json.firm_id : "—";
+    cdRenderSuccess(
+      "cd-auth-result",
+      `<strong>OK</strong> — advisor_id <code>${escapeHTML(id)}</code> · roles <code>${escapeHTML(roles)}</code> · firm_id <code>${escapeHTML(firm)}</code>`,
+      res.json,
+    );
+  }
+
+  // ── 2. Firms ───────────────────────────────────────────────────────────
+
+  async function cdCreateFirm() {
+    const body = {
+      display_name: (el("cd-firm-name").value || "").trim(),
+      country:      (el("cd-firm-country").value || "").trim(),
+    };
+    const fid = cdNullIfBlank(el("cd-firm-id").value);
+    if (fid) body.firm_id = fid;
+
+    cdRenderLoading("cd-firms-result", "Creating firm…");
+    const res = await cdApiFetch("/firms", {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 409) {
+        cdRenderError("cd-firms-result",
+          `<strong>409 duplicate</strong>: ${escapeHTML(res.detail)}. Probar otro <code>firm_id</code> o usar List Firms para reusar el existente.`);
+        return;
+      }
+      if (res.status === 403) {
+        cdRenderError("cd-firms-result", `<strong>403 forbidden:</strong> el token actual no tiene rol <code>admin</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cd-firms-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-firms-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const firmId = res.json && res.json.firm_id ? res.json.firm_id : "(unknown)";
+    // Propagar a inputs downstream
+    if (firmId !== "(unknown)") {
+      el("cd-advisor-firm-id").value = firmId;
+      el("cd-client-firm-id").value  = firmId;
+      el("cd-case-firm-id").value    = firmId;
+    }
+    cdRenderSuccess("cd-firms-result", `Firm creada: <code>${escapeHTML(firmId)}</code>`, res.json);
+  }
+
+  async function cdListFirms() {
+    cdRenderLoading("cd-firms-result", "Loading firms…");
+    const res = await cdApiFetch("/firms", { headers: cdAuthHeaders() });
+    if (!res.ok) {
+      if (res.networkError) { el("cd-firms-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-firms-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const count = (res.json && typeof res.json.count === "number") ? res.json.count : "?";
+    cdRenderSuccess("cd-firms-result", `<strong>${count}</strong> firms encontradas`, res.json);
+  }
+
+  // ── 3. Advisors ────────────────────────────────────────────────────────
+
+  function cdParseRolesCSV(raw) {
+    return (raw || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+  async function cdCreateAdvisor() {
+    const firmId = cdNullIfBlank(el("cd-advisor-firm-id").value);
+    if (!firmId) {
+      cdRenderError("cd-advisors-result", "<strong>firm_id requerido.</strong>");
+      return;
+    }
+    const roles = cdParseRolesCSV(el("cd-advisor-roles").value);
+    if (roles.length === 0) {
+      cdRenderError("cd-advisors-result", "<strong>roles requerido</strong> (CSV; e.g. <code>advisor</code>).");
+      return;
+    }
+    const body = {
+      firm_id:      firmId,
+      display_name: (el("cd-advisor-name").value || "").trim(),
+      email:        (el("cd-advisor-email").value || "").trim(),
+      roles:        roles,
+    };
+    const aid = cdNullIfBlank(el("cd-advisor-id").value);
+    if (aid) body.advisor_id = aid;
+
+    cdRenderLoading("cd-advisors-result", "Creating advisor…");
+    const res = await cdApiFetch("/advisors", {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 409) {
+        cdRenderError("cd-advisors-result",
+          `<strong>409 duplicate</strong>: ${escapeHTML(res.detail)}. Probar otro <code>advisor_id</code> o usar List Advisors.`);
+        return;
+      }
+      if (res.status === 422) {
+        cdRenderError("cd-advisors-result",
+          `<strong>422 validation</strong>: ${escapeHTML(res.detail)}. Verificar que <code>firm_id</code> existe.`);
+        return;
+      }
+      if (res.status === 403) {
+        cdRenderError("cd-advisors-result", `<strong>403 forbidden:</strong> requiere rol <code>admin</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cd-advisors-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-advisors-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const advisorId = res.json && res.json.advisor_id ? res.json.advisor_id : "(unknown)";
+    if (advisorId !== "(unknown)") {
+      el("cd-client-advisor-id").value = advisorId;
+      el("cd-case-advisor-id").value   = advisorId;
+    }
+    cdRenderSuccess("cd-advisors-result", `Advisor creado: <code>${escapeHTML(advisorId)}</code>`, res.json);
+  }
+
+  async function cdListAdvisors() {
+    cdRenderLoading("cd-advisors-result", "Loading advisors…");
+    const res = await cdApiFetch("/advisors", { headers: cdAuthHeaders() });
+    if (!res.ok) {
+      if (res.networkError) { el("cd-advisors-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-advisors-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const count = (res.json && typeof res.json.count === "number") ? res.json.count : "?";
+    cdRenderSuccess("cd-advisors-result", `<strong>${count}</strong> advisors encontrados`, res.json);
+  }
+
+  // ── 4. Clients ─────────────────────────────────────────────────────────
+
+  async function cdCreateClient() {
+    const firmId    = cdNullIfBlank(el("cd-client-firm-id").value);
+    const advisorId = cdNullIfBlank(el("cd-client-advisor-id").value);
+    if (!firmId || !advisorId) {
+      cdRenderError("cd-clients-result", "<strong>firm_id y primary_advisor_id son requeridos.</strong>");
+      return;
+    }
+    const body = {
+      firm_id:            firmId,
+      primary_advisor_id: advisorId,
+      display_name:       (el("cd-client-name").value || "").trim(),
+    };
+    const cid = cdNullIfBlank(el("cd-client-id").value);
+    if (cid) body.client_id = cid;
+
+    cdRenderLoading("cd-clients-result", "Creating client…");
+    const res = await cdApiFetch("/clients", {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 409) {
+        cdRenderError("cd-clients-result",
+          `<strong>409 duplicate</strong>: ${escapeHTML(res.detail)}.`);
+        return;
+      }
+      if (res.status === 422) {
+        cdRenderError("cd-clients-result",
+          `<strong>422 validation</strong>: ${escapeHTML(res.detail)}. Verificar que <code>firm_id</code> y <code>primary_advisor_id</code> existen y pertenecen a la misma firm.`);
+        return;
+      }
+      if (res.status === 403) {
+        cdRenderError("cd-clients-result", `<strong>403 forbidden:</strong> requiere rol <code>admin</code> o <code>advisor</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cd-clients-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-clients-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const clientId = res.json && res.json.client_id ? res.json.client_id : "(unknown)";
+    if (clientId !== "(unknown)") {
+      el("cd-case-client-id").value = clientId;
+    }
+    cdRenderSuccess("cd-clients-result", `Client creado: <code>${escapeHTML(clientId)}</code>`, res.json);
+  }
+
+  async function cdListClients() {
+    cdRenderLoading("cd-clients-result", "Loading clients…");
+    const res = await cdApiFetch("/clients", { headers: cdAuthHeaders() });
+    if (!res.ok) {
+      if (res.networkError) { el("cd-clients-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-clients-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const count = (res.json && typeof res.json.count === "number") ? res.json.count : "?";
+    cdRenderSuccess("cd-clients-result", `<strong>${count}</strong> clients encontrados`, res.json);
+  }
+
+  // ── 5. Cases ───────────────────────────────────────────────────────────
+
+  async function cdCreateCase() {
+    const firmId    = cdNullIfBlank(el("cd-case-firm-id").value);
+    const clientId  = cdNullIfBlank(el("cd-case-client-id").value);
+    const advisorId = cdNullIfBlank(el("cd-case-advisor-id").value);
+    if (!firmId || !clientId || !advisorId) {
+      cdRenderError("cd-cases-result",
+        "<strong>firm_id, client_id y lead_advisor_id son requeridos.</strong>");
+      return;
+    }
+    const body = {
+      firm_id:         firmId,
+      client_id:       clientId,
+      lead_advisor_id: advisorId,
+      title:           (el("cd-case-title").value || "").trim() || "Untitled case",
+    };
+
+    cdRenderLoading("cd-cases-result", "Creating case…");
+    const res = await cdApiFetch("/cases", {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 422) {
+        cdRenderError("cd-cases-result",
+          `<strong>422 validation</strong>: ${escapeHTML(res.detail)}. Verificar que firm/client/advisor existen y son consistentes (cross-firm).`);
+        return;
+      }
+      if (res.status === 403) {
+        cdRenderError("cd-cases-result", `<strong>403 forbidden:</strong> requiere rol <code>admin</code> o <code>advisor</code>.`);
+        return;
+      }
+      if (res.networkError) { el("cd-cases-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-cases-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const caseId = res.json && res.json.case_id ? res.json.case_id : "(unknown)";
+    if (caseId !== "(unknown)") {
+      el("cd-summary-case-id").value = caseId;
+    }
+    cdRenderSuccess("cd-cases-result",
+      `Case creado: <code>${escapeHTML(caseId)}</code> — listo para <strong>Load Summary</strong>.`,
+      res.json);
+  }
+
+  async function cdListCases() {
+    cdRenderLoading("cd-cases-result", "Loading cases…");
+    const res = await cdApiFetch("/cases", { headers: cdAuthHeaders() });
+    if (!res.ok) {
+      if (res.networkError) { el("cd-cases-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-cases-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const count = (res.json && typeof res.json.count === "number") ? res.json.count : "?";
+    cdRenderSuccess("cd-cases-result", `<strong>${count}</strong> cases encontrados`, res.json);
+  }
+
+  // ── 6. Quick demo seed ─────────────────────────────────────────────────
+
+  async function cdSeedDemo() {
+    cdRenderLoading("cd-seed-result", "Seeding demo data…");
+    const headers = cdAuthHeaders(true);
+    if (!headers["Authorization"]) {
+      cdRenderError("cd-seed-result", "<strong>Token vacío.</strong>");
+      return;
+    }
+    const log = [];
+    const tag = (lvl, msg) => log.push(`[${lvl}] ${msg}`);
+
+    // Helpers internos: lookup-or-create por entidad.
+    // 1. firm
+    let firmId = null;
+    {
+      const body = { display_name: "Firm Demo Local", country: "AR", firm_id: "firm_demo_local" };
+      const r = await cdApiFetch("/firms", { method: "POST", headers, body: JSON.stringify(body) });
+      if (r.ok) {
+        firmId = r.json.firm_id;
+        tag("OK", `firm creado: ${firmId}`);
+      } else if (r.status === 409) {
+        firmId = body.firm_id;
+        tag("WARN", `firm ya existía (409): ${firmId} — reusando`);
+      } else if (r.status === 403) {
+        cdRenderError("cd-seed-result", "<strong>403:</strong> seed requiere rol <code>admin</code>.");
+        return;
+      } else {
+        cdRenderError("cd-seed-result", `firm: HTTP ${r.status} — ${escapeHTML(r.detail || "?")}`);
+        return;
+      }
+    }
+
+    // 2. advisor
+    let advisorId = null;
+    {
+      const body = {
+        firm_id:      firmId,
+        advisor_id:   "advisor_demo_local",
+        display_name: "Advisor Demo Local",
+        email:        "advisor@demo.local",
+        roles:        ["advisor"],
+      };
+      const r = await cdApiFetch("/advisors", { method: "POST", headers, body: JSON.stringify(body) });
+      if (r.ok) {
+        advisorId = r.json.advisor_id;
+        tag("OK", `advisor creado: ${advisorId}`);
+      } else if (r.status === 409) {
+        advisorId = body.advisor_id;
+        tag("WARN", `advisor ya existía (409): ${advisorId} — reusando`);
+      } else {
+        cdRenderError("cd-seed-result", `advisor: HTTP ${r.status} — ${escapeHTML(r.detail || "?")}`);
+        return;
+      }
+    }
+
+    // 3. client
+    let clientId = null;
+    {
+      const body = {
+        firm_id:            firmId,
+        primary_advisor_id: advisorId,
+        client_id:          "client_demo_local",
+        display_name:       "Client Demo Local",
+      };
+      const r = await cdApiFetch("/clients", { method: "POST", headers, body: JSON.stringify(body) });
+      if (r.ok) {
+        clientId = r.json.client_id;
+        tag("OK", `client creado: ${clientId}`);
+      } else if (r.status === 409) {
+        clientId = body.client_id;
+        tag("WARN", `client ya existía (409): ${clientId} — reusando`);
+      } else {
+        cdRenderError("cd-seed-result", `client: HTTP ${r.status} — ${escapeHTML(r.detail || "?")}`);
+        return;
+      }
+    }
+
+    // 4. case (sin case_id explícito; el backend genera uno auto-incremental).
+    let caseId = null;
+    {
+      const body = {
+        firm_id:         firmId,
+        client_id:       clientId,
+        lead_advisor_id: advisorId,
+        title:           "Demo advisory case",
+      };
+      const r = await cdApiFetch("/cases", { method: "POST", headers, body: JSON.stringify(body) });
+      if (r.ok) {
+        caseId = r.json.case_id;
+        tag("OK", `case creado: ${caseId}`);
+      } else {
+        cdRenderError("cd-seed-result", `case: HTTP ${r.status} — ${escapeHTML(r.detail || "?")}`);
+        return;
+      }
+    }
+
+    // Propagar a inputs downstream
+    el("cd-firm-id").value           = firmId;
+    el("cd-advisor-firm-id").value   = firmId;
+    el("cd-advisor-id").value        = advisorId;
+    el("cd-client-firm-id").value    = firmId;
+    el("cd-client-advisor-id").value = advisorId;
+    el("cd-client-id").value         = clientId;
+    el("cd-case-firm-id").value      = firmId;
+    el("cd-case-client-id").value    = clientId;
+    el("cd-case-advisor-id").value   = advisorId;
+    el("cd-summary-case-id").value   = caseId;
+
+    cdRenderSuccess("cd-seed-result",
+      `Seed completo. <strong>case_id:</strong> <code>${escapeHTML(caseId)}</code> — abrir <em>Load Summary</em>.`,
+      { firm_id: firmId, advisor_id: advisorId, client_id: clientId, case_id: caseId, log });
+  }
+
+  // ── 7. Case Summary ────────────────────────────────────────────────────
+
+  function cdSummaryHighlights(s) {
+    if (!s || typeof s !== "object") return "";
+    const c   = s.case || {};
+    const p   = s.progress || {};
+    const a   = s.audit || {};
+    const ai  = s.ai || {};
+    const rep = s.current_report || null;
+
+    const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
+    const flagPill = (v) => v ? '<span class="pill pill-green">yes</span>' : '<span class="pill pill-grey">no</span>';
+    const statusBadge = (st) => st ? `<span class="pill pill-blue">${escapeHTML(st)}</span>` : "—";
+    const intactBadge = (v) => v ? '<span class="pill pill-green">intact</span>' : '<span class="pill pill-red">broken</span>';
+
+    return `
+      <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;margin-bottom:10px;background:#fafbfd;">
+        <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Case overview</div>
+        <table style="width:100%;border-collapse:collapse;">
+          ${row("case_id",                `<code>${escapeHTML(c.case_id || "—")}</code>`)}
+          ${row("status",                 statusBadge(c.status))}
+          ${row("client_id",              `<code>${escapeHTML(c.client_id || "—")}</code>`)}
+          ${row("lead_advisor_id",        `<code>${escapeHTML(c.lead_advisor_id || "—")}</code>`)}
+          ${row("completion_ratio",       `<strong>${(p.completion_ratio !== undefined ? p.completion_ratio : "—")}</strong>`)}
+          ${row("next_recommended_action", `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+          ${row("has_kyc",                flagPill(p.has_kyc))}
+          ${row("has_ai_profile_analysis", flagPill(p.has_ai_profile_analysis))}
+          ${row("has_profile_approval",   flagPill(p.has_profile_approval))}
+          ${row("has_investment_preferences", flagPill(p.has_investment_preferences))}
+          ${row("has_universe_filter",    flagPill(p.has_universe_filter))}
+          ${row("has_portfolio_proposal", flagPill(p.has_portfolio_proposal))}
+          ${row("has_override_approval",  flagPill(p.has_override_approval))}
+          ${row("has_portfolio_selection", flagPill(p.has_portfolio_selection))}
+          ${row("has_report",             flagPill(p.has_report))}
+          ${row("audit.is_intact",        intactBadge(a.is_intact))}
+          ${row("audit.total_events",     `<code>${a.total_events !== undefined ? a.total_events : "—"}</code>`)}
+          ${row("ai.ai_logs_count",       `<code>${ai.ai_logs_count !== undefined ? ai.ai_logs_count : "—"}</code>`)}
+          ${row("current_report.report_id", rep && rep.report_id ? `<code>${escapeHTML(rep.report_id)}</code>` : "—")}
+        </table>
+      </div>
+    `;
+  }
+
+  async function cdLoadSummary() {
+    const caseId = cdNullIfBlank(el("cd-summary-case-id").value);
+    if (!caseId) {
+      cdRenderError("cd-summary-result", "<strong>case_id requerido.</strong>");
+      return;
+    }
+    cdRenderLoading("cd-summary-result", `Loading summary for ${escapeHTML(caseId)}…`);
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/summary`, {
+      headers: cdAuthHeaders(),
+    });
+    if (!res.ok) {
+      if (res.status === 404) {
+        cdRenderError("cd-summary-result", `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+        return;
+      }
+      if (res.networkError) { el("cd-summary-result").innerHTML = apiError(res.err); return; }
+      cdRenderError("cd-summary-result", `<strong>HTTP ${res.status}:</strong> ${escapeHTML(res.detail)}`);
+      return;
+    }
+    const highlights = cdSummaryHighlights(res.json);
+    cdRenderJson("cd-summary-result", res.json, highlights);
   }
 
 </script>

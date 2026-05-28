@@ -79,6 +79,53 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | AI Filtered Portfolio Demo | `POST` | `/ai/filtered-portfolio-demo` | Lenguaje natural → OpenAI → filtro → snapshots → portfolios candidatos (requiere API key) |
 | Persisted Workflows | `GET` | `/workflow` | Lista todos los workflows |
 | Persisted Workflows | `GET` | `/workflow?client_id=...` | Filtra workflows por cliente |
+| **Case Dashboard (Phase 2)** | `GET` | `/auth/me` | Verifica el token activo |
+| **Case Dashboard (Phase 2)** | `GET`/`POST` | `/firms` | Lista/crea firms |
+| **Case Dashboard (Phase 2)** | `GET`/`POST` | `/advisors` | Lista/crea advisors |
+| **Case Dashboard (Phase 2)** | `GET`/`POST` | `/clients` | Lista/crea clients |
+| **Case Dashboard (Phase 2)** | `GET`/`POST` | `/cases` | Lista/crea cases |
+| **Case Dashboard (Phase 2)** | `GET` | `/cases/{case_id}/summary` | Estado completo del case seleccionado |
+
+---
+
+## Case Dashboard — Phase 2
+
+Nueva sección al final del index para **visualizar y crear las entidades base del flujo case-scoped**: firms → advisors → clients → cases → summary. Es la primera entrada visual al backend Fase 2; **NO es el Case Workbench completo** (las acciones del workflow — KYC, AI profile analysis, profile approval, investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, report — **todavía no se invocan desde esta UI**).
+
+### Qué permite hoy
+
+1. **Auth token activo** — input Bearer + botón `Check /auth/me` que muestra `advisor_id`, `roles`, `firm_id`.
+2. **Firms** — `List` + `Create` (admin only). Auto-propaga el `firm_id` creado a los inputs de advisors/clients/cases.
+3. **Advisors** — `List` + `Create` (admin only). Auto-propaga el `advisor_id` a inputs downstream.
+4. **Clients** — `List` + `Create` (admin / advisor). Auto-propaga el `client_id`.
+5. **Cases** — `List` + `Create` (admin / advisor). Auto-popula `Selected case_id` para el panel de summary.
+6. **Quick demo seed** — botón `Create demo firm + advisor + client + case` que ejecuta los 4 POSTs en cascada con IDs explícitos (`firm_demo_local`, `advisor_demo_local`, `client_demo_local`). Maneja `409 duplicate` reusando los IDs existentes.
+7. **Case Summary** — input `case_id` + botón `Load Summary` que consume `GET /cases/{case_id}/summary` y muestra una tabla con: case overview, `progress.completion_ratio`, `progress.next_recommended_action`, todos los `has_*` flags, `audit.is_intact`, `ai.ai_logs_count`, `current_report.report_id`, más el JSON completo abajo.
+
+### Qué NO permite todavía (queda para Case Workbench, Fase 3)
+
+- POST `/cases/{id}/kyc` — KYC submission con formulario completo.
+- POST `/cases/{id}/ai/profile-analysis`, `/profile-approval`, `/investment-preferences`, `/universe-filter`, `/portfolio-proposal`, `/override-approval`, `/portfolio-selection`, `/reports`.
+- GET `/cases/{id}/audit`, `/audit/verify`, `/ai-logs`.
+
+Para ejercitar el workflow case-scoped completo hoy:
+
+```powershell
+python scripts/run_case_workflow_smoke_check.py
+```
+
+o usar Swagger UI directamente: `http://127.0.0.1:8000/docs`.
+
+### Tokens
+
+La sección usa por default `dev-advisor-token` (fallback hard-coded del backend, rol `advisor`). Para acciones que requieren `admin` (crear firm, crear advisor, seed demo), reemplazar por `dev-admin-token` o por un token cargado vía `config/advisor_tokens.yaml` / `ADVISOR_TOKENS_FILE`. El input es global a la card del Case Dashboard.
+
+### Disclaimers visibles en la UI
+
+- "Phase 2 backend workflow — local/dev UI"
+- "NOT production-ready"
+- "case-scoped flow"
+- "full workbench pending"
 
 ---
 
