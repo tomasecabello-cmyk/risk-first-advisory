@@ -8,19 +8,18 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **2256 tests, todos verdes** (unit + integration)
-- MVP local visual completo — frontend estático en `frontend/index.html`
-- Backend FastAPI con 18 endpoints expuestos
-- **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite con `record_id` y `report_record_id`
-- **Fase 1 cerrada — local advisor pilot scaffold:** scaffold de autenticación del asesor (Bearer token + dependencia FastAPI + `GET /auth/me`) + tres endpoints protegidos con registro auditable en SQLite: `POST /advisor/profile-approval` (decisión sobre perfil propuesto), `POST /advisor/override-approval` (decisión sobre variantes que exceden RiskBudget) y `POST /advisor/portfolio-selection` (selección final de la variante a presentar al cliente). El frontend estático expone un card **"Advisor Decisions Demo — Phase 1"** que invoca los cuatro endpoints (`/auth/me` + las tres acciones formales). Auth scaffold es development-only (tokens hard-coded); no hay auth global todavía ni RBAC por rol.
-- **Fase 1.5 — KYC fields auditables:** `KYCDataRequest` del `/workflow/run` acepta ahora `jurisdiction`, `preferred_currency`, `investment_objective`, `prefers_simple_products`, `annual_income_usd` y campos ESG (`esg_strictness_level`, `esg_exclusions`, `esg_preferences`). Antes el helper `_build_kyc_data` hardcodeaba estos campos silenciosamente; ahora se reciben y validan. Todos llevan defaults backward-compatible para no romper payloads existentes.
-- **Fase 1.6 — Supuestos críticos en config versionable:** los parámetros de `RiskBudgetBuilder` (`PROFILE_BASE_PARAMS`) y los retornos alcanzables de `GoalFeasibilityEngine` (`DEFAULT_ACHIEVABLE_RETURNS`) ya no son literales en Python — se cargan desde `config/risk_profiles.yaml` y `config/achievable_returns.yaml` vía `config_layer/risk_assumptions.py`. Los valores numéricos quedan idénticos; lo que cambia es que ahora viven en archivos auditables versionables en git. Siguen siendo supuestos demo, NO un CMA productivo.
-- **OpenAI** requerido para los endpoints `/ai/*` (API key en la terminal del servidor)
-- **yfinance** requerido para `/live/portfolio-demo` (descarga datos históricos de ETFs; requiere internet)
-- **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para demo multi-instrumento con renta fija y ETFs
-- Sin Bloomberg (datos de mercado reales para producción son out-of-scope del MVP)
-- Sin PostgreSQL (SQLite local para persistencia de sesión)
-- **Auth development-only (Fase 1):** Bearer token con mapa hard-coded de tokens demo (`dev-advisor-token`, `dev-compliance-token`). Sin JWT, sin IdP, sin rotación, sin RBAC real. Exclusivamente desarrollo local — ver sección "Auth scaffold (Fase 1)"
+- **3016 tests, todos verdes** (unit + integration)
+- **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
+- **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
+- **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
+- **Próximo: Fase 3 — plug-and-play local + Case Workbench frontend** (UI que consuma `/cases/{id}/summary`, seed demo data, bootstrap script).
+- **OpenAI** requerido solo para los endpoints `/ai/*` legacy; el flujo case-scoped soporta `POST /cases/{id}/ai/profile-analysis` también, pero los tests y el smoke check usan mocks determinísticos.
+- **yfinance** requerido para `/live/portfolio-demo` (legacy).
+- **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para todos los flujos demo, incluyendo `POST /cases/{id}/universe-filter`.
+- Sin Bloomberg ni provider de datos productivo (out-of-scope MVP — pendiente Fase 4).
+- Sin PostgreSQL (SQLite local).
+- **Auth development-only:** Bearer token con mapa configurable vía YAML (`config/advisor_tokens.yaml` o `ADVISOR_TOKENS_FILE` env var). Sin JWT, sin IdP, sin rotación, sin firm-level access control. Exclusivamente desarrollo local — ver sección "Auth scaffold".
+- **Esto NO es production-ready.** No es asesoramiento financiero. No reemplaza al asesor humano. Ver `docs/COMPLIANCE_NOTES.md` para límites detallados.
 
 ---
 
@@ -40,7 +39,33 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 | Reporting | `reporting_layer` | `MarkdownReportGenerator` — genera reporte `.md` con metadata de variantes |
 | Persistencia | `persistence_layer` | SQLite + repositorios in-memory |
 | Config | `config_layer` | Loader auditable de `config/risk_profiles.yaml` y `config/achievable_returns.yaml` (supuestos de RiskBudget y retornos alcanzables externalizados) |
-| API | `api_layer` | FastAPI: 19 endpoints — auth, decisiones del asesor, ejecución, recuperación, demo IA y demo portfolio |
+| API | `api_layer` | FastAPI: ~50 endpoints — legacy (auth, decisiones del asesor, ejecución, recuperación, demo IA y demo portfolio) + workflow case-scoped Fase 2 |
+
+---
+
+## Endpoints case-scoped (Fase 2)
+
+El backend expone el flujo completo `firm → advisor → client → case → KYC → AI profile analysis → profile approval → preferences → universe filter → portfolio proposal → override approval → portfolio selection → report` con AuditEvent hash chain y AIRequestLog persistente. Endpoints principales (todos requieren Bearer token; ver "Auth scaffold"):
+
+| Endpoint | RBAC | Qué hace |
+|---|---|---|
+| `POST/GET /cases` | advisor, admin (POST) / any (GET) | CRUD del `AdvisoryCase` |
+| `POST/GET /cases/{case_id}/kyc` | advisor, admin (POST) / any (GET) | KYC versionado por case |
+| `POST/GET /cases/{case_id}/ai/profile-analysis` | advisor, admin (POST) / any (GET) | Análisis IA de perfil sobre la última KYC |
+| `POST/GET /cases/{case_id}/profile-approval` | advisor, admin (POST) / any (GET) | Decisión del asesor: approve / modify / reject |
+| `POST/GET /cases/{case_id}/investment-preferences` | advisor, admin (POST) / any (GET) | Preferencias manuales o AI-extracted |
+| `POST/GET /cases/{case_id}/universe-filter` | advisor, admin (POST) / any (GET) | `PreferenceFilterEngine` sobre el universo CSV |
+| `POST/GET /cases/{case_id}/portfolio-proposal` | advisor, admin (POST) / any (GET) | Genera variants DEFENSIVE / BALANCED / GROWTH |
+| `POST/GET /cases/{case_id}/override-approval` | advisor, admin (POST) / any (GET) | Override del advisor para variants exceeding-budget |
+| `POST/GET /cases/{case_id}/portfolio-selection` | advisor, admin (POST) / any (GET) | Selección final; transiciona case a `PORTFOLIO_SELECTED` |
+| `POST/GET /cases/{case_id}/reports` | advisor, admin (POST) / any (GET) | Markdown report determinístico, versionado |
+| `GET /cases/{case_id}/summary` | any rol válido | Full case state en un solo response (base para Case Workbench) |
+| `GET /cases/{case_id}/audit` | any rol válido | Lista de AuditEvents del case |
+| `GET /cases/{case_id}/audit/verify` | admin, compliance | Verifica integridad del hash chain |
+| `GET /cases/{case_id}/ai-logs` | admin, compliance | Lista de AIRequestLog del case (input redactado) |
+| `GET /admin/ai-logs` y `GET /admin/ai-logs/{id}` | admin, compliance | Cross-case audit de llamadas IA |
+
+Detalles, semántica de `is_current` y decisiones de diseño en `docs/TODO_DESIGN_NOTES.md`.
 
 ---
 
@@ -576,7 +601,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~50 segundos, 2256 tests.
+Suite completa (unit + integration): ~3 minutos, **3016 tests** (todos verdes).
 
 ```powershell
 # Solo tests de API

@@ -2,6 +2,45 @@
 
 Notas de diseño relevantes para la revisión regulatoria y de compliance del sistema. Este documento no es asesoramiento legal. Describe las decisiones de arquitectura que soportan los requisitos de compliance de un sistema de asesoría de inversiones (MiFID II, CNBV, SEC/FINRA según jurisdicción).
 
+**Estado actual:** Fase 2 cerrada como backend/workflow case-scoped. **NO production-ready.** No reemplaza al asesor humano. No constituye recomendación automática de inversión. Sign-off legal/compliance formal pendiente.
+
+---
+
+## 0. Capacidades de compliance ya implementadas en Fase 2
+
+Fase 2 entregó un conjunto concreto de mecanismos auditables. Lo que sigue es lo que **ya funciona hoy** en el backend (ver `docs/TODO_DESIGN_NOTES.md` para los commits que cierran cada bloque):
+
+- **AuditEvent hash chain por `case_id`** (`POST/GET /cases/{id}/audit*`):
+  - Cada evento (case_created, kyc_submitted, ai_profile_analyzed, advisor_profile_approved/_modified/_rejected, investment_preferences_recorded, universe_filtered, portfolio_proposal_generated, advisor_override_approved/_rejected, portfolio_selected, report_generated) queda encadenado vía `previous_hash` + `event_hash` (SHA-256 sobre payload canonical).
+  - `GET /cases/{id}/audit/verify` recomputa la cadena y reporta `is_intact` + `first_broken_sequence`.
+  - Append-only a nivel API; no expone update/delete.
+- **AIRequestLog con redacción de PII** (`/admin/ai-logs`, `/cases/{id}/ai-logs`):
+  - Cada llamada a OpenAI registra `endpoint`, `model`, `prompt_version`, `input_redacted_json` (texto libre + client_id redactados; estructurados conservados), `input_hash` (SHA-256 sobre el original), `raw_response`, `validation_status` (`parsed_ok / api_error / parse_error / validation_error`), `latency_ms`.
+  - Política de redacción defensiva: API keys (`sk-`, `Bearer`) siempre redactadas; texto libre conocido (`natural_language_preferences`, `open_*`, `kyc_context`) reemplazado por `<REDACTED:text_N_chars>`; `client_id` hasheado a `client_<sha256[:8]>`.
+- **KYCSubmission versionado por case** (`POST/GET /cases/{id}/kyc`):
+  - `UNIQUE(case_id, version)` con `payload_hash` sobre canonical JSON.
+  - Append-only; cada nueva submission incrementa la version.
+- **Advisor decisions case-scoped**:
+  - `/cases/{id}/profile-approval` con `decision ∈ {approve, modify, reject}`, mantiene `is_current` + actualiza `current_approved_profile_id`.
+  - `/cases/{id}/override-approval` con validación cruzada (proposal + variant + decision=approve) para variants que exceden RiskBudget.
+  - `/cases/{id}/portfolio-selection` exige override aprobado válido si el variant lo requiere; actualiza puntero + transiciona status del case a `PORTFOLIO_SELECTED`.
+- **Portfolio proposal/override/selection/reports case-scoped** (`/cases/{id}/portfolio-proposal`, `/cases/{id}/reports`):
+  - Snapshot completo del candidate (weights + metadata override) se persiste en `selected_candidate_json` de la selection — independiente del proposal aunque éste se regenere.
+  - Reports markdown determinísticos con 4 disclaimers fijos (no recomendación automática, requiere revisión advisor, datos pueden ser proxy/demo, IA no aprueba la recomendación final).
+
+### Límites duros de esta implementación
+
+- **Hash chain NO es blockchain.** Un actor con acceso directo a la DB SQLite puede reescribir coherentemente toda la cadena (recomputar todos los `event_hash`). `verify_chain` detecta mutaciones puntuales (un payload, un hash, un sequence gap), NO una reescritura completa coordinada. Para protección contra DBA malicioso haría falta firma asimétrica por evento o anclaje a una autoridad de timestamping externa.
+- **No hay WORM external storage** ni replicación append-only fuera del SQLite local.
+- **No hay encryption at-rest.** El archivo SQLite vive en plano en filesystem. `payload_json` / `input_redacted_json` quedan legibles para cualquier proceso con acceso al archivo.
+- **No hay retention / pruning policy.** Logs y eventos se acumulan indefinidamente.
+- **No hay firm-level access control completo.** Un advisor/admin/compliance de la firma A puede ver/operar sobre cases de la firma B. El `firm_id` está en la tabla de cada entidad case-scoped pero no se filtra en los endpoints (ver Fase 4).
+- **No hay auth productiva.** Tokens son strings opacos en YAML (`config/advisor_tokens.yaml` o `ADVISOR_TOKENS_FILE` env var). Sin JWT, sin IdP, sin rotación, sin revocation.
+- **No hay sign-off legal/compliance formal** del sistema. El diseño está pensado para soportar revisión MiFID II / CNBV / SEC-FINRA, pero ninguna autoridad lo validó.
+- **No hay firma digital** del asesor sobre las decisiones. El `rationale` es texto libre.
+
+Las decisiones de la Fase 2 que son materia de compliance pero **no** están firmadas / certificadas / WORMed están explícitamente acotadas a "pilot interno con asesor consciente del scope".
+
 ---
 
 ## 1. Separación entre IA y decisión del asesor

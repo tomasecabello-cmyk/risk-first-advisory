@@ -1,6 +1,6 @@
 # Architecture — risk-first-advisory
 
-Estado: M1 completo / M2-prep en curso.
+**Estado:** M1 completo. Fase 2 cerrada como workflow case-scoped backend (ver sección "Fase 2 — case-scoped entities y workflow" al final). Próximo: Fase 3 (UI Case Workbench + bootstrap local).
 
 ---
 
@@ -163,3 +163,94 @@ AdvisoryWorkflowResult (COMPLETED / COMPLETED_WITH_WARNINGS)
 | **Bloques bloqueados** | Muestra diagnóstico legible | Devuelve `AdvisoryWorkflowStatus` bloqueado con `reason_codes` |
 
 **Por qué el workflow es la fuente única de verdad:** cualquier otro consumidor (FastAPI, notebook, batch job, report generator) que reimplemente el orden de filtros corre el riesgo de producir resultados inconsistentes con el criterio de compliance aprobado. El coordinator es el único punto donde governance → suitability → ESG → data quality → feasibility → portfolio se aplican en el orden correcto y con la política de bloqueo correcta.
+
+---
+
+## Fase 2 — case-scoped entities y workflow
+
+Fase 2 introduce una capa de **entidades persistentes** sobre SQLite que extienden el modelo legacy (que usa la tabla `records` client-scoped) sin reemplazarlo. Las dos capas coexisten:
+
+- **Legacy (`records`)**: workflow client_id-scoped, sin case linkage. Sigue vivo y soporta los endpoints `/workflow/run`, `/ai/filtered-portfolio-demo`, `/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection` (Fase 0/1).
+- **Case-scoped (Fase 2)**: entidades nuevas con FKs explícitas, scope por `case_id`, AuditEvent hash chain, AIRequestLog con redacción, RBAC por rol. Soporta el workflow completo a través de `/cases/*`.
+
+### Modelo de entidades (jerarquía)
+
+```
+Firm (firms)
+ └── Advisor (advisors)
+       └── Client (clients)
+             └── AdvisoryCase (advisory_cases)
+                   ├── KYCSubmission           (kyc_submissions, versionado)
+                   ├── AIProfileAnalysis       (ai_profile_analyses)
+                   ├── AdvisorProfileApproval  (advisor_profile_approvals, is_current)
+                   ├── InvestmentPreferences   (case_investment_preferences, is_current)
+                   ├── UniverseFilterRun       (case_universe_filter_runs, is_current)
+                   ├── PortfolioProposal       (case_portfolio_proposals, is_current)
+                   ├── OverrideApproval        (case_override_approvals, is_current)
+                   ├── PortfolioSelection      (case_portfolio_selections, is_current)
+                   ├── CaseReport              (case_reports, versionado por case)
+                   ├── AuditEvent              (audit_events, hash chain por case_id)
+                   └── AIRequestLog            (ai_request_logs, indirecto vía case_id)
+```
+
+`advisory_cases` mantiene punteros materializados a:
+- `current_kyc_submission_id`
+- `current_approved_profile_id`
+- `current_portfolio_selection_id`
+
+Status FSM del case: `DRAFT → IN_PROGRESS → PORTFOLIO_SELECTED → CLOSED`.
+
+### Flujo completo case-scoped
+
+```
+POST /cases                              (case created → AuditEvent case_created)
+  │
+  ▼
+POST /cases/{id}/kyc                     (kyc_submitted; DRAFT → IN_PROGRESS)
+  │
+  ▼
+POST /cases/{id}/ai/profile-analysis     (ai_profile_analyzed; AIRequestLog persistido)
+  │
+  ▼
+POST /cases/{id}/profile-approval        (advisor_profile_approved/_modified/_rejected;
+  │                                       actualiza current_approved_profile_id)
+  ▼
+POST /cases/{id}/investment-preferences  (investment_preferences_recorded; manual o AI-extracted)
+  │
+  ▼
+POST /cases/{id}/universe-filter         (universe_filtered; PreferenceFilterEngine sobre CSV)
+  │
+  ▼
+POST /cases/{id}/portfolio-proposal      (portfolio_proposal_generated;
+  │                                       PortfolioGenerationCoordinator)
+  ▼ (si algún candidate requiere override)
+POST /cases/{id}/override-approval       (advisor_override_approved/_rejected)
+  │
+  ▼
+POST /cases/{id}/portfolio-selection     (portfolio_selected;
+  │                                       actualiza current_portfolio_selection_id;
+  │                                       IN_PROGRESS → PORTFOLIO_SELECTED)
+  ▼
+POST /cases/{id}/reports                 (report_generated; markdown determinístico)
+  │
+  ▼
+GET  /cases/{id}/summary                 (full case state — base para Case Workbench)
+GET  /cases/{id}/audit/verify            (valida hash chain del case)
+```
+
+### Coexistencia legacy vs case-scoped
+
+- Las tablas `records` y `counters` (legacy `SQLitePersistenceStore`) **NO son tocadas** por las migrations Fase 2.
+- El runner `scripts/migrate.py` solo crea/usa `schema_migrations` y las tablas case-scoped.
+- `SQLiteEntityStore` (Fase 2) y `SQLitePersistenceStore` (legacy) pueden coexistir en el mismo archivo SQLite — comparten `counters` para ID generation (con prefijos distintos), sin colisión.
+- Los endpoints legacy NO consultan las tablas case-scoped y viceversa. Los dos workflows están aislados a nivel storage.
+- Deprecación / migración del legacy queda fuera del scope Fase 2.
+
+### Audit chain (Fase 2)
+
+Cada `AuditEvent` queda anclado a un `case_id` con `sequence` monotónico (`UNIQUE(case_id, sequence)`). Cada evento incluye:
+- `payload_hash` = SHA-256 sobre canonical JSON del payload.
+- `previous_hash` = `event_hash` del evento anterior (NULL para `sequence=1`).
+- `event_hash` = SHA-256 sobre `(previous_hash, sequence, event_type, actor_advisor_id, actor_role, created_at_utc, payload_hash)` canonical.
+
+`GET /cases/{id}/audit/verify` recomputa toda la cadena y reporta `is_intact` + `first_broken_sequence`. Detecta mutaciones puntuales (un payload, un hash, un sequence gap) pero NO una reescritura completa coordinada (no es blockchain — ver `docs/COMPLIANCE_NOTES.md` sección 0).

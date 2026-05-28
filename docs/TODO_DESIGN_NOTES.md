@@ -1,6 +1,81 @@
 \# TODO / Design Notes
 
+---
 
+## Fase 2 — Workflow case-scoped backend readiness ✅ (cerrada)
+
+Fase 2 está **funcionalmente cerrada a nivel backend/workflow**. El flujo completo end-to-end de un `AdvisoryCase` está implementado, testeado (3016 tests verdes) y validado vía smoke check ejecutable.
+
+### Qué incluye Fase 2 cerrada
+
+| Bloque | Estado | Endpoints / artefactos |
+|---|---|---|
+| Migrations infra + core schema | ✅ | `migrations/0001..0009`, runner `scripts/migrate.py` |
+| Advisor tokens desde config | ✅ | `config/advisor_tokens.yaml` + `ADVISOR_TOKENS_FILE` env var |
+| RBAC enforcement por rol | ✅ | `require_roles("admin", "advisor", "compliance", "viewer")` |
+| Firm / Advisor / Client entities | ✅ | `/firms`, `/advisors`, `/clients` (CRUD) |
+| AdvisoryCase + FSM | ✅ | `/cases` (POST/GET/list), `PATCH /cases/{id}/status`, FSM DRAFT → IN_PROGRESS → PORTFOLIO_SELECTED → CLOSED |
+| KYCSubmission case-scoped | ✅ | `POST/GET /cases/{id}/kyc`; versionado por case; auto-event `kyc_submitted` |
+| AIProfileAnalysis case-scoped | ✅ | `POST/GET /cases/{id}/ai/profile-analysis`; vincula KYC + AIRequestLog |
+| AdvisorProfileApproval case-scoped | ✅ | `POST/GET /cases/{id}/profile-approval`; mantiene `is_current` + `current_approved_profile_id`; auto-events `advisor_profile_approved/_modified/_rejected` |
+| InvestmentPreferences case-scoped | ✅ | `POST/GET /cases/{id}/investment-preferences`; manual o AI-extracted |
+| UniverseFilterRun case-scoped | ✅ | `POST/GET /cases/{id}/universe-filter` sobre CSV |
+| PortfolioProposal case-scoped | ✅ | `POST/GET /cases/{id}/portfolio-proposal` |
+| OverrideApproval case-scoped | ✅ | `POST/GET /cases/{id}/override-approval` |
+| PortfolioSelection case-scoped | ✅ | `POST/GET /cases/{id}/portfolio-selection`; actualiza puntero + status |
+| CaseReport case-scoped | ✅ | `POST/GET /cases/{id}/reports`, `GET /cases/{id}/reports/{report_id}`; markdown determinístico |
+| Case Summary | ✅ | `GET /cases/{id}/summary` — full case state en un solo response |
+| AuditEvent hash chain por case | ✅ | `GET /cases/{id}/audit`, `/audit/verify`, `POST /cases/{id}/audit-events` |
+| AIRequestLog con redacción de PII | ✅ | `GET /admin/ai-logs`, `/admin/ai-logs/{id}`, `/cases/{id}/ai-logs`, `POST /admin/ai-logs` |
+| End-to-end smoke check | ✅ | `python scripts/run_case_workflow_smoke_check.py` |
+
+### Lo que Fase 2 NO incluye
+
+Esto está documentado para evitar confusiones operativas, **no** son bugs ni regresiones:
+
+- **Frontend nuevo case-scoped** — el legacy `frontend/index.html` sigue mostrando solo Fase 0/1. Item Fase 3.
+- **Firm-level access control** completo — cualquier token con rol válido ve cualquier case. Item Fase 4.
+- **Auth productiva** (JWT/OIDC/IdP) — tokens son strings opacos en YAML. Item Fase 4.
+- **Live market data provider** — el universe-filter sigue usando CSV fixture. Item Fase 4.
+- **PDF / branding del report** — solo markdown. Item Fase 3.
+- **Lifecycle formal de reports** (draft → reviewed → final → sent) — solo `{draft, final}`. Item Fase 3.
+- **Cifrado at-rest** / WORM external storage / sign-off legal formal — items Fase 4.
+
+### Próximos focos
+
+- **Fase 3 (próxima)**: plug-and-play local + Case Workbench frontend. Ver sección "Fase 3 — UI + bootstrap local" más abajo.
+- **Fase 4**: pilot readiness / production hardening. Ver sección "Fase 4 — Pilot readiness" más abajo.
+
+---
+
+## Fase 3 — UI + bootstrap local (próxima, NO empezada)
+
+Objetivo: que un dev nuevo pueda clonar el repo, correr un script, y ver el flujo case-scoped end-to-end en el navegador sin pasos manuales adicionales.
+
+- **Case Dashboard frontend** — listado de cases con `current_*` flags y `next_recommended_action` consumidos de `GET /cases/{id}/summary`.
+- **Case Workbench frontend** — vista detalle por case con tabs para KYC / análisis / approval / preferences / filter / proposal / override / selection / report / audit.
+- **Seed demo data script** — corre el smoke check + deja datos persistidos en una DB visible desde el frontend.
+- **Local bootstrap script** — un comando que migrate + seed + start backend + abrir browser.
+- **Setup health checks** — `GET /health` extendido o `/health/full` que valide migrations aplicadas, tokens cargados, fixtures presentes.
+- **Plug-and-play docs** — README "5 min quickstart" para Case Workbench.
+- **Frontend cleanup / split** — separar el card legacy "AI Filtered Portfolio Demo" de la nueva vista case-scoped.
+
+## Fase 4 — Pilot readiness (después de Fase 3)
+
+Hardening necesario para correr el sistema con un asesor piloto real (no producción aún):
+
+- **Firm-level access control** — `firm_id` en token + filtrado por firm en todos los `/cases/*`.
+- **Production auth** — JWT/OIDC/IdP integration; rotación de tokens; revocation.
+- **Market data provider productivo** — reemplazar el CSV fixture por live provider con SLA de frescura y validación.
+- **Manual universe upload** — admin endpoint para reemplazar el CSV sin redeploy.
+- **PDF / branding del report** — render de markdown a PDF con logo + colores + header de la firm.
+- **Backup / restore** de la DB SQLite (o migración a PostgreSQL si la escala lo pide).
+- **Pilot readiness checklist** — documentación legal/compliance, sign-off, runbook de incidentes.
+- **Cifrado at-rest** + retention/pruning policy para `ai_request_logs`, `kyc_submissions`, etc.
+- **Anclaje externo del audit chain** (timestamping authority o append-only external store) para defenderse contra DBA malicioso.
+- **AuditEvent integrado en endpoints legacy** (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`, `PATCH /cases/{id}/status`).
+
+---
 
 \## ESGPreference target pendiente
 

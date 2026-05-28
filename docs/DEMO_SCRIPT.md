@@ -2,6 +2,13 @@
 
 Guía de recorrido de demo de 5–7 minutos para mostrar el producto a un asesor financiero o potencial usuario.
 
+Hay **dos modos de demo**:
+
+- **A. Demo visual legacy (Fase 0/1):** el frontend estático `frontend/index.html` expone los cinco flujos legacy (`/ai/profile-demo`, `/ai/profile-follow-up`, `/live/portfolio-demo`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`) + el card "Advisor Decisions Demo" con los tres endpoints client-scoped Phase 1. **Esta es la guía principal de abajo.**
+- **B. Smoke check del workflow case-scoped (Fase 2):** ejecutable de consola que valida end-to-end el flujo completo `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn. Sección al final del documento ("Case-scoped backend workflow smoke check").
+
+> **No confundir:** el frontend legacy **NO** consume todavía los endpoints case-scoped de Fase 2. La UI Case Workbench es el próximo entregable (Fase 3). Hasta que exista, el workflow case-scoped se demuestra vía smoke check o vía Swagger UI (`/docs`).
+
 ---
 
 ## Objetivo de la demo
@@ -326,4 +333,69 @@ El sistema garantiza trazabilidad en cada punto: qué datos ingresaron, qué dec
 | **Advisor profile approval** | `POST /advisor/profile-approval` | No | **Sí** |
 | **Advisor override approval** | `POST /advisor/override-approval` | No | **Sí** |
 | **Advisor portfolio selection** | `POST /advisor/portfolio-selection` | No | **Sí** |
-| Smoke check offline | `python scripts/run_mvp_smoke_check.py` | No | No |
+| MVP smoke check offline | `python scripts/run_mvp_smoke_check.py` | No | No |
+| **Case workflow smoke check (Fase 2)** | `python scripts/run_case_workflow_smoke_check.py` | No (mockeado) | No (sin uvicorn) |
+
+---
+
+## Case-scoped backend workflow smoke check (Fase 2)
+
+Si la audiencia es técnica y querés mostrar el flujo case-scoped end-to-end **sin frontend** (la UI Case Workbench es el próximo entregable de Fase 3), correr:
+
+```powershell
+python scripts/run_case_workflow_smoke_check.py
+```
+
+### Qué hace
+
+Aplica todas las migrations sobre una DB SQLite temporal, monkeypatchea `OpenAIProfileClient` con un mock determinístico, usa FastAPI TestClient (sin uvicorn) y ejercita el flujo completo en 14 pasos:
+
+1. Migrate database (`0001..0009`).
+2. Install stubs (DB path + tokens YAML + OpenAI mock).
+3. Crear firm + advisor + client + case.
+4. POST KYC submission.
+5. POST AI profile analysis (mockeado → "moderado").
+6. POST profile approval (decision=approve).
+7. POST investment preferences (structured manual).
+8. POST universe filter.
+9. POST portfolio proposal.
+10. POST override approval (si algún variant lo requiere).
+11. POST portfolio selection (transiciona case a `PORTFOLIO_SELECTED`).
+12. POST case report (markdown determinístico).
+13. GET case summary (valida `completion_ratio=1.0` + `next_action=ready_for_review`).
+14. GET audit/verify (valida `is_intact=true`).
+
+Output esperado al final:
+
+```
+PASS — case workflow smoke check completed
+    case_id          : case_000001
+    report_id        : case_report_000001
+    audit intact     : True
+    completion ratio : 1.0
+    next action      : ready_for_review
+```
+
+### Lo que este smoke check NO hace
+
+- **No reemplaza la UI Case Workbench** (que aún no existe — Fase 3).
+- **No requiere OpenAI real ni internet.** El cliente OpenAI está stubeado con un fake determinístico.
+- **No requiere uvicorn corriendo.** Usa `fastapi.testclient.TestClient` para invocar la app directamente.
+- **No toca la DB dev** (`data/demo_api.db`). Usa una DB temporal (override con `--db-path`).
+- **No valida el frontend.** Solo el backend + workflow.
+- **No es production smoke** — corre en proceso local, no contra un deploy.
+
+### Opciones útiles
+
+```powershell
+# Preservar la DB temporal para inspección manual:
+python scripts/run_case_workflow_smoke_check.py --keep-db
+
+# Especificar DB en un path concreto:
+python scripts/run_case_workflow_smoke_check.py --db-path data/smoke_inspection.db
+
+# Traceback completo si algo falla:
+python scripts/run_case_workflow_smoke_check.py --debug
+```
+
+Exit code: `0` si pasa, `1` si al menos una aserción falla.

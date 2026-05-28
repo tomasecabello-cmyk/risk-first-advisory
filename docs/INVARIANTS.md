@@ -74,3 +74,46 @@ Saltarse o reordenar pasos es una violación de compliance, no solo un bug.
 ## I-015 — KYC estandarizado como base obligatoria
 
 El sistema debe partir de un `KYCData` estructurado. La IA no puede reemplazar el cuestionario base ni decidir libremente qué variables recolectar como mecanismo primario de perfilamiento. Puede detectar contradicciones entre los campos del KYC, generar preguntas de follow-up acotadas a esas contradicciones, y resumir o interpretar respuestas abiertas (`open_*`), siempre sujeto a revisión y aprobación del asesor. La comparabilidad entre clientes y la trazabilidad ante auditoría dependen de que todos partan del mismo conjunto de variables mínimas.
+
+---
+
+## Invariantes Fase 2 — workflow case-scoped
+
+Los siguientes invariantes aplican al flujo case-scoped introducido en Fase 2. Son contratos de diseño del workflow `firm → … → report` consumido vía `/cases/*`.
+
+## I-016 — La IA no aprueba la recomendación final case-scoped
+
+`POST /cases/{id}/ai/profile-analysis` produce un `preliminary_profile` + `confidence` + `contradictions` + `follow_up_questions`. Este output es **propuesta**, no decisión. El campo `preliminary_profile` solo se convierte en perfil aprobado tras un `POST /cases/{id}/profile-approval` explícito con `decision ∈ {approve, modify}` y `rationale` no vacío. Misma separación que I-001 / I-002 pero materializada como entidades persistentes vinculadas al `case_id`.
+
+## I-017 — `current_approved_profile_id` solo apunta a approvals con `decision ∈ {approve, modify}`
+
+`POST /cases/{id}/profile-approval` con `decision=reject`:
+- queda `is_current=0` desde el insert,
+- NO actualiza `advisory_cases.current_approved_profile_id`,
+- NO invalida una aprobación previa (el `current_approved_profile_id` anterior se mantiene).
+
+Razón: un rechazo nuevo no invalida la última decisión vigente. Para invalidar, el asesor debe emitir un nuevo `modify` o re-aprobar con `approve`.
+
+## I-018 — Override obligatorio para variants que exceden el RiskBudget
+
+`POST /cases/{id}/portfolio-selection` rechaza con `409` si el `selected_variant` tiene `metadata.requires_advisor_override=True` y no se provee (explícitamente o vía `current_for_case`) un `override_approval_id` con `decision=approve`, `proposal_id` matching y `candidate_variant` matching. Inversamente, si el variant **no** requiere override, pasar `override_approval_id` explícito devuelve `422`. Política estricta: override approval es solo para variants exceeding-budget.
+
+## I-019 — Portfolio selection es decisión humana del asesor
+
+Ningún endpoint genera automáticamente una `CasePortfolioSelection`. Solo `POST /cases/{id}/portfolio-selection` (RBAC `advisor`/`admin`) crea el row, transiciona el case a `PORTFOLIO_SELECTED` y materializa `advisory_cases.current_portfolio_selection_id`. La selección NO se infiere del proposal ni del análisis IA.
+
+## I-020 — Los reports case-scoped son review-ready, NO recomendación automática
+
+`CaseMarkdownReportGenerator` produce markdown puramente formateando los snapshots ya persistidos (proposal, selection, approval, override). NO invoca el optimizer, NO consulta a OpenAI, NO recalcula nada. Los reports incluyen 4 disclaimers fijos (no es recomendación automática, requiere revisión advisor, datos pueden ser proxy/demo, IA no aprueba la recomendación final). El advisor es responsable de presentarlo al cliente.
+
+## I-021 — AuditEvent hash chain debe permanecer verificable
+
+`audit_events` es append-only a nivel API. Cada evento incluye `previous_hash` + `event_hash` (SHA-256 sobre canonical JSON). `GET /cases/{id}/audit/verify` debe devolver `is_intact=true` después de cualquier flujo válido del workflow. Si un test, script o endpoint hace que `verify` devuelva `is_intact=false` sin manipulación explícita de DB, es un bug crítico de compliance, no un edge case.
+
+## I-022 — AIRequestLog no persiste input sensible sin redacción
+
+Toda llamada a OpenAI registrada en `ai_request_logs` aplica `redact_ai_input()` al payload original antes de persistirlo. Las claves redactadas explícitamente (`natural_language_preferences`, `open_*`, `kyc_context`, `previous_profile_analysis`) y `client_id` (hasheado a `client_<sha256[:8]>`) NO deben aparecer en claro en `input_redacted_json`. API keys (`sk-`, `Bearer`) siempre redactadas en cualquier posición (incluso anidadas en dicts/lists). El `input_hash` se computa sobre el original (no el redactado) para correlación sin exposición.
+
+## I-023 — Append-only a nivel API en todas las entidades case-scoped
+
+Ningún endpoint expone update / delete sobre `kyc_submissions`, `ai_profile_analyses`, `advisor_profile_approvals`, `case_investment_preferences`, `case_universe_filter_runs`, `case_portfolio_proposals`, `case_override_approvals`, `case_portfolio_selections`, `case_reports`, `audit_events`, `ai_request_logs`. La única mutación permitida es `mark_previous_not_current(case_id, exclude_id=new_id)` que setea `is_current=0` a los rows previos del case (sin tocar el contenido). Cambios de estado se modelan como nuevos rows con version incremental o `is_current=1` nuevo.
