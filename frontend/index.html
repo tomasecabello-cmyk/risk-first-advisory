@@ -1406,17 +1406,19 @@
   -->
   <div class="card" id="card-case-workbench">
     <div class="card-header">
-      <h2>Case Workbench — Profile Steps</h2>
+      <h2>Case Workbench — Phase 2 Workflow</h2>
       <span class="pill pill-blue" style="font-size:10px;">case-scoped workflow · dev UI</span>
     </div>
     <div class="card-body">
 
       <div class="ai-disclaimer" style="background:#eff6ff;border-color:#93c5fd;color:#1e40af;">
-        <strong>Phase 2 case-scoped workflow — primera iteración del Workbench.</strong>
+        <strong>Phase 2 case-scoped workflow — Workbench end-to-end.</strong>
         <ul>
-          <li>Este workbench inicial cubre solo <strong>KYC → AI Profile Analysis → Profile Approval</strong>. Preferences / universe filter / portfolio proposal / override / selection / reports / audit / AI logs panels quedan para el próximo commit.</li>
+          <li>Cubre el flujo completo: <strong>KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report</strong>.</li>
           <li>El <code>case_id</code> debe existir previamente — crear vía Case Dashboard (sección 6 "Quick demo seed") o vía <code>POST /cases</code> directo.</li>
           <li>Reusa el token del Case Dashboard (input <code>cd-token</code>); cambiar ahí afecta también acá.</li>
+          <li>Cada POST exitoso <strong>auto-refresca el summary</strong>. Los inputs downstream se autopopulan desde el último summary.</li>
+          <li><strong>Audit panel completo y AI logs panel</strong> quedan pendientes (consultar vía <code>GET /cases/{id}/audit</code> / <code>/admin/ai-logs</code> en Swagger). <strong>PDF export</strong> pendiente (el report es markdown).</li>
           <li><strong>NOT production-ready.</strong> Sin firm-level access control, sin JWT, sin firma digital del advisor.</li>
         </ul>
       </div>
@@ -1632,10 +1634,233 @@
         <div id="cw-pa-result" style="margin-top:12px;"></div>
       </div>
 
+      <!-- ── Section 5: Investment Preferences ─────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">5. Investment Preferences — <code>POST /cases/{case_id}/investment-preferences</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Modo <strong>manual</strong> con <code>structured_preferences</code> JSON. Si querés NLP (extracción IA), borrar el JSON y poner texto en el textarea opcional;
+          si están ambos, structured manda y el texto queda como contexto (sin llamar IA).
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>source</label>
+            <select id="cw-pref-source">
+              <option value="manual" selected>manual</option>
+              <option value="ai">ai</option>
+              <option value="imported">imported</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid cols-2" style="margin-top:10px;">
+          <div class="field full-span">
+            <label>structured_preferences <span class="hint">JSON dict; debe matchear el shape que entiende PreferenceFilterEngine</span></label>
+            <textarea id="cw-pref-structured" rows="6" style="font-family:monospace;font-size:12px;">{
+  "allowed_instrument_types": ["CORPORATE_BOND", "SOVEREIGN_BOND", "ETF", "STOCK", "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET"]
+}</textarea>
+          </div>
+          <div class="field full-span">
+            <label>natural_language_preferences <span class="hint">opcional; ignorado si structured viene</span></label>
+            <textarea id="cw-pref-nlp" rows="2" style="font-size:13px;line-height:1.5;" placeholder="(opcional)"></textarea>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-submit-pref" onclick="cwSubmitPreferences()">Submit Investment Preferences</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-pref-result')">Clear</button>
+        </div>
+        <div id="cw-pref-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 6: Universe Filter ────────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">6. Universe Filter — <code>POST /cases/{case_id}/universe-filter</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Aplica las preferences vigentes al universo CSV via <code>PreferenceFilterEngine</code>. Si <code>preference_id</code> vacío → usa la current del case.
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>preference_id <span class="hint">opcional — current si vacío</span></label>
+            <input type="text" id="cw-uf-pref-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>source_universe</label>
+            <input type="text" id="cw-uf-source" value="sample_instrument_universe.csv" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-run-filter" onclick="cwRunUniverseFilter()">Run Universe Filter</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-uf-result')">Clear</button>
+        </div>
+        <div id="cw-uf-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 7: Portfolio Proposal ─────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">7. Portfolio Proposal — <code>POST /cases/{case_id}/portfolio-proposal</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Genera DEFENSIVE / BALANCED / GROWTH a partir del filter run + approved profile current. Si <code>variant_policy=standard</code> (default), corre el coordinator estándar.
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>filter_run_id <span class="hint">opcional — current</span></label>
+            <input type="text" id="cw-pp-filter-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>approved_profile_id <span class="hint">opcional — current</span></label>
+            <input type="text" id="cw-pp-approval-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>variant_policy</label>
+            <input type="text" id="cw-pp-policy" value="standard" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-gen-proposal" onclick="cwGenerateProposal()">Generate Portfolio Proposal</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-pp-result')">Clear</button>
+        </div>
+        <div id="cw-pp-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 8: Override Approval ──────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">8. Override Approval — <code>POST /cases/{case_id}/override-approval</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Aprobar/rechazar override para una variante que excede el RiskBudget aprobado (típicamente GROWTH). Si el current proposal tiene candidate que requiere override, se preselecciona esa variante.
+        </p>
+        <div id="cw-ovr-hint" style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>proposal_id <span class="hint">opcional — current</span></label>
+            <input type="text" id="cw-ovr-proposal-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>candidate_variant</label>
+            <select id="cw-ovr-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED">BALANCED</option>
+              <option value="GROWTH" selected>GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>decision</label>
+            <select id="cw-ovr-decision">
+              <option value="approve" selected>approve</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="cw-ovr-source" value="manual" />
+          </div>
+          <div class="field">
+            <label>reason_codes <span class="hint">CSV</span></label>
+            <input type="text" id="cw-ovr-reasons"
+                   value="PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET" />
+          </div>
+          <div class="field">
+            <label>exceeded_constraints <span class="hint">CSV</span></label>
+            <input type="text" id="cw-ovr-exceeded"
+                   value="max_volatility" />
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:10px;">
+          <label>rationale</label>
+          <textarea id="cw-ovr-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor reviewed the candidate and approves the override for demo purposes.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-submit-ovr" onclick="cwSubmitOverride()">Submit Override Approval</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-ovr-result')">Clear</button>
+        </div>
+        <div id="cw-ovr-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 9: Portfolio Selection ────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">9. Portfolio Selection — <code>POST /cases/{case_id}/portfolio-selection</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Selección final del advisor. Si el variant requiere override, debe ir <code>override_approval_id</code> aprobado (current si vacío). Si el variant NO requiere override, dejar <code>override_approval_id</code> vacío.
+        </p>
+        <div id="cw-sel-hint" style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>proposal_id <span class="hint">opcional — current</span></label>
+            <input type="text" id="cw-sel-proposal-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>selected_variant</label>
+            <select id="cw-sel-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED" selected>BALANCED</option>
+              <option value="GROWTH">GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>override_approval_id <span class="hint">opcional — current si vacío</span></label>
+            <input type="text" id="cw-sel-ovr-id" placeholder="(usa current si requires_override)" />
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="cw-sel-source" value="manual" />
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:10px;">
+          <label>rationale</label>
+          <textarea id="cw-sel-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor selects this variant as the final recommendation for the client.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-submit-sel" onclick="cwSubmitSelection()">Submit Portfolio Selection</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-sel-result')">Clear</button>
+        </div>
+        <div id="cw-sel-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 10: Report Generation ─────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">10. Report Generation — <code>POST /cases/{case_id}/reports</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Markdown determinístico que consolida la selection final. Sin PDF todavía. Versionado por case (UNIQUE(case_id, version)).
+        </p>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>portfolio_selection_id <span class="hint">opcional — current</span></label>
+            <input type="text" id="cw-rep-selection-id" placeholder="(usa current)" />
+          </div>
+          <div class="field">
+            <label>report_type</label>
+            <select id="cw-rep-type">
+              <option value="portfolio_recommendation" selected>portfolio_recommendation</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>status</label>
+            <select id="cw-rep-status">
+              <option value="draft" selected>draft</option>
+              <option value="final">final</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="cw-btn-gen-report" onclick="cwGenerateReport()">Generate Report</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-rep-result')">Clear</button>
+        </div>
+        <div id="cw-rep-result" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- ── Section 11: Compact Final Summary ─────────────── -->
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">11. Compact final summary</div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Refresca el summary del case y muestra los flags del segundo tramo del workflow + IDs derivados.
+        </p>
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn-primary" id="cw-btn-final" onclick="cwLoadFinalSummary()">Refresh Final Summary</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-final-result')">Clear</button>
+        </div>
+        <div id="cw-final-result"></div>
+      </div>
+
       <!-- ── Footer: next steps ───────────────────────────── -->
       <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Próximo:</strong> investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, reports, audit panel. Endpoints case-scoped ya existen en backend; ejercitar mientras tanto via
-        <code>python scripts/run_case_workflow_smoke_check.py</code> o Swagger <code>/docs</code>.
+        <strong>Pendiente Fase 3:</strong> audit panel dedicado (<code>GET /cases/{id}/audit</code> + <code>verify</code>), AI logs panel (<code>GET /cases/{id}/ai-logs</code>), PDF export del report, frontend cleanup / split. Hasta entonces, consultar esos endpoints vía Swagger <code>/docs</code> o el smoke check.
       </div>
 
     </div>
@@ -4643,9 +4868,17 @@
   }
 
   // Prellena los inputs downstream con los IDs derivados del summary.
+  // Implementación completa para los dos tramos del workflow:
+  //   1) profile steps  (KYC → analysis → approval)
+  //   2) portfolio/report steps  (preferences → filter → proposal → override
+  //                               → selection → report)
+  // Helpers auxiliares (cwGetCurrentProposalCandidates / cwFind*Variant) y
+  // los renderers de hints se definen más abajo y son hoisted por declaración.
   function cwAutofillFromSummary(s) {
     if (!s || typeof s !== "object") return;
     cwLastSummary = s;
+
+    // ── Profile steps autofill ────────────────────────────────────────────
     const kyc = s.latest_kyc || null;
     const an  = s.latest_ai_profile_analysis || null;
     if (kyc && kyc.kyc_submission_id) {
@@ -4665,6 +4898,31 @@
       if (opts.includes(an.preliminary_profile)) {
         sel.value = an.preliminary_profile;
       }
+    }
+
+    // ── Portfolio/report steps autofill ───────────────────────────────────
+    // Propagar IDs current a inputs downstream cuando corresponde.
+    const cp = s.current_investment_preferences;
+    if (cp && cp.preference_id)        el("cw-uf-pref-id").value = cp.preference_id;
+    const cf = s.current_universe_filter;
+    if (cf && cf.filter_run_id)        el("cw-pp-filter-id").value = cf.filter_run_id;
+    const ca = s.current_profile_approval;
+    if (ca && ca.approval_id)          el("cw-pp-approval-id").value = ca.approval_id;
+    const pp = s.current_portfolio_proposal;
+    if (pp && pp.proposal_id) {
+      el("cw-ovr-proposal-id").value = pp.proposal_id;
+      el("cw-sel-proposal-id").value = pp.proposal_id;
+    }
+    const co = s.current_override_approval;
+    if (co && co.override_approval_id) el("cw-sel-ovr-id").value = co.override_approval_id;
+    if (co && co.candidate_variant)    el("cw-ovr-variant").value = co.candidate_variant;
+    const cs = s.current_portfolio_selection;
+    if (cs && cs.selection_id)         el("cw-rep-selection-id").value = cs.selection_id;
+
+    // Hints + variant preselection del proposal (DOM-specific render).
+    if (pp) {
+      cwRenderOverrideHint(pp, co);
+      cwRenderSelectionHint(pp, co);
     }
   }
 
@@ -4782,11 +5040,7 @@
     cwRenderSuccess("cw-kyc-result",
       `KYC submitted: <code>${escapeHTML(subId)}</code> (version ${ver}). Refreshing summary…`,
       res.json);
-    await cwLoadSummary(true);
-    // Re-renderizar el summary visible si el usuario lo había cargado antes.
-    if (el("cw-summary-result").innerHTML.length > 0) {
-      await cwLoadSummary();
-    }
+    await cwRefreshAfterPost();
   }
 
   // ── 3. AI Profile Analysis ─────────────────────────────────────────────
@@ -4850,10 +5104,7 @@
     cwRenderSuccess("cw-ai-result",
       `Analysis OK: <code>${escapeHTML(aId)}</code> · preliminary_profile <code>${escapeHTML(prof)}</code> · confidence <code>${escapeHTML(String(conf))}</code> · ai_request_log_id <code>${escapeHTML(logId)}</code>. Refreshing summary…`,
       j);
-    await cwLoadSummary(true);
-    if (el("cw-summary-result").innerHTML.length > 0) {
-      await cwLoadSummary();
-    }
+    await cwRefreshAfterPost();
   }
 
   // ── 4. Advisor Profile Approval ────────────────────────────────────────
@@ -4920,10 +5171,494 @@
     cwRenderSuccess("cw-pa-result",
       `Approval OK: <code>${escapeHTML(apprId)}</code> · decision <code>${escapeHTML(dec)}</code> · approved_profile <code>${escapeHTML(approvedOut)}</code>. Refreshing summary…`,
       j);
-    await cwLoadSummary(true);
-    if (el("cw-summary-result").innerHTML.length > 0) {
-      await cwLoadSummary();
+    await cwRefreshAfterPost();
+  }
+
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CASE WORKBENCH — PORTFOLIO/REPORT STEPS (sections 5–11)
+  // Mismo prefijo cw* / cw-* (la misma card). Reusa cwLoadSummary, cwGetCaseId,
+  // cdApiFetch, cdAuthHeaders, cdNullIfBlank.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // ── Helpers comunes (extensión) ────────────────────────────────────────
+
+  function cwParseCSV(raw) {
+    return (raw || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+  function cwParseJsonTextarea(elId, fallback = null) {
+    const raw = (el(elId).value || "").trim();
+    if (!raw) return { ok: true, value: fallback };
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { ok: false, error: "must be a JSON object (dict), not an array or primitive" };
+      }
+      return { ok: true, value: parsed };
+    } catch (e) {
+      return { ok: false, error: e.message };
     }
+  }
+
+  // Refresh común post-POST: una sola request al backend; re-renderiza
+  // cualquier panel visible (summary y/o final) reusando el JSON cacheado.
+  async function cwRefreshAfterPost() {
+    const s = await cwLoadSummary(true);
+    if (s && el("cw-summary-result").innerHTML.length > 0) {
+      cwRenderJson("cw-summary-result", s, cwSummaryHighlights(s));
+    }
+    if (el("cw-final-result").innerHTML.length > 0) {
+      cwRenderFinalSummary(s || cwLastSummary);
+    }
+  }
+
+  // Encuentra candidates en cwLastSummary.current_portfolio_proposal
+  function cwGetCurrentProposalCandidates() {
+    if (!cwLastSummary) return [];
+    const p = cwLastSummary.current_portfolio_proposal;
+    if (!p || !Array.isArray(p.candidates)) return [];
+    return p.candidates;
+  }
+
+  function cwFindOverrideRequiredVariant() {
+    for (const c of cwGetCurrentProposalCandidates()) {
+      const meta = c && c.metadata;
+      if (meta && meta.requires_advisor_override === true) {
+        return c.variant;
+      }
+    }
+    return null;
+  }
+
+  function cwFindNonOverrideVariant() {
+    for (const c of cwGetCurrentProposalCandidates()) {
+      const meta = c && c.metadata;
+      if (meta && meta.requires_advisor_override === false) {
+        return c.variant;
+      }
+    }
+    return null;
+  }
+
+  // Centralizar render genérico de error HTTP por panel
+  function cwRenderHttpError(elId, res, ctx = "") {
+    if (res.networkError) { el(elId).innerHTML = apiError(res.err); return; }
+    const tag = `<strong>HTTP ${res.status}${ctx ? " ("+ctx+")" : ""}:</strong> `;
+    cwRenderError(elId, tag + escapeHTML(res.detail || "?"));
+  }
+
+  // ── Hint renderers (override + selection panels) ───────────────────────
+  // Llamados desde cwAutofillFromSummary cuando hay current_portfolio_proposal.
+  // Mutan los `cw-{ovr,sel}-hint` panels y preseleccionan el variant del input.
+  function cwRenderOverrideHint(proposal, currentOverride) {
+    const overrideVariant = cwFindOverrideRequiredVariant();
+    const hint = el("cw-ovr-hint");
+    hint.style.display = "block";
+    if (overrideVariant !== null) {
+      hint.innerHTML = `<strong>${escapeHTML(overrideVariant)}</strong> en current proposal requiere advisor override.`;
+      el("cw-ovr-variant").value = overrideVariant;
+    } else {
+      hint.innerHTML = `<em>No override-required candidate detected in current proposal.</em> El submit fallará 422 a menos que la situación cambie; usar solo si insistís.`;
+    }
+  }
+
+  function cwRenderSelectionHint(proposal, currentOverride) {
+    // Preselección:
+    //   1) si hay current override approved → su variant + su id
+    //   2) si hay candidate sin override → BALANCED si existe, sino el primero sin override
+    //   3) si solo hay candidates con override → el de override (advisor debe aprobar primero)
+    const co = currentOverride;
+    const overrideVariant = cwFindOverrideRequiredVariant();
+    const nonOverrideVariant = cwFindNonOverrideVariant();
+    const hint = el("cw-sel-hint");
+
+    if (co && co.decision === "approve" && co.candidate_variant) {
+      el("cw-sel-variant").value = co.candidate_variant;
+      hint.style.display = "block";
+      hint.innerHTML = `Current approved override exists for <strong>${escapeHTML(co.candidate_variant)}</strong> — preseleccionando.`;
+      return;
+    }
+    if (nonOverrideVariant !== null) {
+      const variants = cwGetCurrentProposalCandidates().map(c => c.variant);
+      const prefer = variants.includes("BALANCED") ? "BALANCED" : nonOverrideVariant;
+      el("cw-sel-variant").value = prefer;
+      hint.style.display = "block";
+      hint.innerHTML = `Preselected <strong>${escapeHTML(prefer)}</strong> (no override requerido).`;
+      return;
+    }
+    if (overrideVariant !== null) {
+      el("cw-sel-variant").value = overrideVariant;
+      hint.style.display = "block";
+      hint.innerHTML = `<strong>${escapeHTML(overrideVariant)}</strong> requiere override — aprobar primero en sección 8.`;
+    }
+  }
+
+  // ── 5. Investment Preferences ──────────────────────────────────────────
+
+  async function cwSubmitPreferences() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-pref-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const structuredParse = cwParseJsonTextarea("cw-pref-structured", null);
+    if (!structuredParse.ok) {
+      cwRenderError("cw-pref-result",
+        `<strong>structured_preferences JSON inválido:</strong> ${escapeHTML(structuredParse.error)}`);
+      return;
+    }
+    const nlp = cdNullIfBlank(el("cw-pref-nlp").value);
+    if (structuredParse.value === null && !nlp) {
+      cwRenderError("cw-pref-result",
+        "<strong>Debe proveerse al menos uno</strong>: structured_preferences (JSON) o natural_language_preferences (texto).");
+      return;
+    }
+    const body = { source: el("cw-pref-source").value };
+    if (structuredParse.value) body.structured_preferences = structuredParse.value;
+    if (nlp) body.natural_language_preferences = nlp;
+
+    cwRenderLoading("cw-pref-result", "Submitting investment preferences…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/investment-preferences`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-pref-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) { cwRenderError("cw-pref-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿Case CLOSED?`); return; }
+      if (res.status === 422) { cwRenderError("cw-pref-result", `<strong>422:</strong> ${escapeHTML(res.detail)}.`); return; }
+      if (res.status === 502) { cwRenderError("cw-pref-result", `<strong>502 IA:</strong> ${escapeHTML(res.detail)}. ¿NLP path sin OPENAI_API_KEY?`); return; }
+      cwRenderHttpError("cw-pref-result", res);
+      return;
+    }
+    const j = res.json || {};
+    const pid = j.preference_id || "(unknown)";
+    const src = j.source || "—";
+    const aiLog = j.ai_request_log_id ? ` · ai_request_log_id <code>${escapeHTML(j.ai_request_log_id)}</code>` : "";
+    cwRenderSuccess("cw-pref-result",
+      `Preferences OK: <code>${escapeHTML(pid)}</code> · source <code>${escapeHTML(src)}</code>${aiLog}. Refreshing summary…`,
+      j);
+    await cwRefreshAfterPost();
+  }
+
+  // ── 6. Universe Filter ─────────────────────────────────────────────────
+
+  async function cwRunUniverseFilter() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-uf-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const body = {
+      source_universe: (el("cw-uf-source").value || "").trim() || "sample_instrument_universe.csv",
+    };
+    const pid = cdNullIfBlank(el("cw-uf-pref-id").value);
+    if (pid) body.preference_id = pid;
+
+    cwRenderLoading("cw-uf-result", "Running universe filter…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/universe-filter`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-uf-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) { cwRenderError("cw-uf-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿Falta investment_preferences? Submit preferences (sección 5) primero.`); return; }
+      if (res.status === 422) { cwRenderError("cw-uf-result", `<strong>422:</strong> ${escapeHTML(res.detail)}. ¿preference_id de otro case o inválido?`); return; }
+      cwRenderHttpError("cw-uf-result", res);
+      return;
+    }
+    const j = res.json || {};
+    const eligibles = Array.isArray(j.eligible_instruments) ? j.eligible_instruments : [];
+    const top5 = eligibles.slice(0, 5).map(i => `<code>${escapeHTML(i.ticker || "?")}</code>`).join(", ") || "<em>none</em>";
+    const applied = Array.isArray(j.applied_filters) ? j.applied_filters : [];
+    const warnings = Array.isArray(j.warnings) ? j.warnings : [];
+    const head = `
+      <div class="msg msg-success">
+        Filter OK: <code>${escapeHTML(j.filter_run_id || "?")}</code> ·
+        eligible <strong>${j.eligible_count}</strong> · excluded <strong>${j.excluded_count}</strong> · total <strong>${j.total_count}</strong>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#4a5568;">
+        <div><strong>Top 5 eligible:</strong> ${top5}</div>
+        <div style="margin-top:4px;"><strong>applied_filters (${applied.length}):</strong> ${applied.map(f => `<code>${escapeHTML(f)}</code>`).join(" ") || "<em>none</em>"}</div>
+        <div style="margin-top:4px;"><strong>warnings (${warnings.length}):</strong> ${warnings.map(w => `<code>${escapeHTML(w)}</code>`).join(" ") || "<em>none</em>"}</div>
+      </div>
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
+      <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    `;
+    el("cw-uf-result").innerHTML = head;
+    await cwRefreshAfterPost();
+  }
+
+  // ── 7. Portfolio Proposal ──────────────────────────────────────────────
+
+  async function cwGenerateProposal() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-pp-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const body = {
+      variant_policy: (el("cw-pp-policy").value || "").trim() || "standard",
+    };
+    const fid = cdNullIfBlank(el("cw-pp-filter-id").value);
+    if (fid) body.filter_run_id = fid;
+    const aid = cdNullIfBlank(el("cw-pp-approval-id").value);
+    if (aid) body.approved_profile_id = aid;
+
+    cwRenderLoading("cw-pp-result", "Generating portfolio proposal…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/portfolio-proposal`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-pp-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) { cwRenderError("cw-pp-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿Falta filter run o approved profile? Completar pasos previos.`); return; }
+      if (res.status === 422) { cwRenderError("cw-pp-result", `<strong>422:</strong> ${escapeHTML(res.detail)}.`); return; }
+      cwRenderHttpError("cw-pp-result", res);
+      return;
+    }
+    const j = res.json || {};
+    const cands = Array.isArray(j.candidates) ? j.candidates : [];
+    const warnings = Array.isArray(j.warnings) ? j.warnings : [];
+    const candRows = cands.map(c => {
+      const m = c.metadata || {};
+      const overrideBadge = m.requires_advisor_override
+        ? '<span class="pill pill-orange">override</span>'
+        : '<span class="pill pill-green">within budget</span>';
+      const rc = Array.isArray(c.reason_codes) && c.reason_codes.length
+        ? c.reason_codes.map(r => `<code>${escapeHTML(r)}</code>`).join(" ")
+        : "<em>—</em>";
+      return `<tr>
+        <td style="padding:4px 8px;font-size:12px;"><code>${escapeHTML(c.variant || "?")}</code></td>
+        <td style="padding:4px 8px;font-size:12px;">${overrideBadge}</td>
+        <td style="padding:4px 8px;font-size:12px;text-align:right;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
+        <td style="padding:4px 8px;font-size:12px;text-align:right;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
+        <td style="padding:4px 8px;font-size:12px;">${rc}</td>
+      </tr>`;
+    }).join("");
+    const head = `
+      <div class="msg msg-success">
+        Proposal OK: <code>${escapeHTML(j.proposal_id || "?")}</code> ·
+        status <code>${escapeHTML(j.status || "?")}</code> ·
+        profile <code>${escapeHTML(j.profile_name || "?")}</code> ·
+        candidates <strong>${cands.length}</strong>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px;border:1px solid #dde2ea;">
+        <thead><tr style="background:#f4f6fa;">
+          <th style="padding:6px 8px;font-size:11px;text-align:left;">variant</th>
+          <th style="padding:6px 8px;font-size:11px;text-align:left;">budget</th>
+          <th style="padding:6px 8px;font-size:11px;text-align:right;">E[ret] anual</th>
+          <th style="padding:6px 8px;font-size:11px;text-align:right;">vol anual</th>
+          <th style="padding:6px 8px;font-size:11px;text-align:left;">reason_codes</th>
+        </tr></thead>
+        <tbody>${candRows || `<tr><td colspan="5" style="padding:8px;font-size:12px;color:#a0aec0;">No candidates.</td></tr>`}</tbody>
+      </table>
+      ${warnings.length ? `<div style="margin-top:6px;font-size:11px;color:#92400e;"><strong>warnings:</strong> ${warnings.map(w => escapeHTML(w)).join("; ")}</div>` : ""}
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
+      <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    `;
+    el("cw-pp-result").innerHTML = head;
+    await cwRefreshAfterPost();
+  }
+
+  // ── 8. Override Approval ───────────────────────────────────────────────
+
+  async function cwSubmitOverride() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-ovr-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const rationale = (el("cw-ovr-rationale").value || "").trim();
+    if (!rationale) {
+      cwRenderError("cw-ovr-result", "<strong>rationale requerido</strong>.");
+      return;
+    }
+    const body = {
+      candidate_variant:    el("cw-ovr-variant").value,
+      decision:             el("cw-ovr-decision").value,
+      reason_codes:         cwParseCSV(el("cw-ovr-reasons").value),
+      exceeded_constraints: cwParseCSV(el("cw-ovr-exceeded").value),
+      rationale:            rationale,
+      source:               (el("cw-ovr-source").value || "").trim() || "manual",
+    };
+    const pid = cdNullIfBlank(el("cw-ovr-proposal-id").value);
+    if (pid) body.proposal_id = pid;
+
+    cwRenderLoading("cw-ovr-result", "Submitting override approval…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/override-approval`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-ovr-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) { cwRenderError("cw-ovr-result", `<strong>409:</strong> ${escapeHTML(res.detail)}. ¿Case CLOSED o proposal sin candidates (status != completed)?`); return; }
+      if (res.status === 422) { cwRenderError("cw-ovr-result", `<strong>422:</strong> ${escapeHTML(res.detail)}. Posibles causas: variant no existe en proposal, variant NO requiere override, proposal de otro case.`); return; }
+      cwRenderHttpError("cw-ovr-result", res);
+      return;
+    }
+    const j = res.json || {};
+    cwRenderSuccess("cw-ovr-result",
+      `Override OK: <code>${escapeHTML(j.override_approval_id || "?")}</code> · decision <code>${escapeHTML(j.decision || "?")}</code> · variant <code>${escapeHTML(j.candidate_variant || "?")}</code> · is_current <strong>${j.is_current}</strong>. Refreshing summary…`,
+      j);
+    await cwRefreshAfterPost();
+  }
+
+  // ── 9. Portfolio Selection ─────────────────────────────────────────────
+
+  async function cwSubmitSelection() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-sel-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const rationale = (el("cw-sel-rationale").value || "").trim();
+    if (!rationale) {
+      cwRenderError("cw-sel-result", "<strong>rationale requerido</strong>.");
+      return;
+    }
+    const body = {
+      selected_variant: el("cw-sel-variant").value,
+      rationale:        rationale,
+      source:           (el("cw-sel-source").value || "").trim() || "manual",
+    };
+    const pid = cdNullIfBlank(el("cw-sel-proposal-id").value);
+    if (pid) body.proposal_id = pid;
+    const oid = cdNullIfBlank(el("cw-sel-ovr-id").value);
+    if (oid) body.override_approval_id = oid;
+
+    cwRenderLoading("cw-sel-result", "Submitting portfolio selection…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/portfolio-selection`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-sel-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) {
+        cwRenderError("cw-sel-result",
+          `<strong>409:</strong> ${escapeHTML(res.detail)}. Causa típica: variant requiere override aprobado y no se provee, o override existente tiene decision=reject. Aprobar override en sección 8 y reintentar.`);
+        return;
+      }
+      if (res.status === 422) {
+        cwRenderError("cw-sel-result",
+          `<strong>422:</strong> ${escapeHTML(res.detail)}. Posibles causas: variant no existe en proposal, variant no requiere override pero se pasa override_approval_id, override de otro case/proposal/variant.`);
+        return;
+      }
+      cwRenderHttpError("cw-sel-result", res);
+      return;
+    }
+    const j = res.json || {};
+    const cand = j.selected_candidate || {};
+    const candSummary = cand && cand.expected_return_annual !== undefined
+      ? ` · E[ret] <strong>${(cand.expected_return_annual * 100).toFixed(2)}%</strong> · vol <strong>${cand.volatility_annual !== undefined ? (cand.volatility_annual * 100).toFixed(2) + "%" : "—"}</strong>`
+      : "";
+    cwRenderSuccess("cw-sel-result",
+      `Selection OK: <code>${escapeHTML(j.selection_id || "?")}</code> · variant <code>${escapeHTML(j.selected_variant || "?")}</code> · override_approval_id <code>${escapeHTML(j.override_approval_id || "null")}</code>${candSummary}. Case status debería ser PORTFOLIO_SELECTED tras refresh.`,
+      j);
+    await cwRefreshAfterPost();
+  }
+
+  // ── 10. Report Generation ──────────────────────────────────────────────
+
+  async function cwGenerateReport() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-rep-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    const body = {
+      report_type: el("cw-rep-type").value,
+      status:      el("cw-rep-status").value,
+    };
+    const sid = cdNullIfBlank(el("cw-rep-selection-id").value);
+    if (sid) body.portfolio_selection_id = sid;
+
+    cwRenderLoading("cw-rep-result", "Generating report…");
+    const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/reports`, {
+      method: "POST",
+      headers: cdAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) { cwRenderError("cw-rep-result", `<strong>404:</strong> case no encontrado.`); return; }
+      if (res.status === 409) {
+        cwRenderError("cw-rep-result",
+          `<strong>409:</strong> ${escapeHTML(res.detail)}. Probable: case sin portfolio selection — completar sección 9 primero.`);
+        return;
+      }
+      if (res.status === 422) { cwRenderError("cw-rep-result", `<strong>422:</strong> ${escapeHTML(res.detail)}.`); return; }
+      cwRenderHttpError("cw-rep-result", res);
+      return;
+    }
+    const j = res.json || {};
+    const md = j.markdown || "";
+    const meta = j.metadata || {};
+    cwRenderSuccess("cw-rep-result",
+      `Report OK: <code>${escapeHTML(j.report_id || "?")}</code> · version <strong>${j.version}</strong> · status <code>${escapeHTML(j.status || "?")}</code> · type <code>${escapeHTML(j.report_type || "?")}</code>`);
+    el("cw-rep-result").insertAdjacentHTML("beforeend", `
+      <div style="margin-top:8px;">
+        <details open>
+          <summary style="cursor:pointer;font-size:12px;color:#2e4a8a;font-weight:600;">Markdown preview (${md.length} chars)</summary>
+          <pre style="background:#fff;border:1px solid #dde2ea;border-radius:4px;padding:10px;margin-top:6px;font-size:11px;line-height:1.4;max-height:340px;overflow:auto;white-space:pre-wrap;">${escapeHTML(md)}</pre>
+        </details>
+        <details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">metadata</summary>
+          <pre class="json-block">${escapeHTML(formatJSON(meta))}</pre>
+        </details>
+      </div>
+    `);
+    await cwRefreshAfterPost();
+  }
+
+  // ── 11. Compact final summary ──────────────────────────────────────────
+
+  function cwRenderFinalSummary(s) {
+    if (!s) {
+      el("cw-final-result").innerHTML =
+        `<div class="msg msg-info">Refresh summary first (clic en el botón).</div>`;
+      return;
+    }
+    const p   = s.progress || {};
+    const a   = s.audit || {};
+    const rep = s.current_report || null;
+    const sel = s.current_portfolio_selection || null;
+    const c   = s.case || {};
+
+    const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
+    const flagPill = (v) => v ? '<span class="pill pill-green">yes</span>' : '<span class="pill pill-grey">no</span>';
+    const intactBadge = (v) => v ? '<span class="pill pill-green">intact</span>' : '<span class="pill pill-red">broken</span>';
+
+    el("cw-final-result").innerHTML = `
+      <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;background:#fafbfd;">
+        <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Final state · case <code>${escapeHTML(c.case_id || "—")}</code> (${escapeHTML(c.status || "—")})</div>
+        <table style="width:100%;border-collapse:collapse;">
+          ${row("next_recommended_action", `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+          ${row("completion_ratio",        `<strong>${p.completion_ratio !== undefined ? p.completion_ratio : "—"}</strong>`)}
+          ${row("has_investment_preferences", flagPill(p.has_investment_preferences))}
+          ${row("has_universe_filter",       flagPill(p.has_universe_filter))}
+          ${row("has_portfolio_proposal",    flagPill(p.has_portfolio_proposal))}
+          ${row("has_override_approval",     flagPill(p.has_override_approval))}
+          ${row("has_portfolio_selection",   flagPill(p.has_portfolio_selection))}
+          ${row("has_report",                flagPill(p.has_report))}
+          ${row("audit.is_intact",           intactBadge(a.is_intact))}
+          ${row("current_report.report_id",  rep && rep.report_id ? `<code>${escapeHTML(rep.report_id)}</code> (v${rep.version})` : "—")}
+          ${row("current_portfolio_selection.selected_variant",
+                sel && sel.selected_variant ? `<code>${escapeHTML(sel.selected_variant)}</code>` : "—")}
+        </table>
+      </div>
+    `;
+  }
+
+  async function cwLoadFinalSummary() {
+    cwRenderFinalSummary((await cwLoadSummary(true)) || cwLastSummary || null);
   }
 
 </script>
