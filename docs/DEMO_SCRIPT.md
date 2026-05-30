@@ -36,6 +36,39 @@ El eje central:
 
 ## Inicio rápido
 
+**Para demo visual de Fase 2 (Case Dashboard + Workbench), seguir los 5 pasos en orden:**
+
+```
+1. migrate         → python scripts/migrate.py
+2. seed demo data  → python scripts/seed_demo_data.py
+3. start backend   → uvicorn (Terminal 1, abajo)
+4. start frontend  → python -m http.server (Terminal 2, abajo)
+5. abrir browser   → http://127.0.0.1:5500 (cards Case Dashboard + Case Workbench)
+```
+
+Los pasos 1–2 son idempotentes — correr múltiples veces es seguro. El paso 2 crea `firm_demo_local`, `advisor_demo_local`, `client_demo_local`, `case_demo_local` que el Workbench puede abrir directamente.
+
+Para demos legacy (Fase 0/1: AI Profile Demo, Live Portfolio, etc.) los pasos 1–2 son opcionales; solo backend + frontend.
+
+### Pre-step (recomendado para demos Fase 2) — migrate + seed
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+python scripts/migrate.py
+python scripts/seed_demo_data.py
+```
+
+Output esperado del seed:
+
+```
+PASS — demo data ready
+    firm_id    : firm_demo_local    (created)
+    advisor_id : advisor_demo_local (created)
+    client_id  : client_demo_local  (created)
+    case_id    : case_demo_local    (created)
+```
+
 ### Terminal 1 — Backend con IA
 
 ```powershell
@@ -55,6 +88,8 @@ python -m http.server 5500 -d frontend
 ```
 
 Abrir en el navegador: **`http://127.0.0.1:5500`**
+
+En la card "Case Dashboard — Phase 2" tipear `case_demo_local` en "Selected case_id" y clic en "Load Summary" para abrir el case que dejó el seed. En la card "Case Workbench" tipear el mismo `case_demo_local` y empezar el flujo con "Submit KYC".
 
 ### Verificación offline (sin API key, sin internet)
 

@@ -12,7 +12,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
 - **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
 - **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
-- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). PDF export y compliance ZIP package siguen pendientes.
+- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). PDF export, compliance ZIP package y bootstrap script (1-comando) siguen pendientes.
 - **OpenAI** requerido solo para los endpoints `/ai/*` legacy; el flujo case-scoped soporta `POST /cases/{id}/ai/profile-analysis` también, pero los tests y el smoke check usan mocks determinísticos.
 - **yfinance** requerido para `/live/portfolio-demo` (legacy).
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para todos los flujos demo, incluyendo `POST /cases/{id}/universe-filter`.
@@ -687,6 +687,50 @@ python scripts/run_case_workflow_smoke_check.py --debug
 ```
 
 El script aplica todas las migrations (`0001..0009`) sobre una DB SQLite temporal, monkeypatchea `OpenAIProfileClient` con un mock determinístico (sin red), usa FastAPI TestClient (sin uvicorn) y valida 14 pasos del workflow. Exit code 0 si pasa, 1 si falla.
+
+---
+
+## Seed demo data (Fase 3)
+
+Crea (o reutiliza) las entidades base necesarias para ejercitar el Case Dashboard / Case Workbench sin tipear datos a mano. **Idempotente**: corre múltiples veces sin duplicar nada.
+
+```powershell
+python scripts/seed_demo_data.py
+```
+
+Crea con IDs estables:
+
+| Entidad | ID | Default name |
+|---|---|---|
+| Firm | `firm_demo_local` | Demo Advisory Firm |
+| Advisor | `advisor_demo_local` | Demo Advisor |
+| Client | `client_demo_local` | Demo Client |
+| Case | `case_demo_local` | Demo advisory case |
+
+Aplica todas las migrations automáticamente antes de seedear (a menos que se pase `--no-migrate`). Por default usa la DB del backend (`api_layer.main.DEFAULT_DB_PATH` → `data/demo_api.db`); override con `--db-path data/otra.db`.
+
+Output al final:
+
+```
+PASS — demo data ready
+    firm_id    : firm_demo_local    (created)
+    advisor_id : advisor_demo_local (created)
+    client_id  : client_demo_local  (created)
+    case_id    : case_demo_local    (created)
+```
+
+En corridas subsecuentes los estados aparecen como `(reused)`. El script **NO** completa KYC, AI analysis, profile approval, portfolio proposal ni report — para eso usar:
+
+- `python scripts/run_case_workflow_smoke_check.py` (end-to-end batch, sin frontend), o
+- el Case Workbench del frontend (recorrer panel por panel después de abrir `case_demo_local`).
+
+### Tokens recomendados para usar después del seed
+
+- `dev-admin-token` — para crear/editar entidades adicionales (firms, advisors, clients) desde el Dashboard.
+- `dev-advisor-token` — para correr el workflow case-scoped (KYC, análisis, aprobaciones, etc.) desde el Workbench.
+- `dev-compliance-token` — para audit verify + AI logs panels.
+
+El input "Bearer token" del Case Dashboard es global a las cards Phase 2; cambiarlo allí afecta también al Workbench.
 
 ---
 

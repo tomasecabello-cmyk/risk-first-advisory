@@ -52,13 +52,13 @@ Esto está documentado para evitar confusiones operativas, **no** son bugs ni re
 
 Objetivo: que un dev nuevo pueda clonar el repo, correr un script, y ver el flujo case-scoped end-to-end en el navegador sin pasos manuales adicionales.
 
-- **Case Dashboard frontend** — listado de cases con `current_*` flags y `next_recommended_action` consumidos de `GET /cases/{id}/summary`.
-- **Case Workbench frontend** — vista detalle por case con tabs para KYC / análisis / approval / preferences / filter / proposal / override / selection / report / audit.
-- **Seed demo data script** — corre el smoke check + deja datos persistidos en una DB visible desde el frontend.
-- **Local bootstrap script** — un comando que migrate + seed + start backend + abrir browser.
+- ~~**Case Dashboard frontend** — listado de cases con `current_*` flags y `next_recommended_action` consumidos de `GET /cases/{id}/summary`.~~ ✅
+- ~~**Case Workbench frontend** — vista detalle por case con tabs para KYC / análisis / approval / preferences / filter / proposal / override / selection / report / audit / AI logs / compliance snapshot.~~ ✅ (15 paneles end-to-end)
+- ~~**Frontend cleanup / split** — separar HTML estructural de CSS/JS.~~ ✅ (`css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js`)
+- ~~**Seed demo data script** — crea/reusa firm/advisor/client/case demo con IDs estables `*_demo_local`; idempotente; aplica migrations automáticamente.~~ ✅ (`scripts/seed_demo_data.py`)
+- **Local bootstrap script** — un comando que migrate + seed + start backend + abrir browser. Próximo entregable.
 - **Setup health checks** — `GET /health` extendido o `/health/full` que valide migrations aplicadas, tokens cargados, fixtures presentes.
 - **Plug-and-play docs** — README "5 min quickstart" para Case Workbench.
-- **Frontend cleanup / split** — separar el card legacy "AI Filtered Portfolio Demo" de la nueva vista case-scoped.
 
 ## Fase 4 — Pilot readiness (después de Fase 3)
 

@@ -115,6 +115,25 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 
 ---
 
+## Seed demo data (recomendado antes de la primera demo visual)
+
+Para evitar tipear firm/advisor/client/case a mano, correr desde la raíz del repo:
+
+```powershell
+python scripts/seed_demo_data.py
+```
+
+Crea (o reusa, si ya existen) las 4 entidades base con IDs estables:
+
+- `firm_demo_local`
+- `advisor_demo_local`
+- `client_demo_local`
+- `case_demo_local`
+
+Idempotente — correr múltiples veces es seguro. Aplica migrations si hace falta. Tras esto, el Case Dashboard puede listar todo y el Case Workbench puede abrir `case_demo_local` directamente. El seed **NO** completa KYC/análisis/portfolio/report — para eso usar el Workbench panel por panel o `python scripts/run_case_workflow_smoke_check.py`.
+
+---
+
 ## Case Dashboard — Phase 2
 
 Nueva sección al final del index para **visualizar y crear las entidades base del flujo case-scoped**: firms → advisors → clients → cases → summary. Es la primera entrada visual al backend Fase 2; **NO es el Case Workbench completo** (las acciones del workflow — KYC, AI profile analysis, profile approval, investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, report — **todavía no se invocan desde esta UI**).
