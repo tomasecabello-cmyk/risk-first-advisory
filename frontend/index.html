@@ -1858,9 +1858,64 @@
         <div id="cw-final-result"></div>
       </div>
 
+      <!-- ── Section 12: Audit Trail ──────────────────────── -->
+      <div style="padding:14px 0;border-top:2px solid #cbd5e0;border-bottom:1px solid #dde2ea;margin-bottom:14px;margin-top:18px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">12. Audit Trail — <code>GET /cases/{case_id}/audit</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Lista cronológica de <code>AuditEvent</code> del case (hash chain SHA-256). Cualquier rol válido puede leer.
+        </p>
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn-primary" id="cw-btn-audit" onclick="cwLoadAuditEvents()">Load Audit Events</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-audit-result')">Clear</button>
+        </div>
+        <div id="cw-audit-result"></div>
+      </div>
+
+      <!-- ── Section 13: Audit Verification ────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">13. Audit Verification — <code>GET /cases/{case_id}/audit/verify</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Recomputa el hash chain y reporta <code>is_intact</code>. <strong>Requiere rol <code>admin</code> o <code>compliance</code></strong> (advisor recibe 403). Cambiar token en Case Dashboard si es necesario.
+        </p>
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn-primary" id="cw-btn-verify" onclick="cwVerifyAudit()">Verify Audit Chain</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-verify-result')">Clear</button>
+        </div>
+        <div id="cw-verify-result"></div>
+      </div>
+
+      <!-- ── Section 14: AI Request Logs ───────────────────── -->
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">14. AI Request Logs — <code>GET /cases/{case_id}/ai-logs</code></div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Llamadas a OpenAI persistidas para este case. <strong>input_redacted</strong> es la versión sanitizada por backend (texto libre + <code>client_id</code> redactados). <strong>Requiere rol <code>admin</code> o <code>compliance</code></strong> (advisor recibe 403).
+        </p>
+        <div id="cw-logs-privacy" style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;padding:6px 10px;border-radius:4px;margin-bottom:10px;">
+          <strong>Privacidad:</strong> los detalles "raw_response" y campos no whitelisted vienen sin redacción a nivel API. Revisar antes de compartir exportes.
+        </div>
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn-primary" id="cw-btn-logs" onclick="cwLoadAiLogs()">Load AI Logs</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-logs-result')">Clear</button>
+        </div>
+        <div id="cw-logs-result"></div>
+      </div>
+
+      <!-- ── Section 15: Compliance Snapshot ───────────────── -->
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">15. Compliance Snapshot</div>
+        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
+          Vista combinada: <code>summary</code> + <code>audit/verify</code> + <code>ai-logs</code> en un solo render. Útil para handoff a compliance review. Si el token actual no tiene rol <code>admin</code>/<code>compliance</code>, las partes verify/ai-logs aparecerán como "skipped (403)".
+        </p>
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn-primary" id="cw-btn-compliance" onclick="cwRefreshComplianceSnapshot()">Refresh Compliance Snapshot</button>
+          <button class="btn-secondary" onclick="cwClearResult('cw-compliance-result')">Clear</button>
+        </div>
+        <div id="cw-compliance-result"></div>
+      </div>
+
       <!-- ── Footer: next steps ───────────────────────────── -->
       <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Pendiente Fase 3:</strong> audit panel dedicado (<code>GET /cases/{id}/audit</code> + <code>verify</code>), AI logs panel (<code>GET /cases/{id}/ai-logs</code>), PDF export del report, frontend cleanup / split. Hasta entonces, consultar esos endpoints vía Swagger <code>/docs</code> o el smoke check.
+        <strong>Pendiente Fase 3:</strong> PDF export del report, export package compliance-ready (ZIP con report + audit + logs), frontend cleanup / split, refresh automático de audit/logs después de cada POST (hoy es manual para evitar polling agresivo).
       </div>
 
     </div>
@@ -5659,6 +5714,312 @@
 
   async function cwLoadFinalSummary() {
     cwRenderFinalSummary((await cwLoadSummary(true)) || cwLastSummary || null);
+  }
+
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CASE WORKBENCH — AUDIT & AI LOGS PANELS (sections 12–15)
+  // GET /cases/{id}/audit            → any rol válido
+  // GET /cases/{id}/audit/verify     → admin, compliance
+  // GET /cases/{id}/ai-logs          → admin, compliance
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // ── Helpers comunes ────────────────────────────────────────────────────
+
+  function cwShortHash(h) {
+    if (!h || typeof h !== "string") return "—";
+    if (h.length <= 12) return h;
+    return `${h.slice(0, 6)}…${h.slice(-4)}`;
+  }
+
+  // Wrapper común para GETs de paneles compliance: handlea 401/403/404 con
+  // mensajes consistentes; devuelve el JSON parseado o null si hubo error.
+  async function cwComplianceGet(elId, path, role403Hint) {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError(elId, "<strong>case_id requerido</strong> (sección 1).");
+      return null;
+    }
+    cwRenderLoading(elId, `Loading ${escapeHTML(path)}…`);
+    const res = await cdApiFetch(path.replace("{case_id}", encodeURIComponent(caseId)), {
+      headers: cdAuthHeaders(),
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        cwRenderError(elId, `<strong>401:</strong> token inválido o ausente — verificar input del Case Dashboard.`);
+      } else if (res.status === 403) {
+        cwRenderError(elId, `<strong>403:</strong> ${escapeHTML(role403Hint)}.`);
+      } else if (res.status === 404) {
+        cwRenderError(elId, `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+      } else {
+        cwRenderHttpError(elId, res);
+      }
+      return null;
+    }
+    return res.json;
+  }
+
+  // ── 12. Audit Trail ───────────────────────────────────────────────────
+
+  function cwRenderAuditEvents(elId, j) {
+    if (!j) return;
+    const events = Array.isArray(j.events) ? j.events : [];
+    if (!events.length) {
+      el(elId).innerHTML = `<div class="msg msg-info">No audit events for this case yet.</div>`;
+      return;
+    }
+    const rows = events.map(e => `
+      <tr>
+        <td style="padding:4px 8px;font-size:11px;text-align:right;"><strong>${e.sequence}</strong></td>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(e.event_type || "?")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;"><span class="pill pill-blue">${escapeHTML(e.actor_role || "—")}</span></td>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(e.actor_advisor_id || "—")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;color:#4a5568;">${escapeHTML(e.created_at_utc || "—")}</td>
+        <td style="padding:4px 8px;font-size:10px;font-family:monospace;color:#718096;" title="${escapeHTML(e.previous_hash || "null")}">${cwShortHash(e.previous_hash)}</td>
+        <td style="padding:4px 8px;font-size:10px;font-family:monospace;color:#4a5568;" title="${escapeHTML(e.payload_hash || "")}">${cwShortHash(e.payload_hash)}</td>
+        <td style="padding:4px 8px;font-size:10px;font-family:monospace;color:#2d3748;" title="${escapeHTML(e.event_hash || "")}">${cwShortHash(e.event_hash)}</td>
+      </tr>
+    `).join("");
+    el(elId).innerHTML = `
+      <div class="msg msg-success">Loaded <strong>${j.count}</strong> audit event(s).</div>
+      <div style="overflow-x:auto;margin-top:8px;">
+        <table style="width:100%;border-collapse:collapse;border:1px solid #dde2ea;">
+          <thead><tr style="background:#f4f6fa;">
+            <th style="padding:6px 8px;font-size:11px;text-align:right;">seq</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">event_type</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">actor_role</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">actor_advisor_id</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">created_at_utc</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;" title="previous_hash">prev_hash</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;" title="payload_hash">payload_hash</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;" title="event_hash">event_hash</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
+      <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    `;
+  }
+
+  async function cwLoadAuditEvents() {
+    const j = await cwComplianceGet("cw-audit-result", "/cases/{case_id}/audit",
+      "este rol no debería estar restringido para GET /audit; verificar token y backend");
+    cwRenderAuditEvents("cw-audit-result", j);
+  }
+
+  // ── 13. Audit Verification ────────────────────────────────────────────
+
+  function cwRenderAuditVerify(elId, j) {
+    if (!j) return;
+    const intact = j.is_intact === true;
+    const badge = intact
+      ? '<span class="pill pill-green">INTACT</span>'
+      : '<span class="pill pill-red">BROKEN</span>';
+    const broken = j.first_broken_sequence !== null && j.first_broken_sequence !== undefined
+      ? `<code>${escapeHTML(String(j.first_broken_sequence))}</code>`
+      : "<em>none</em>";
+    const msgClass = intact ? "msg-success" : "msg-error";
+    el(elId).innerHTML = `
+      <div class="msg ${msgClass}">
+        ${badge} · total_events <strong>${j.total_events}</strong> · first_broken_sequence ${broken}
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#4a5568;">
+        <strong>message:</strong> ${escapeHTML(j.message || "—")}
+        ${j.checked_at_utc ? `<br><strong>checked_at_utc:</strong> <code>${escapeHTML(j.checked_at_utc)}</code>` : ""}
+      </div>
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
+      <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    `;
+  }
+
+  async function cwVerifyAudit() {
+    const j = await cwComplianceGet("cw-verify-result", "/cases/{case_id}/audit/verify",
+      "requiere rol <code>admin</code> o <code>compliance</code>");
+    cwRenderAuditVerify("cw-verify-result", j);
+  }
+
+  // ── 14. AI Request Logs ───────────────────────────────────────────────
+
+  function cwValidationPill(status) {
+    if (status === "parsed_ok") return '<span class="pill pill-green">parsed_ok</span>';
+    if (status === "api_error" || status === "parse_error" || status === "validation_error") {
+      return `<span class="pill pill-red">${escapeHTML(status)}</span>`;
+    }
+    return `<span class="pill pill-grey">${escapeHTML(status || "—")}</span>`;
+  }
+
+  function cwRenderAiLogs(elId, j) {
+    if (!j) return;
+    const logs = Array.isArray(j.logs) ? j.logs : [];
+    if (!logs.length) {
+      el(elId).innerHTML = `<div class="msg msg-info">No AI logs for this case yet.</div>`;
+      return;
+    }
+    const rows = logs.map(g => `
+      <tr>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(g.request_id || "?")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(g.endpoint || "—")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(g.model || "—")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;"><code>${escapeHTML(g.prompt_version || "—")}</code></td>
+        <td style="padding:4px 8px;font-size:11px;">${cwValidationPill(g.validation_status)}</td>
+        <td style="padding:4px 8px;font-size:11px;text-align:right;">${g.latency_ms !== null && g.latency_ms !== undefined ? g.latency_ms + " ms" : "—"}</td>
+        <td style="padding:4px 8px;font-size:11px;color:#4a5568;">${escapeHTML(g.created_at_utc || "—")}</td>
+        <td style="padding:4px 8px;font-size:11px;color:#991b1b;">${escapeHTML(g.error_message || "—")}</td>
+      </tr>
+    `).join("");
+    const latest = logs[logs.length - 1];
+    el(elId).innerHTML = `
+      <div class="msg msg-success">
+        Loaded <strong>${j.count}</strong> AI log(s). Latest: <code>${escapeHTML(latest.request_id || "?")}</code>
+        · ${cwValidationPill(latest.validation_status)}
+      </div>
+      <div style="overflow-x:auto;margin-top:8px;">
+        <table style="width:100%;border-collapse:collapse;border:1px solid #dde2ea;">
+          <thead><tr style="background:#f4f6fa;">
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">request_id</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">endpoint</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">model</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">prompt_version</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">status</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:right;">latency</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">created_at_utc</th>
+            <th style="padding:6px 8px;font-size:11px;text-align:left;">error</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;font-weight:600;">Latest log — input_redacted + raw_response</summary>
+      <div style="margin-top:6px;font-size:11px;color:#4a5568;">
+        <div><strong>input_redacted</strong> (sanitizado por backend):</div>
+        <pre class="json-block">${escapeHTML(formatJSON(latest.input_redacted || {}))}</pre>
+        <div style="margin-top:6px;"><strong>raw_response</strong> <span style="color:#92400e;">⚠ no necesariamente redactado — revisar antes de exportar</span>:</div>
+        <pre class="json-block">${escapeHTML(formatJSON(latest.raw_response || null))}</pre>
+      </div></details>
+      <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON (all logs)</summary>
+      <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    `;
+  }
+
+  async function cwLoadAiLogs() {
+    const j = await cwComplianceGet("cw-logs-result", "/cases/{case_id}/ai-logs",
+      "requiere rol <code>admin</code> o <code>compliance</code>");
+    cwRenderAiLogs("cw-logs-result", j);
+  }
+
+  // ── 15. Compliance Snapshot ───────────────────────────────────────────
+
+  function cwRenderComplianceSnapshot(parts) {
+    // parts = { summary, verify, logs, errors: {summary?, verify?, logs?} }
+    const s = parts.summary;
+    const v = parts.verify;
+    const l = parts.logs;
+    const err = parts.errors || {};
+
+    const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
+    const intactBadge = (x) => x === true ? '<span class="pill pill-green">intact</span>'
+                              : x === false ? '<span class="pill pill-red">broken</span>'
+                              : '<span class="pill pill-grey">—</span>';
+
+    const c   = (s && s.case) || {};
+    const p   = (s && s.progress) || {};
+    const ai  = (s && s.ai) || {};
+    const rep = s && s.current_report;
+    const sel = s && s.current_portfolio_selection;
+    const app = s && s.current_profile_approval;
+    const ovr = s && s.current_override_approval;
+
+    // verify can come from /audit/verify (preferred) o fallback summary.audit
+    let auditIntact, auditTotal, auditMsg;
+    if (v) {
+      auditIntact = v.is_intact;
+      auditTotal  = v.total_events;
+      auditMsg    = v.message;
+    } else if (s && s.audit) {
+      auditIntact = s.audit.is_intact;
+      auditTotal  = s.audit.total_events;
+      auditMsg    = s.audit.message;
+    }
+
+    // latest validation_status: prefer /ai-logs (last entry), fallback summary.ai
+    let latestValidation = null;
+    if (l && Array.isArray(l.logs) && l.logs.length) {
+      latestValidation = l.logs[l.logs.length - 1].validation_status;
+    } else if (ai.latest_validation_status) {
+      latestValidation = ai.latest_validation_status;
+    }
+    const logsCount = (l && typeof l.count === "number") ? l.count : (ai.ai_logs_count || 0);
+
+    const part = (label, kind) => {
+      if (err[kind]) return `<span class="pill pill-grey" style="font-size:10px;">${label}: ${escapeHTML(err[kind])}</span>`;
+      return `<span class="pill pill-green" style="font-size:10px;">${label}: ok</span>`;
+    };
+
+    el("cw-compliance-result").innerHTML = `
+      <div style="margin-bottom:8px;">
+        ${part("summary", "summary")}
+        ${part("audit/verify", "verify")}
+        ${part("ai-logs", "logs")}
+      </div>
+      <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;background:#fafbfd;">
+        <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Compliance snapshot · case <code>${escapeHTML(c.case_id || "—")}</code></div>
+        <table style="width:100%;border-collapse:collapse;">
+          ${row("case status",              `<code>${escapeHTML(c.status || "—")}</code>`)}
+          ${row("completion_ratio",         `<strong>${p.completion_ratio !== undefined ? p.completion_ratio : "—"}</strong>`)}
+          ${row("next_recommended_action",  `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+          ${row("audit.is_intact",          intactBadge(auditIntact))}
+          ${row("audit.total_events",       auditTotal !== undefined && auditTotal !== null ? `<strong>${auditTotal}</strong>` : "—")}
+          ${row("audit.message",            escapeHTML(auditMsg || "—"))}
+          ${row("ai.ai_logs_count",         `<strong>${logsCount}</strong>`)}
+          ${row("ai.latest_validation_status",
+                latestValidation ? cwValidationPill(latestValidation) : "—")}
+          ${row("current_profile_approval.decision",
+                app && app.decision ? `<code>${escapeHTML(app.decision)}</code>` : "—")}
+          ${row("current_override_approval.decision",
+                ovr && ovr.decision ? `<code>${escapeHTML(ovr.decision)}</code>` : "—")}
+          ${row("current_portfolio_selection.selected_variant",
+                sel && sel.selected_variant ? `<code>${escapeHTML(sel.selected_variant)}</code>` : "—")}
+          ${row("current_report.report_id",
+                rep && rep.report_id ? `<code>${escapeHTML(rep.report_id)}</code> (v${rep.version})` : "—")}
+        </table>
+      </div>
+    `;
+  }
+
+  // Lanza summary + audit/verify + ai-logs en paralelo y rinde un panel
+  // combinado. Cualquier sub-request que falle se reporta como "skipped (HTTP X)"
+  // en el header sin abortar las otras.
+  async function cwRefreshComplianceSnapshot() {
+    const caseId = cwGetCaseId();
+    if (!caseId) {
+      cwRenderError("cw-compliance-result", "<strong>case_id requerido</strong> (sección 1).");
+      return;
+    }
+    cwRenderLoading("cw-compliance-result", "Loading summary + audit/verify + ai-logs…");
+    const headers = cdAuthHeaders();
+    const enc = encodeURIComponent(caseId);
+    const [sRes, vRes, lRes] = await Promise.all([
+      cdApiFetch(`/cases/${enc}/summary`, { headers }),
+      cdApiFetch(`/cases/${enc}/audit/verify`, { headers }),
+      cdApiFetch(`/cases/${enc}/ai-logs`, { headers }),
+    ]);
+    const parts = { summary: null, verify: null, logs: null, errors: {} };
+    if (sRes.ok)  parts.summary = sRes.json;
+    else          parts.errors.summary = `HTTP ${sRes.status}`;
+    if (vRes.ok)  parts.verify = vRes.json;
+    else          parts.errors.verify = `HTTP ${vRes.status}`;
+    if (lRes.ok)  parts.logs = lRes.json;
+    else          parts.errors.logs = `HTTP ${lRes.status}`;
+
+    // Si todo falló por 404 (summary), case probablemente no existe.
+    if (!parts.summary && sRes.status === 404) {
+      cwRenderError("cw-compliance-result",
+        `<strong>404:</strong> case <code>${escapeHTML(caseId)}</code> no encontrado.`);
+      return;
+    }
+    // Mantener cwLastSummary actualizado si vino el summary.
+    if (parts.summary) cwAutofillFromSummary(parts.summary);
+    cwRenderComplianceSnapshot(parts);
   }
 
 </script>

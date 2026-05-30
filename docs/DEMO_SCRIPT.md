@@ -7,7 +7,7 @@ Hay **dos modos de demo**:
 - **A. Demo visual legacy (Fase 0/1):** el frontend estático `frontend/index.html` expone los cinco flujos legacy (`/ai/profile-demo`, `/ai/profile-follow-up`, `/live/portfolio-demo`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`) + el card "Advisor Decisions Demo" con los tres endpoints client-scoped Phase 1. **Esta es la guía principal de abajo.**
 - **B. Smoke check del workflow case-scoped (Fase 2):** ejecutable de consola que valida end-to-end el flujo completo `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn. Sección al final del documento ("Case-scoped backend workflow smoke check").
 
-> **No confundir:** el frontend legacy **NO** consume todavía los endpoints case-scoped de Fase 2. La UI Case Workbench es el próximo entregable (Fase 3). Hasta que exista, el workflow case-scoped se demuestra vía smoke check o vía Swagger UI (`/docs`).
+> **Frontend status (Fase 3 en curso):** además de los cards demo legacy, el frontend ya incluye **"Case Dashboard — Phase 2"** (CRUD de firms/advisors/clients/cases + summary) y **"Case Workbench — Phase 2 Workflow"** que cubre el flujo case-scoped end-to-end en 15 secciones (KYC → … → report → audit trail / verify / AI logs / compliance snapshot). Tras correr el smoke check de Fase 2 (sección al final), el visualizador puede cargar el `case_id` resultante en el Workbench y recorrer audit verify + AI logs sin volver a Swagger. PDF export y compliance ZIP package siguen pendientes.
 
 ---
 
@@ -378,7 +378,7 @@ PASS — case workflow smoke check completed
 
 ### Lo que este smoke check NO hace
 
-- **No reemplaza la UI Case Workbench** (que aún no existe — Fase 3).
+- **No reemplaza la UI Case Workbench** — la complementa: el smoke check valida que el backend funciona end-to-end; el Workbench (ya disponible) permite recorrer visualmente el mismo flujo + audit / AI logs sobre cualquier `case_id` existente.
 - **No requiere OpenAI real ni internet.** El cliente OpenAI está stubeado con un fake determinístico.
 - **No requiere uvicorn corriendo.** Usa `fastapi.testclient.TestClient` para invocar la app directamente.
 - **No toca la DB dev** (`data/demo_api.db`). Usa una DB temporal (override con `--db-path`).

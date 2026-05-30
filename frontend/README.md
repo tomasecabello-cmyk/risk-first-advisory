@@ -89,6 +89,15 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 | **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/kyc` | Submit KYC submission para el case |
 | **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/ai/profile-analysis` | Análisis IA sobre el current KYC |
 | **Case Workbench (profile steps)** | `POST` | `/cases/{case_id}/profile-approval` | Decisión del advisor (approve/modify/reject) |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/investment-preferences` | Preferences (manual JSON o NLP→IA) |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/universe-filter` | Filter run sobre CSV |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/portfolio-proposal` | Generación de candidates |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/override-approval` | Decisión de override para variants exceeding-budget |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/portfolio-selection` | Selección final del advisor |
+| **Case Workbench (portfolio/report)** | `POST` | `/cases/{case_id}/reports` | Genera markdown report determinístico |
+| **Case Workbench (audit & logs)** | `GET` | `/cases/{case_id}/audit` | Lista de AuditEvents del case (hash chain) |
+| **Case Workbench (audit & logs)** | `GET` | `/cases/{case_id}/audit/verify` | Verifica integridad del hash chain (admin/compliance) |
+| **Case Workbench (audit & logs)** | `GET` | `/cases/{case_id}/ai-logs` | AIRequestLogs del case con input redactado (admin/compliance) |
 
 ---
 
@@ -133,57 +142,75 @@ La sección usa por default `dev-advisor-token` (fallback hard-coded del backend
 
 ---
 
-## Case Workbench — Profile Steps
+## Case Workbench — Phase 2 Workflow
 
-Nueva sección al final del index (después del Case Dashboard) con la **primera iteración del Case Workbench**. Cubre solo los pasos iniciales del workflow case-scoped:
+Card al final del index (después del Case Dashboard) que cubre **el workflow case-scoped completo + audit/compliance review** en 15 secciones agrupadas en 3 bloques:
+
+### Bloque A — Profile steps (1–4)
 
 1. **Cargar summary** del `case_id` activo (`GET /cases/{case_id}/summary`).
 2. **Submit KYC** con formulario completo (`POST /cases/{case_id}/kyc`).
 3. **Run AI Profile Analysis** (`POST /cases/{case_id}/ai/profile-analysis`).
 4. **Advisor Profile Approval** (`POST /cases/{case_id}/profile-approval`) con decisión approve/modify/reject.
 
-### Qué permite hoy
+### Bloque B — Portfolio/report steps (5–11)
 
-- Tomar el `case_id` activo del Case Dashboard (botón "Use selected case from Dashboard") o tipearlo manualmente.
-- Submit KYC con formulario rico: age, jurisdiction, currency, scores (risk_tolerance / risk_capacity / liquidity_need), horizon, drawdown, experience, income stability, net worth + liquid net worth, annual income, investment objective, y los 4 campos open-text (`open_investment_goal`, `open_risk_reaction`, `open_past_experience`, `open_concerns`).
-- Run AI analysis con `kyc_submission_id` opcional (usa current si vacío) y `analysis_type` (solo `initial` implementado; `follow_up` queda para futuro).
-- Profile approval con `proposed_profile` auto-prefilled desde el último análisis, `approved_profile` opcional según decision (vacío para approve/reject, requerido para modify), `rationale` libre.
-- **Auto-refresh del summary** después de cada POST exitoso (KYC / análisis / approval).
-- Tabla compacta de highlights: `case_id`, `status`, `completion_ratio`, `next_recommended_action`, los 3 flags clave (`has_kyc`, `has_ai_profile_analysis`, `has_profile_approval`), `kyc_submission_id`, `analysis_id`, `preliminary_profile`, `approval_id`, `approved_profile`, `audit.is_intact`.
-- JSON completo del summary debajo de la tabla.
+5. **Investment Preferences** (`POST /cases/{case_id}/investment-preferences`) — modo manual con JSON, o NLP opcional para extracción IA.
+6. **Universe Filter** (`POST /cases/{case_id}/universe-filter`) — aplica `PreferenceFilterEngine` sobre el CSV; muestra eligible/excluded counts + top 5 instruments.
+7. **Portfolio Proposal** (`POST /cases/{case_id}/portfolio-proposal`) — tabla de candidates con E[ret], vol, requires_advisor_override.
+8. **Override Approval** (`POST /cases/{case_id}/override-approval`) — preselecciona variant que requiere override desde el current proposal.
+9. **Portfolio Selection** (`POST /cases/{case_id}/portfolio-selection`) — preselecciona variant según override approval + non-override candidates; transiciona case a `PORTFOLIO_SELECTED`.
+10. **Report Generation** (`POST /cases/{case_id}/reports`) — markdown determinístico con metadata.
+11. **Compact final summary** — re-render del state combinado con flags portfolio/report.
 
-### Qué NO permite todavía (próximas iteraciones del Workbench)
+### Bloque C — Audit & Compliance (12–15)
 
-- POST `/cases/{id}/investment-preferences`
-- POST `/cases/{id}/universe-filter`
-- POST `/cases/{id}/portfolio-proposal`
-- POST `/cases/{id}/override-approval`
-- POST `/cases/{id}/portfolio-selection`
-- POST `/cases/{id}/reports`
-- GET `/cases/{id}/audit` y `/audit/verify` (panel dedicado)
-- GET `/cases/{id}/ai-logs` (panel dedicado)
+12. **Audit Trail** (`GET /cases/{case_id}/audit`) — tabla con `sequence`, `event_type`, `actor_role`, `actor_advisor_id`, `created_at_utc`, y `previous_hash` / `payload_hash` / `event_hash` truncados (hover = hash completo).
+13. **Audit Verification** (`GET /cases/{case_id}/audit/verify`) — recomputa el hash chain y reporta `is_intact`, `total_events`, `first_broken_sequence`, `message`. Pill verde (INTACT) o roja (BROKEN). **Requiere rol `admin` o `compliance`** (advisor recibe 403).
+14. **AI Request Logs** (`GET /cases/{case_id}/ai-logs`) — tabla con `request_id`, `endpoint`, `model`, `prompt_version`, `validation_status` (pill verde/roja), `latency_ms`, `created_at_utc`, `error_message`. Latest log expone `input_redacted` (sanitizado por backend) y `raw_response` (con warning de "no necesariamente redactado — revisar antes de exportar"). **Requiere rol `admin` o `compliance`**.
+15. **Compliance Snapshot** — vista combinada `summary` + `audit/verify` + `ai-logs` (3 GETs en paralelo). Sub-requests fallidas se reportan como pills "skipped (HTTP X)" sin abortar el resto. Útil para handoff a compliance review en un solo paso.
 
-Para ejercitar el workflow completo hoy:
+### Privacidad
+
+- **`input_redacted`** se muestra tal cual viene del backend — la redacción es responsabilidad del repo (`SQLiteAIRequestLogRepository`), no del frontend.
+- **`raw_response`** se incluye en el panel pero **con warning visible**: no compartir exportes sin revisar.
+- **El frontend NO agrega lógica de redacción** — para mantener al backend como única fuente de verdad de qué se sanitiza.
+- **Export package compliance-ready (ZIP)** y **PDF export del report** siguen pendientes en Fase 3.
+
+### Auto-refresh
+
+- Cada POST exitoso (KYC, análisis, approval, preferences, filter, proposal, override, selection, report) llama `cwRefreshAfterPost`, que hace **una sola** GET al summary y re-renderiza el summary panel + final panel si están visibles.
+- **Audit panel, audit verify y AI logs panels NO se auto-refrescan** después de cada POST — son carga manual con sus botones (decisión: evitar polling agresivo / requests innecesarias). El botón "Refresh Compliance Snapshot" recarga los tres GETs en paralelo cuando el usuario lo pide.
+
+### Manejo de errores
+
+Cada panel renderiza mensajes específicos por status:
+- **400**: `OPENAI_API_KEY` no configurada (análisis IA / preferences NLP).
+- **401**: token inválido o ausente.
+- **403**: el token no tiene rol requerido — verify y ai-logs requieren `admin`/`compliance`; POSTs requieren `admin`/`advisor`.
+- **404**: `case_id` (o report_id en GET single) inexistente.
+- **409**: case `CLOSED`; sin KYC para análisis; sin investment_preferences para filter; sin proposal para override/selection; sin selection para report; override con decision=reject al seleccionar.
+- **422**: validation fail (rangos KYC, coherencia approve/modify/reject, cross-resource mismatch entre IDs).
+- **502**: la llamada IA falló — ver AI Request Logs panel para el log `api_error`.
+
+### Token
+
+Reusa el mismo input `Bearer token` del Case Dashboard (no hay un segundo campo). Cambios al token en el Dashboard afectan automáticamente al Workbench. Para verify + AI logs cambiar a `dev-admin-token` o `dev-compliance-token`.
+
+### Lo que NO incluye este Workbench
+
+- **Auto-refresh** del audit y AI logs panels después de cada POST (manual por design — ver "Auto-refresh" arriba).
+- **PDF export** del report (solo markdown).
+- **Compliance export package** (ZIP con report + audit + logs sanitizados).
+- **Frontend refactor / split** (sigue siendo single-file HTML + vanilla JS).
+
+Para ejercitar el workflow completo hoy sin UI:
 
 ```powershell
 python scripts/run_case_workflow_smoke_check.py
 ```
 
 o usar Swagger UI directamente: `http://127.0.0.1:8000/docs`.
-
-### Manejo de errores
-
-Cada panel renderiza mensajes específicos por status:
-- **400**: típicamente `OPENAI_API_KEY` no configurada (solo aplica al análisis IA).
-- **403**: el token actual no tiene rol `admin` o `advisor`.
-- **404**: `case_id` inexistente.
-- **409**: case `CLOSED`, o se intenta correr análisis sin KYC.
-- **422**: validation fail (rangos out-of-bounds en KYC; coherencia decision/approved_profile en approval).
-- **502**: la llamada IA falló — ver `/admin/ai-logs` para el log `api_error`.
-
-### Token
-
-Reusa el mismo input `Bearer token` del Case Dashboard (no hay un segundo campo). Cambios al token en el Dashboard afectan automáticamente al Workbench.
 
 ---
 
