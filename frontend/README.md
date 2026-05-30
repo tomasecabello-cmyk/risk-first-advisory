@@ -2,7 +2,21 @@
 
 Página HTML estática para probar visualmente el backend sin usar terminal ni curl.
 
-Un solo archivo: `index.html`. Sin frameworks. Sin CDN. Sin dependencias.
+Estructura (Phase 3 frontend split — sin build step ni dependencias):
+
+```
+frontend/
+├── index.html              # solo HTML estructural (cards + forms)
+├── css/
+│   └── base.css            # estilos compartidos (reset, layout, cards, pills, forms)
+└── js/
+    ├── common.js           # helpers globales (el, formatJSON, escapeHTML, apiError, statusPill, ...)
+    ├── legacy-demo.js      # cards Phase 0/1: health, workflow, AI demos, advisor decisions, persisted
+    ├── case-dashboard.js   # card "Case Dashboard — Phase 2" (cd-* / cd*)
+    └── case-workbench.js   # card "Case Workbench — Phase 2 Workflow" (cw-* / cw*)
+```
+
+**Sin frameworks. Sin CDN. Sin dependencias.** Scripts cargados en orden clásico (no ES modules) para preservar los `onclick="..."` handlers globales del HTML. `case-dashboard.js` debe cargarse antes que `case-workbench.js` porque el Workbench reusa helpers `cd*` (`cdToken`, `cdAuthHeaders`, `cdApiFetch`, `cdNullIfBlank`).
 
 ---
 
