@@ -56,8 +56,8 @@ Objetivo: que un dev nuevo pueda clonar el repo, correr un script, y ver el fluj
 - ~~**Case Workbench frontend** — vista detalle por case con tabs para KYC / análisis / approval / preferences / filter / proposal / override / selection / report / audit / AI logs / compliance snapshot.~~ ✅ (15 paneles end-to-end)
 - ~~**Frontend cleanup / split** — separar HTML estructural de CSS/JS.~~ ✅ (`css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js`)
 - ~~**Seed demo data script** — crea/reusa firm/advisor/client/case demo con IDs estables `*_demo_local`; idempotente; aplica migrations automáticamente.~~ ✅ (`scripts/seed_demo_data.py`)
-- **Local bootstrap script** — un comando que migrate + seed + start backend + abrir browser. Próximo entregable.
-- **Setup health checks** — `GET /health` extendido o `/health/full` que valide migrations aplicadas, tokens cargados, fixtures presentes.
+- ~~**Local bootstrap script** — un comando que aplica migrations + corre seed + valida archivos del frontend + detecta config + imprime comandos backend/frontend + tokens. Flags `--check-only`, `--skip-migrate`, `--skip-seed`, `--run-smoke`.~~ ✅ (`scripts/bootstrap_local_demo.py`)
+- **Setup health checks** — `GET /health` extendido o `/health/full` que valide migrations aplicadas, tokens cargados, fixtures presentes. Próximo entregable.
 - **Plug-and-play docs** — README "5 min quickstart" para Case Workbench.
 
 ## Fase 4 — Pilot readiness (después de Fase 3)

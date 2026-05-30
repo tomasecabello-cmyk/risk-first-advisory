@@ -12,7 +12,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
 - **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
 - **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
-- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). PDF export, compliance ZIP package y bootstrap script (1-comando) siguen pendientes.
+- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). **Bootstrap local en un comando**: `python scripts/bootstrap_local_demo.py` (migrate + seed + checks + instrucciones; `--check-only` para CI; `--run-smoke` para verificar end-to-end). PDF export y compliance ZIP package siguen pendientes.
 - **OpenAI** requerido solo para los endpoints `/ai/*` legacy; el flujo case-scoped soporta `POST /cases/{id}/ai/profile-analysis` también, pero los tests y el smoke check usan mocks determinísticos.
 - **yfinance** requerido para `/live/portfolio-demo` (legacy).
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para todos los flujos demo, incluyendo `POST /cases/{id}/universe-filter`.
@@ -687,6 +687,46 @@ python scripts/run_case_workflow_smoke_check.py --debug
 ```
 
 El script aplica todas las migrations (`0001..0009`) sobre una DB SQLite temporal, monkeypatchea `OpenAIProfileClient` con un mock determinístico (sin red), usa FastAPI TestClient (sin uvicorn) y valida 14 pasos del workflow. Exit code 0 si pasa, 1 si falla.
+
+---
+
+## Bootstrap local demo (Fase 3 — recomendado para empezar)
+
+Un comando que prepara todo el entorno para demo / dev local: aplica migrations, corre el seed, valida archivos del frontend, detecta configuración (tokens YAML, OPENAI_API_KEY) y imprime los comandos exactos para levantar backend + frontend.
+
+```powershell
+python scripts/bootstrap_local_demo.py
+```
+
+**No levanta servidores** — solo imprime las instrucciones. El control queda en el dev (evita procesos zombies si se cancela).
+
+Flags principales:
+
+| Flag | Qué hace |
+|---|---|
+| `--db-path PATH` | DB custom (default: `api_layer.main.DEFAULT_DB_PATH`). Se pasa también al seed. |
+| `--check-only` | Solo verifica archivos + config; no toca DB. Útil para CI o para "¿qué falta?" |
+| `--skip-migrate` | No aplicar migrations (asume schema actual). |
+| `--skip-seed` | No correr `seed_demo_data`. |
+| `--run-smoke` | Correr el smoke check end-to-end en una **DB temporal aislada** (no ensucia la DB de demo). |
+| `--debug` | Traceback completo en excepciones inesperadas. |
+
+Output (extracto, modo full):
+
+```
+[1/5] Checking environment...      ✓
+[2/5] Apply migrations...          ✓
+[3/5] Seed demo data...            ✓  firm=created, advisor=created, client=created, case=created
+[4/5] End-to-end smoke check...    skipped (default)
+[5/5] Launch instructions...
+    Backend  : python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+    Frontend : python -m http.server 5500 -d frontend
+    Open     : http://127.0.0.1:8000/docs  +  http://127.0.0.1:5500
+    Tokens   : dev-advisor-token, dev-compliance-token
+PASS — local demo environment is ready
+```
+
+Si no existe `config/advisor_tokens.yaml`, el bootstrap detecta el fallback dev-only (solo `dev-advisor-token` + `dev-compliance-token` — **no hay admin/viewer en el fallback**) y avisa cómo agregarlos si necesitás crear firms / advisors desde el Dashboard.
 
 ---
 

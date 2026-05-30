@@ -115,9 +115,17 @@ Esta opción evita los problemas de CORS porque la página se sirve desde `http:
 
 ---
 
-## Seed demo data (recomendado antes de la primera demo visual)
+## Bootstrap local (recomendado para empezar)
 
-Para evitar tipear firm/advisor/client/case a mano, correr desde la raíz del repo:
+Un comando que aplica migrations + seedea demo data + valida archivos del frontend + imprime instrucciones para levantar backend y frontend:
+
+```powershell
+python scripts/bootstrap_local_demo.py
+```
+
+NO levanta servidores — solo imprime los comandos para que el dev los copie. Idempotente. Usar `--check-only` para validar sin tocar la DB.
+
+Si solo querés el seed (sin chequeos del frontend ni del entorno):
 
 ```powershell
 python scripts/seed_demo_data.py
