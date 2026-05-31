@@ -377,6 +377,42 @@ class TestFullWorkflow:
         body = _get_summary(client, ctx["case"]["case_id"]).json()
         assert body["progress"]["has_report"] is True
 
+    def test_current_portfolio_proposal_candidates_have_holdings(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: el summary expone current_portfolio_proposal con
+        candidates enriquecidos con holdings — esto es lo que el frontend
+        consume para pintar la composición sin volver a llamar al endpoint
+        de proposal."""
+        ctx = _full_workflow(client, patch_ai_client)
+        body = _get_summary(client, ctx["case"]["case_id"]).json()
+        proposal = body["current_portfolio_proposal"]
+        assert proposal is not None
+        cands = proposal["candidates"]
+        assert isinstance(cands, list) and len(cands) > 0
+        for c in cands:
+            assert isinstance(c.get("holdings"), list)
+            assert len(c["holdings"]) > 0
+            for h in c["holdings"]:
+                assert h.get("ticker")
+                assert isinstance(h.get("weight"), (int, float))
+
+    def test_current_portfolio_selection_selected_candidate_has_holdings(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: el summary expone current_portfolio_selection cuyo
+        selected_candidate trae el snapshot de holdings ya enriquecido."""
+        ctx = _full_workflow(client, patch_ai_client)
+        body = _get_summary(client, ctx["case"]["case_id"]).json()
+        sel = body["current_portfolio_selection"]
+        assert sel is not None
+        cand = sel["selected_candidate"]
+        assert cand["variant"] == sel["selected_variant"]
+        assert isinstance(cand.get("holdings"), list) and len(cand["holdings"]) > 0
+        for h in cand["holdings"]:
+            assert h.get("ticker")
+            assert isinstance(h.get("weight"), (int, float))
+
     def test_next_action_ready_for_review(
         self, client: TestClient, patch_ai_client
     ) -> None:

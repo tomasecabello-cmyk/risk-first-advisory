@@ -126,34 +126,152 @@ def _section_selection(
 
 
 def _section_metrics(candidate: dict[str, Any]) -> str:
-    weights = candidate.get("weights") or {}
+    n_instruments = candidate.get("holdings_count")
+    if not isinstance(n_instruments, int):
+        n_instruments = len(_normalize_holdings(candidate))
     lines = [
         "## Métricas del portfolio",
         "",
         f"- **Retorno esperado anual**: {_pct(candidate.get('expected_return_annual'))}",
         f"- **Volatilidad anual**: {_pct(candidate.get('volatility_annual'))}",
         f"- **Risk score**: {_decimal(candidate.get('risk_score'))}",
-        f"- **Cantidad de instrumentos**: {len(weights) if isinstance(weights, dict) else 0}",
+        f"- **Cantidad de instrumentos**: {n_instruments}",
         f"- **Constraints satisfied**: {bool(candidate.get('constraints_satisfied'))}",
     ]
     return "\n".join(lines)
 
 
-def _section_weights(candidate: dict[str, Any]) -> str:
-    weights = candidate.get("weights") or {}
-    lines = ["## Distribución de pesos", ""]
-    if not isinstance(weights, dict) or not weights:
-        lines.append("_No hay pesos definidos para esta variante._")
+def _normalize_holdings(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Devuelve una lista normalizada `[{ticker, name, instrument_type, currency,
+    weight, rationale}, ...]` a partir del candidate. Soporta tres formas:
+
+      1. `holdings`: list[dict]  — formato Phase 3.6 (preferido, enriquecido).
+      2. `weights`: list[{"ticker","weight"}]  — formato del proposal (sin metadata).
+      3. `weights`: {ticker: weight}  — formato legacy / dict plano.
+
+    Esto hace al report tolerante a candidates antiguos o mockeados sin perder
+    info cuando viene enriquecida.
+    """
+    holdings_raw = candidate.get("holdings")
+    if isinstance(holdings_raw, list) and holdings_raw:
+        out: list[dict[str, Any]] = []
+        for h in holdings_raw:
+            if not isinstance(h, dict):
+                continue
+            out.append({
+                "ticker":          h.get("ticker") or h.get("instrument_id"),
+                "name":            h.get("name"),
+                "instrument_type": h.get("instrument_type"),
+                "currency":        h.get("currency"),
+                "weight":          h.get("weight"),
+                "rationale":       h.get("rationale"),
+            })
+        return out
+    weights = candidate.get("weights")
+    if isinstance(weights, list) and weights:
+        out_w: list[dict[str, Any]] = []
+        for w in weights:
+            if not isinstance(w, dict):
+                continue
+            out_w.append({
+                "ticker":          w.get("ticker"),
+                "name":            None,
+                "instrument_type": None,
+                "currency":        None,
+                "weight":          w.get("weight"),
+                "rationale":       None,
+            })
+        return out_w
+    if isinstance(weights, dict) and weights:
+        return [
+            {
+                "ticker":          t,
+                "name":            None,
+                "instrument_type": None,
+                "currency":        None,
+                "weight":          w,
+                "rationale":       None,
+            }
+            for t, w in weights.items()
+        ]
+    return []
+
+
+def _section_holdings(candidate: dict[str, Any]) -> str:
+    """
+    Composición de la cartera seleccionada. Tabla con `Instrumento | Tipo |
+    Moneda | Peso | Motivo`. Orden determinístico (peso desc, ticker asc).
+    """
+    holdings = _normalize_holdings(candidate)
+    lines = ["## Composición de la cartera seleccionada", ""]
+    if not holdings:
+        lines.append("_No hay holdings definidas para esta variante._")
         return "\n".join(lines)
-    lines.append("| Ticker | Peso |")
-    lines.append("|--------|------|")
-    # Orden determinístico: por peso desc, ticker asc como tiebreaker.
-    sorted_items = sorted(
-        weights.items(),
-        key=lambda kv: (-float(kv[1] or 0.0), kv[0]),
+    sorted_h = sorted(
+        holdings,
+        key=lambda h: (-float(h.get("weight") or 0.0), h.get("ticker") or ""),
     )
-    for ticker, weight in sorted_items:
-        lines.append(f"| `{ticker}` | {_pct(weight)} |")
+    lines.append(f"_Total: {len(sorted_h)} instrumento(s)._")
+    lines.append("")
+    lines.append("| Instrumento | Tipo | Moneda | Peso | Motivo |")
+    lines.append("|---|---|---|---:|---|")
+    for h in sorted_h:
+        ticker = h.get("ticker") or "?"
+        name = h.get("name") or ""
+        label = f"`{ticker}`" + (f" — {name}" if name else "")
+        itype = h.get("instrument_type") or "—"
+        curr = h.get("currency") or "—"
+        weight = _pct(h.get("weight"))
+        rationale = h.get("rationale") or "—"
+        # Markdown table-friendly: replace pipes inside the cell text.
+        safe_name = label.replace("|", "\\|")
+        safe_rat = rationale.replace("|", "\\|")
+        lines.append(f"| {safe_name} | {itype} | {curr} | {weight} | {safe_rat} |")
+    return "\n".join(lines)
+
+
+def _section_variants_comparison(
+    proposal_data: dict[str, Any] | None,
+    selected_variant: str | None,
+) -> str:
+    """
+    Tabla comparativa de las variantes generadas por el optimizador (DEFENSIVE
+    / BALANCED / GROWTH). Útil para el asesor / profesor: muestra de un vistazo
+    el trade-off de retorno-volatilidad y por qué la variante elegida es
+    razonable. Se omite si no hay proposal_data o si no tiene candidates.
+    """
+    if not proposal_data:
+        return ""
+    candidates = proposal_data.get("candidates") or []
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    lines = ["## Comparación de variantes generadas", ""]
+    lines.append("| Variante | E[ret] anual | Volatilidad | Override | # Instr. | Top holdings |")
+    lines.append("|---|---:|---:|---|---:|---|")
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        variant = cand.get("variant") or "?"
+        marker = "**" if variant == selected_variant else ""
+        meta = cand.get("metadata") or {}
+        requires_ovr = bool(meta.get("requires_advisor_override"))
+        ovr_label = "⚠ Sí" if requires_ovr else "No"
+        holdings = _normalize_holdings(cand)
+        n = len(holdings)
+        top = sorted(
+            holdings,
+            key=lambda h: (-float(h.get("weight") or 0.0), h.get("ticker") or ""),
+        )[:3]
+        top_label = ", ".join(
+            f"`{h.get('ticker') or '?'}` {_pct(h.get('weight'))}"
+            for h in top
+        ) if top else "—"
+        e_ret = _pct(cand.get("expected_return_annual"))
+        vol = _pct(cand.get("volatility_annual"))
+        lines.append(
+            f"| {marker}{variant}{marker} | {e_ret} | {vol} | {ovr_label} | {n} | {top_label} |"
+        )
     return "\n".join(lines)
 
 
@@ -243,7 +361,10 @@ class CaseMarkdownReportGenerator:
         generated_at = generated_at_utc or _now_iso_utc()
         candidate = dict(selection_data.get("selected_candidate") or {})
 
-        sections = [
+        variants_section = _section_variants_comparison(
+            proposal_data, selection_data.get("selected_variant")
+        )
+        sections: list[str] = [
             _section_title(case_data.get("case_id", "n/a")),
             "",
             _section_meta(case_data, generated_at),
@@ -254,16 +375,20 @@ class CaseMarkdownReportGenerator:
             "",
             _section_metrics(candidate),
             "",
-            _section_weights(candidate),
+            _section_holdings(candidate),
             "",
+        ]
+        if variants_section:
+            sections.extend([variants_section, ""])
+        sections.extend([
             _section_override(selection_data, override_data),
             "",
             _section_disclaimers(),
             "",
-        ]
+        ])
         markdown = "\n".join(sections)
 
-        weights = candidate.get("weights") or {}
+        holdings = _normalize_holdings(candidate)
         metadata: dict[str, Any] = {
             "case_id":                case_data.get("case_id"),
             "case_status":            case_data.get("status"),
@@ -275,7 +400,11 @@ class CaseMarkdownReportGenerator:
             "selected_variant":       selection_data.get("selected_variant"),
             "expected_return_annual": candidate.get("expected_return_annual"),
             "volatility_annual":      candidate.get("volatility_annual"),
-            "asset_count":            len(weights) if isinstance(weights, dict) else 0,
+            "asset_count":            len(holdings),
+            "holdings_summary":       [
+                {"ticker": h.get("ticker"), "weight": h.get("weight")}
+                for h in holdings
+            ],
             "generated_at_utc":       generated_at,
         }
         return markdown, metadata

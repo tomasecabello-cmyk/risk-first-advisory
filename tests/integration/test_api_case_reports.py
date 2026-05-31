@@ -314,6 +314,75 @@ class TestCreate:
         # la responsabilidad del asesor.
         assert "IA" in md or "asesor" in md.lower()
 
+    def test_markdown_contains_composicion_section(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: el reporte debe tener una sección titulada
+        'Composición de la cartera seleccionada' con tabla legible."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        r = _post_report(client, ctx["case"]["case_id"])
+        md = r.json()["markdown"]
+        assert "## Composición de la cartera seleccionada" in md
+        # tabla markdown: header "Instrumento | Tipo | Moneda | Peso | Motivo"
+        assert "| Instrumento |" in md
+        assert "| Tipo |" in md
+        assert "| Moneda |" in md
+        assert "| Peso |" in md
+
+    def test_markdown_contains_holdings_with_ticker_and_weight(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: la tabla de composición debe listar instrumentos reales
+        del portfolio (tickers del snapshot del filter run, con peso %)."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        r = _post_report(client, ctx["case"]["case_id"])
+        md = r.json()["markdown"]
+        # Trazamos la sección de holdings y verificamos que al menos un
+        # ticker del proposal aparezca en el markdown.
+        cand = ctx["selection"]["selected_candidate"]
+        holdings = cand.get("holdings") or []
+        assert holdings, "Selected candidate should have holdings to test against"
+        ticker_zero = holdings[0]["ticker"]
+        assert f"`{ticker_zero}`" in md
+        # algún porcentaje (formato del helper _pct: "12.34%")
+        import re
+        assert re.search(r"\d+\.\d+%", md)
+
+    def test_markdown_contains_variantes_comparison_when_proposal_present(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: si el proposal tiene candidates, el reporte debe incluir
+        la tabla 'Comparación de variantes generadas' con al menos 2 de las
+        variantes estándar (DEFENSIVE / BALANCED / GROWTH — la disponibilidad
+        depende de la feasibility del universo)."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        r = _post_report(client, ctx["case"]["case_id"])
+        md = r.json()["markdown"]
+        assert "## Comparación de variantes generadas" in md
+        # Cabecera de la tabla
+        assert "| Variante |" in md
+        assert "Top holdings" in md
+        # Al menos 2 variantes (cuáles exactamente depende del universo)
+        variants_present = sum(v in md for v in ("DEFENSIVE", "BALANCED", "GROWTH"))
+        assert variants_present >= 2, (
+            f"expected at least 2 standard variants in comparison table, "
+            f"found {variants_present}"
+        )
+
+    def test_metadata_holdings_summary(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: la metadata persistida incluye un holdings_summary
+        compacto (ticker + weight) además del asset_count."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        r = _post_report(client, ctx["case"]["case_id"])
+        meta = r.json()["metadata"]
+        assert isinstance(meta.get("holdings_summary"), list)
+        assert len(meta["holdings_summary"]) == meta["asset_count"]
+        for h in meta["holdings_summary"]:
+            assert "ticker" in h
+            assert "weight" in h
+
     def test_metadata_dict_not_empty(
         self, client: TestClient, patch_ai_client
     ) -> None:

@@ -618,21 +618,82 @@ async function cwRunUniverseFilter() {
   }
   const j = res.json || {};
   const eligibles = Array.isArray(j.eligible_instruments) ? j.eligible_instruments : [];
-  const top5 = eligibles.slice(0, 5).map(i => `<code>${escapeHTML(i.ticker || "?")}</code>`).join(", ") || "<em>none</em>";
+  const exclusions = Array.isArray(j.exclusions) ? j.exclusions : [];
   const applied = Array.isArray(j.applied_filters) ? j.applied_filters : [];
   const warnings = Array.isArray(j.warnings) ? j.warnings : [];
+
+  // Top 10 eligibles con nombre + tipo + moneda (tabla legible)
+  const elRows = eligibles.slice(0, 10).map(i => {
+    const ticker = i.ticker || "?";
+    const name = i.name || "";
+    const itype = i.instrument_type || "—";
+    const curr = i.currency || "—";
+    return `<tr>
+      <td style="padding:6px 10px;"><code style="font-size:12px;">${escapeHTML(ticker)}</code>${name ? `<br><span style="font-size:11px;color:#64748b;">${escapeHTML(name)}</span>` : ""}</td>
+      <td style="padding:6px 10px;font-size:11.5px;"><code>${escapeHTML(itype)}</code></td>
+      <td style="padding:6px 10px;font-size:11.5px;">${escapeHTML(curr)}</td>
+    </tr>`;
+  }).join("");
+  const elTable = eligibles.length ? `
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-top:6px;">
+      <thead><tr style="background:#f4f6fa;">
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Instrumento</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Tipo</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Moneda</th>
+      </tr></thead>
+      <tbody>${elRows}</tbody>
+    </table>
+    ${eligibles.length > 10 ? `<div style="font-size:11px;color:#64748b;margin-top:4px;">Mostrando 10 de ${eligibles.length} elegibles.</div>` : ""}
+  ` : `<div class="msg msg-info">No quedó ningún instrumento elegible.</div>`;
+
+  // Resumen de motivos de exclusión (agrupados por reason si vienen estructurados)
+  const exReasonCounts = {};
+  for (const ex of exclusions) {
+    if (!ex || typeof ex !== "object") continue;
+    const reasons = Array.isArray(ex.reasons) ? ex.reasons
+      : (ex.reason ? [ex.reason] : ["sin_motivo"]);
+    for (const r of reasons) {
+      const key = String(r);
+      exReasonCounts[key] = (exReasonCounts[key] || 0) + 1;
+    }
+  }
+  const exReasonChips = Object.entries(exReasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([r, n]) => `<span class="chip">${escapeHTML(r)} <strong>(${n})</strong></span>`)
+    .join(" ");
+  const exTopRows = exclusions.slice(0, 5).map(ex => {
+    const ticker = (ex && ex.ticker) || (ex && ex.instrument && ex.instrument.ticker) || "?";
+    const reasons = Array.isArray(ex.reasons) ? ex.reasons.join(", ")
+      : (ex.reason || "—");
+    return `<tr><td style="padding:6px 10px;"><code>${escapeHTML(ticker)}</code></td><td style="padding:6px 10px;font-size:11.5px;">${escapeHTML(reasons)}</td></tr>`;
+  }).join("");
+
   const head = `
     <div class="msg msg-success">
-      Filter OK: <code>${escapeHTML(j.filter_run_id || "?")}</code> ·
-      eligible <strong>${j.eligible_count}</strong> · excluded <strong>${j.excluded_count}</strong> · total <strong>${j.total_count}</strong>
+      <strong>Filtro aplicado</strong> · <code>${escapeHTML(j.filter_run_id || "?")}</code> ·
+      elegibles <strong>${j.eligible_count}</strong> · excluidos <strong>${j.excluded_count}</strong> · total <strong>${j.total_count}</strong>
     </div>
-    <div style="margin-top:8px;font-size:12px;color:#4a5568;">
-      <div><strong>Top 5 eligible:</strong> ${top5}</div>
-      <div style="margin-top:4px;"><strong>applied_filters (${applied.length}):</strong> ${applied.map(f => `<code>${escapeHTML(f)}</code>`).join(" ") || "<em>none</em>"}</div>
-      <div style="margin-top:4px;"><strong>warnings (${warnings.length}):</strong> ${warnings.map(w => `<code>${escapeHTML(w)}</code>`).join(" ") || "<em>none</em>"}</div>
+    <div style="margin-top:12px;">
+      <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Universo elegible</div>
+      ${elTable}
     </div>
-    <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
-    <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    ${exclusions.length ? `
+      <div style="margin-top:14px;">
+        <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Exclusiones — principales motivos</div>
+        <div class="list-chips" style="margin-bottom:8px;">${exReasonChips || `<span class="chip">—</span>`}</div>
+        <details style="margin-top:4px;"><summary style="cursor:pointer;font-size:12px;color:var(--rf-navy-700);font-weight:600;">Ver primeras ${Math.min(5, exclusions.length)} exclusiones</summary>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-top:6px;">
+            <thead><tr style="background:#f4f6fa;"><th style="padding:8px 10px;font-size:11px;text-align:left;">Instrumento</th><th style="padding:8px 10px;font-size:11px;text-align:left;">Motivos</th></tr></thead>
+            <tbody>${exTopRows}</tbody>
+          </table>
+        </details>
+      </div>
+    ` : ""}
+    <div style="margin-top:12px;font-size:12px;color:#4a5568;">
+      <div><strong>Filtros aplicados (${applied.length}):</strong> ${applied.map(f => `<code>${escapeHTML(f)}</code>`).join(" ") || "<em>ninguno</em>"}</div>
+      <div style="margin-top:4px;"><strong>Avisos (${warnings.length}):</strong> ${warnings.map(w => `<code>${escapeHTML(w)}</code>`).join(" ") || "<em>ninguno</em>"}</div>
+    </div>
+    ${rfaJsonDetails(j, "Detalles técnicos · respuesta JSON")}
   `;
   el("cw-uf-result").innerHTML = head;
   await cwRefreshAfterPost();
@@ -670,45 +731,180 @@ async function cwGenerateProposal() {
   const j = res.json || {};
   const cands = Array.isArray(j.candidates) ? j.candidates : [];
   const warnings = Array.isArray(j.warnings) ? j.warnings : [];
-  const candRows = cands.map(c => {
-    const m = c.metadata || {};
-    const overrideBadge = m.requires_advisor_override
-      ? '<span class="pill pill-orange">override</span>'
-      : '<span class="pill pill-green">within budget</span>';
-    const rc = Array.isArray(c.reason_codes) && c.reason_codes.length
-      ? c.reason_codes.map(r => `<code>${escapeHTML(r)}</code>`).join(" ")
-      : "<em>—</em>";
-    return `<tr>
-      <td style="padding:4px 8px;font-size:12px;"><code>${escapeHTML(c.variant || "?")}</code></td>
-      <td style="padding:4px 8px;font-size:12px;">${overrideBadge}</td>
-      <td style="padding:4px 8px;font-size:12px;text-align:right;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
-      <td style="padding:4px 8px;font-size:12px;text-align:right;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
-      <td style="padding:4px 8px;font-size:12px;">${rc}</td>
-    </tr>`;
-  }).join("");
+
+  // Tabla comparativa + tabla detallada de holdings por cada variante.
+  const cardsHtml = cands.map(c => cwRenderCandidateCard(c)).join("");
+  const comparisonRows = cands.map(c => cwRenderCandidateComparisonRow(c)).join("");
+  const compareTable = `
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;border:1px solid #dde2ea;border-radius:8px;overflow:hidden;">
+      <thead><tr style="background:#f4f6fa;">
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Variante</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Presupuesto de riesgo</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:right;">E[ret] anual</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:right;">Volatilidad</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:right;"># Instr.</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Motivos</th>
+      </tr></thead>
+      <tbody>${comparisonRows || `<tr><td colspan="6" style="padding:10px;font-size:12px;color:#a0aec0;">Sin candidatos.</td></tr>`}</tbody>
+    </table>`;
   const head = `
     <div class="msg msg-success">
-      Proposal OK: <code>${escapeHTML(j.proposal_id || "?")}</code> ·
-      status <code>${escapeHTML(j.status || "?")}</code> ·
-      profile <code>${escapeHTML(j.profile_name || "?")}</code> ·
-      candidates <strong>${cands.length}</strong>
+      <strong>Propuesta generada</strong> · <code>${escapeHTML(j.proposal_id || "?")}</code> ·
+      perfil <code>${escapeHTML(j.profile_name || "?")}</code> ·
+      <strong>${cands.length}</strong> variante(s) ·
+      estado <code>${escapeHTML(j.status || "?")}</code>
     </div>
-    <table style="width:100%;border-collapse:collapse;margin-top:8px;border:1px solid #dde2ea;">
-      <thead><tr style="background:#f4f6fa;">
-        <th style="padding:6px 8px;font-size:11px;text-align:left;">variant</th>
-        <th style="padding:6px 8px;font-size:11px;text-align:left;">budget</th>
-        <th style="padding:6px 8px;font-size:11px;text-align:right;">E[ret] anual</th>
-        <th style="padding:6px 8px;font-size:11px;text-align:right;">vol anual</th>
-        <th style="padding:6px 8px;font-size:11px;text-align:left;">reason_codes</th>
-      </tr></thead>
-      <tbody>${candRows || `<tr><td colspan="5" style="padding:8px;font-size:12px;color:#a0aec0;">No candidates.</td></tr>`}</tbody>
-    </table>
-    ${warnings.length ? `<div style="margin-top:6px;font-size:11px;color:#92400e;"><strong>warnings:</strong> ${warnings.map(w => escapeHTML(w)).join("; ")}</div>` : ""}
-    <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">Full JSON</summary>
-    <pre class="json-block">${escapeHTML(formatJSON(j))}</pre></details>
+    <div style="margin-top:12px;">
+      <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Comparación rápida</div>
+      ${compareTable}
+    </div>
+    <div style="margin-top:14px;">
+      <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Composición detallada por variante</div>
+      ${cardsHtml || `<div class="msg msg-info">Sin variantes que mostrar.</div>`}
+    </div>
+    ${warnings.length ? `<div class="msg msg-info" style="margin-top:10px;"><strong>Avisos del backend:</strong> ${warnings.map(w => escapeHTML(w)).join("; ")}</div>` : ""}
+    ${rfaJsonDetails(j, "Detalles técnicos · respuesta JSON")}
   `;
   el("cw-pp-result").innerHTML = head;
   await cwRefreshAfterPost();
+}
+
+// ── Helpers de render para candidates / holdings ─────────────────────
+function cwRenderCandidateComparisonRow(c) {
+  if (!c || typeof c !== "object") return "";
+  const m = c.metadata || {};
+  const overrideBadge = m.requires_advisor_override
+    ? '<span class="pill pill-orange">requiere override</span>'
+    : '<span class="pill pill-green">dentro del presupuesto</span>';
+  const rc = Array.isArray(c.reason_codes) && c.reason_codes.length
+    ? c.reason_codes.map(r => `<code>${escapeHTML(r)}</code>`).join(" ")
+    : "<em>—</em>";
+  const n = (typeof c.holdings_count === "number")
+    ? c.holdings_count
+    : (Array.isArray(c.holdings) ? c.holdings.length
+       : (Array.isArray(c.weights) ? c.weights.length : 0));
+  return `<tr>
+    <td style="padding:8px 10px;font-size:12.5px;"><strong>${escapeHTML(c.variant || "?")}</strong></td>
+    <td style="padding:8px 10px;font-size:12px;">${overrideBadge}</td>
+    <td style="padding:8px 10px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
+    <td style="padding:8px 10px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
+    <td style="padding:8px 10px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;">${n}</td>
+    <td style="padding:8px 10px;font-size:11.5px;">${rc}</td>
+  </tr>`;
+}
+
+function cwRenderCandidateCard(c) {
+  if (!c || typeof c !== "object") return "";
+  const m = c.metadata || {};
+  const variant = c.variant || "?";
+  const overridePill = m.requires_advisor_override
+    ? '<span class="pill pill-orange">Requiere override del asesor</span>'
+    : '<span class="pill pill-green">Dentro del presupuesto de riesgo</span>';
+  const eret = (c.expected_return_annual !== undefined)
+    ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—";
+  const vol = (c.volatility_annual !== undefined)
+    ? (c.volatility_annual * 100).toFixed(2) + "%" : "—";
+  const n = (typeof c.holdings_count === "number")
+    ? c.holdings_count
+    : (Array.isArray(c.holdings) ? c.holdings.length
+       : (Array.isArray(c.weights) ? c.weights.length : 0));
+  const totalWeight = (typeof c.total_weight === "number")
+    ? (c.total_weight * 100).toFixed(2) + "%" : "—";
+  const holdings = cwNormalizeHoldings(c);
+  const holdingsTable = cwRenderHoldingsTable(holdings, /*withRationale*/ true);
+  return `
+    <div class="portfolio-card" style="margin-top:10px;">
+      <div class="portfolio-card-header">
+        <span class="variant-name">${escapeHTML(variant)}</span>
+        ${overridePill}
+        <span style="margin-left:auto;font-size:11px;color:var(--rf-text-muted);">${n} instrumento(s) · peso total ${totalWeight}</span>
+      </div>
+      <div class="portfolio-card-body">
+        <div class="metrics-grid">
+          <div class="metric-item"><label>Retorno esperado anual</label><div class="metric-value">${eret}</div></div>
+          <div class="metric-item"><label>Volatilidad anual</label><div class="metric-value">${vol}</div></div>
+          <div class="metric-item"><label>Instrumentos</label><div class="metric-value">${n}</div></div>
+        </div>
+        <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Composición</div>
+        ${holdingsTable}
+      </div>
+    </div>
+  `;
+}
+
+function cwNormalizeHoldings(c) {
+  if (!c || typeof c !== "object") return [];
+  if (Array.isArray(c.holdings) && c.holdings.length) {
+    return c.holdings.map(h => ({
+      ticker:          h.ticker || h.instrument_id || "?",
+      name:            h.name || null,
+      instrument_type: h.instrument_type || null,
+      currency:        h.currency || null,
+      asset_class:     h.asset_class || null,
+      weight:          (typeof h.weight === "number") ? h.weight : 0,
+      weight_percent:  (typeof h.weight_percent === "number")
+                       ? h.weight_percent
+                       : ((typeof h.weight === "number") ? h.weight * 100 : 0),
+      rationale:       h.rationale || null,
+    }));
+  }
+  if (Array.isArray(c.weights) && c.weights.length) {
+    return c.weights.map(w => ({
+      ticker:          w.ticker || "?",
+      name:            null,
+      instrument_type: null,
+      currency:        null,
+      asset_class:     null,
+      weight:          (typeof w.weight === "number") ? w.weight : 0,
+      weight_percent:  (typeof w.weight === "number") ? w.weight * 100 : 0,
+      rationale:       null,
+    }));
+  }
+  return [];
+}
+
+function cwRenderHoldingsTable(holdings, withRationale) {
+  if (!Array.isArray(holdings) || !holdings.length) {
+    return `<div class="msg msg-info">Sin holdings para esta variante.</div>`;
+  }
+  const sorted = [...holdings].sort((a, b) => (b.weight || 0) - (a.weight || 0));
+  const maxW = Math.max(...sorted.map(h => h.weight || 0), 0.0001);
+  const rows = sorted.map(h => {
+    const pct = (h.weight_percent !== undefined && h.weight_percent !== null)
+      ? Number(h.weight_percent).toFixed(2) + "%"
+      : ((h.weight || 0) * 100).toFixed(2) + "%";
+    const barW = Math.max(2, Math.round(((h.weight || 0) / maxW) * 100));
+    const bar = `<div class="weight-bar-track" style="width:80px;display:inline-block;vertical-align:middle;margin-left:8px;"><div class="weight-bar-fill" style="width:${barW}%;"></div></div>`;
+    const name = h.name
+      ? `<div style="font-size:12.5px;font-weight:600;color:#0b1e3f;">${escapeHTML(h.name)}</div><div style="font-size:11px;color:#64748b;font-family:'JetBrains Mono',monospace;">${escapeHTML(h.ticker)}</div>`
+      : `<code>${escapeHTML(h.ticker)}</code>`;
+    const itype = h.instrument_type ? `<code style="font-size:11px;">${escapeHTML(h.instrument_type)}</code>` : "—";
+    const curr = h.currency ? `<span style="font-size:12px;">${escapeHTML(h.currency)}</span>` : "—";
+    const rationaleCell = withRationale
+      ? `<td style="padding:6px 10px;font-size:11.5px;color:#64748b;">${h.rationale ? escapeHTML(h.rationale) : "—"}</td>`
+      : "";
+    return `<tr>
+      <td style="padding:6px 10px;">${name}</td>
+      <td style="padding:6px 10px;">${itype}</td>
+      <td style="padding:6px 10px;">${curr}</td>
+      <td style="padding:6px 10px;font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;"><strong>${pct}</strong>${bar}</td>
+      ${rationaleCell}
+    </tr>`;
+  }).join("");
+  const ratHeader = withRationale
+    ? '<th style="padding:8px 10px;font-size:11px;text-align:left;">Motivo</th>'
+    : "";
+  return `
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+      <thead><tr style="background:#f4f6fa;">
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Instrumento</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Tipo</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:left;">Moneda</th>
+        <th style="padding:8px 10px;font-size:11px;text-align:right;">Peso</th>
+        ${ratHeader}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // ── 8. Override Approval ───────────────────────────────────────────────
@@ -804,9 +1000,28 @@ async function cwSubmitSelection() {
   const candSummary = cand && cand.expected_return_annual !== undefined
     ? ` · E[ret] <strong>${(cand.expected_return_annual * 100).toFixed(2)}%</strong> · vol <strong>${cand.volatility_annual !== undefined ? (cand.volatility_annual * 100).toFixed(2) + "%" : "—"}</strong>`
     : "";
-  cwRenderSuccess("cw-sel-result",
-    `Selection OK: <code>${escapeHTML(j.selection_id || "?")}</code> · variant <code>${escapeHTML(j.selected_variant || "?")}</code> · override_approval_id <code>${escapeHTML(j.override_approval_id || "null")}</code>${candSummary}. Case status debería ser PORTFOLIO_SELECTED tras refresh.`,
-    j);
+  const overrideLabel = j.override_approval_id
+    ? `con override <code>${escapeHTML(j.override_approval_id)}</code>`
+    : `sin override`;
+  const meta = cand.metadata || {};
+  const overridePill = meta.requires_advisor_override
+    ? '<span class="pill pill-orange">override requerido</span>'
+    : '<span class="pill pill-green">dentro del presupuesto</span>';
+  const holdings = cwNormalizeHoldings(cand);
+  const composicion = `
+    <div style="margin-top:14px;">
+      <div style="font-size:11px;font-weight:700;color:#0b1e3f;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">
+        Composición de la variante seleccionada · ${escapeHTML(j.selected_variant || "?")}
+      </div>
+      <div style="margin-bottom:8px;">${overridePill}</div>
+      ${cwRenderHoldingsTable(holdings, /*withRationale*/ true)}
+    </div>`;
+  const head = `<div class="msg msg-success">
+    <strong>Selección registrada</strong> · <code>${escapeHTML(j.selection_id || "?")}</code> ·
+    variante <code>${escapeHTML(j.selected_variant || "?")}</code> · ${overrideLabel}${candSummary}.
+    El estado del caso debería ser <code>PORTFOLIO_SELECTED</code> tras el refresh.
+  </div>`;
+  el("cw-sel-result").innerHTML = head + composicion + rfaJsonDetails(j, "Detalles técnicos · respuesta JSON");
   await cwRefreshAfterPost();
 }
 
@@ -845,20 +1060,28 @@ async function cwGenerateReport() {
   const j = res.json || {};
   const md = j.markdown || "";
   const meta = j.metadata || {};
-  cwRenderSuccess("cw-rep-result",
-    `Report OK: <code>${escapeHTML(j.report_id || "?")}</code> · version <strong>${j.version}</strong> · status <code>${escapeHTML(j.status || "?")}</code> · type <code>${escapeHTML(j.report_type || "?")}</code>`);
-  el("cw-rep-result").insertAdjacentHTML("beforeend", `
-    <div style="margin-top:8px;">
-      <details open>
-        <summary style="cursor:pointer;font-size:12px;color:#2e4a8a;font-weight:600;">Markdown preview (${md.length} chars)</summary>
-        <pre style="background:#fff;border:1px solid #dde2ea;border-radius:4px;padding:10px;margin-top:6px;font-size:11px;line-height:1.4;max-height:340px;overflow:auto;white-space:pre-wrap;">${escapeHTML(md)}</pre>
-      </details>
-      <details style="margin-top:6px;">
-        <summary style="cursor:pointer;font-size:12px;color:#2e4a8a;">metadata</summary>
-        <pre class="json-block">${escapeHTML(formatJSON(meta))}</pre>
-      </details>
+  const hasComposicion = md.includes("Composición de la cartera seleccionada");
+  const composicionPill = hasComposicion
+    ? '<span class="pill pill-green">incluye composición</span>'
+    : '<span class="pill pill-orange">sin composición</span>';
+  const variantesPill = md.includes("Comparación de variantes generadas")
+    ? '<span class="pill pill-violet">incluye comparación de variantes</span>' : "";
+  el("cw-rep-result").innerHTML = `
+    <div class="msg msg-success">
+      <strong>Reporte generado</strong> · <code>${escapeHTML(j.report_id || "?")}</code> ·
+      versión <strong>${j.version}</strong> · estado <code>${escapeHTML(j.status || "?")}</code>
+      · ${composicionPill} ${variantesPill}
     </div>
-  `);
+    <div style="margin-top:10px;">
+      <details open>
+        <summary style="cursor:pointer;font-size:12px;color:var(--rf-navy-700);font-weight:600;">
+          Vista previa del reporte (${md.length} caracteres) · contiene la composición de la cartera y la tabla comparativa de variantes
+        </summary>
+        <pre style="background:#fff;border:1px solid #dde2ea;border-radius:8px;padding:14px;margin-top:6px;font-size:11.5px;line-height:1.5;max-height:420px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;">${escapeHTML(md)}</pre>
+      </details>
+      ${rfaJsonDetails(meta, "Metadata del reporte (técnico)")}
+    </div>
+  `;
   await cwRefreshAfterPost();
 }
 
@@ -877,26 +1100,40 @@ function cwRenderFinalSummary(s) {
   const c   = s.case || {};
 
   const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
-  const flagPill = (v) => v ? '<span class="pill pill-green">yes</span>' : '<span class="pill pill-grey">no</span>';
-  const intactBadge = (v) => v ? '<span class="pill pill-green">intact</span>' : '<span class="pill pill-red">broken</span>';
+  const flagPill = (v) => v ? '<span class="pill pill-green">sí</span>' : '<span class="pill pill-grey">no</span>';
+  const intactBadge = (v) => v ? '<span class="pill pill-green">intacta</span>' : '<span class="pill pill-red">rota</span>';
+
+  // Composición de la cartera seleccionada (si existe).
+  const selCandidate = sel && sel.selected_candidate ? sel.selected_candidate : null;
+  const selHoldings = selCandidate ? cwNormalizeHoldings(selCandidate) : [];
+  const composicionBlock = selCandidate ? `
+    <div style="margin-top:14px;">
+      <div style="font-weight:700;color:#0b1e3f;margin-bottom:6px;font-size:13px;">
+        Composición final · ${escapeHTML(sel.selected_variant || "?")}
+      </div>
+      ${cwRenderHoldingsTable(selHoldings, /*withRationale*/ false)}
+    </div>` : "";
 
   el("cw-final-result").innerHTML = `
-    <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;background:#fafbfd;">
-      <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Final state · case <code>${escapeHTML(c.case_id || "—")}</code> (${escapeHTML(c.status || "—")})</div>
+    <div style="border:1px solid #dde2ea;border-radius:10px;padding:14px;background:#fafbfd;">
+      <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">
+        Estado final · caso <code>${escapeHTML(c.case_id || "—")}</code> (${escapeHTML(c.status || "—")})
+      </div>
       <table style="width:100%;border-collapse:collapse;">
-        ${row("next_recommended_action", `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
-        ${row("completion_ratio",        `<strong>${p.completion_ratio !== undefined ? p.completion_ratio : "—"}</strong>`)}
-        ${row("has_investment_preferences", flagPill(p.has_investment_preferences))}
-        ${row("has_universe_filter",       flagPill(p.has_universe_filter))}
-        ${row("has_portfolio_proposal",    flagPill(p.has_portfolio_proposal))}
-        ${row("has_override_approval",     flagPill(p.has_override_approval))}
-        ${row("has_portfolio_selection",   flagPill(p.has_portfolio_selection))}
-        ${row("has_report",                flagPill(p.has_report))}
-        ${row("audit.is_intact",           intactBadge(a.is_intact))}
-        ${row("current_report.report_id",  rep && rep.report_id ? `<code>${escapeHTML(rep.report_id)}</code> (v${rep.version})` : "—")}
-        ${row("current_portfolio_selection.selected_variant",
+        ${row("Próxima acción sugerida",       `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+        ${row("Avance",                        `<strong>${p.completion_ratio !== undefined ? p.completion_ratio : "—"}</strong>`)}
+        ${row("Preferencias enviadas",         flagPill(p.has_investment_preferences))}
+        ${row("Filtro de universo corrido",    flagPill(p.has_universe_filter))}
+        ${row("Propuesta de cartera generada", flagPill(p.has_portfolio_proposal))}
+        ${row("Firma de override",             flagPill(p.has_override_approval))}
+        ${row("Selección de cartera",          flagPill(p.has_portfolio_selection))}
+        ${row("Reporte generado",              flagPill(p.has_report))}
+        ${row("Cadena de auditoría",           intactBadge(a.is_intact))}
+        ${row("Reporte vigente",               rep && rep.report_id ? `<code>${escapeHTML(rep.report_id)}</code> (v${rep.version})` : "—")}
+        ${row("Variante seleccionada",
               sel && sel.selected_variant ? `<code>${escapeHTML(sel.selected_variant)}</code>` : "—")}
       </table>
+      ${composicionBlock}
     </div>
   `;
 }

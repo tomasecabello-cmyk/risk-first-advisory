@@ -445,6 +445,138 @@ class TestCreate:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Holdings visibility (Phase 3.6 — composición visible)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _completed_candidates(client: TestClient, patch_ai_client) -> tuple[dict, list[dict]]:
+    """Helper: corre el flujo, devuelve (body, candidates) si status=completed."""
+    ctx = _full_setup(client, patch_ai_client)
+    body = _post_proposal(client, ctx["case"]["case_id"]).json()
+    if body["status"] != "completed":
+        pytest.skip(
+            f"Proposal status is {body['status']!r}; need 'completed' to test "
+            f"holdings. Universe fixture may be too narrow."
+        )
+    return body, body["candidates"]
+
+
+class TestCandidateHoldings:
+    """
+    Verifica que cada candidate completed exponga su composición real
+    (instrument_id, ticker, name, instrument_type, currency, weight, etc.)
+    de forma estructurada — no solo `weights` por ticker.
+    """
+
+    def test_every_completed_candidate_has_holdings(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        assert len(cands) > 0
+        for c in cands:
+            assert isinstance(c.get("holdings"), list), (
+                f"candidate {c.get('variant')!r} missing 'holdings' list"
+            )
+            assert len(c["holdings"]) > 0, (
+                f"candidate {c.get('variant')!r} has empty holdings"
+            )
+
+    def test_holding_shape(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            for h in c["holdings"]:
+                # Identificación: instrument_id + ticker presentes y no vacíos
+                assert h.get("instrument_id"), f"holding missing instrument_id: {h!r}"
+                assert h.get("ticker") == h.get("instrument_id"), (
+                    "ticker should mirror instrument_id"
+                )
+                # Peso numérico y > 0
+                assert isinstance(h.get("weight"), (int, float))
+                assert h["weight"] > 0
+                # weight_percent = weight*100 (con tolerancia)
+                assert abs(h["weight_percent"] - h["weight"] * 100.0) < 1e-3
+                # Reason codes & risk flags son listas (pueden estar vacías)
+                assert isinstance(h.get("inclusion_reason_codes"), list)
+                assert isinstance(h.get("risk_flags"), list)
+
+    def test_holding_metadata_from_universe(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """
+        Las holdings deben traer la metadata del instrumento (name, type, currency)
+        cuando el ticker matchea con el snapshot del filter run.
+        """
+        _, cands = _completed_candidates(client, patch_ai_client)
+        # Al menos UNA holding (cualquier candidate) debe tener name + type + currency
+        # poblados — si todas vienen vacías es señal de que el lookup no enganchó.
+        enriched = 0
+        for c in cands:
+            for h in c["holdings"]:
+                if h.get("name") and h.get("instrument_type") and h.get("currency"):
+                    enriched += 1
+        assert enriched > 0, (
+            "No holdings have name+instrument_type+currency — universe lookup is broken."
+        )
+
+    def test_holdings_count_matches(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            assert c.get("holdings_count") == len(c["holdings"])
+
+    def test_total_weight_close_to_one(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            tw = c.get("total_weight")
+            assert isinstance(tw, (int, float))
+            # Tolerancia para floating point + el filtro w > 1e-6 del serializer.
+            assert 0.99 <= tw <= 1.01, (
+                f"candidate {c.get('variant')!r} total_weight={tw} not ≈ 1.0"
+            )
+
+    def test_holdings_sorted_by_weight_desc(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            weights = [h["weight"] for h in c["holdings"]]
+            assert weights == sorted(weights, reverse=True), (
+                f"candidate {c.get('variant')!r} holdings not sorted by weight desc"
+            )
+
+    def test_weights_legacy_field_preserved(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Backward compatibility: el campo `weights` (legacy) sigue presente."""
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            assert isinstance(c.get("weights"), list)
+            assert len(c["weights"]) == len(c["holdings"])
+
+    def test_blocked_proposal_has_empty_holdings(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """
+        Si el proposal queda blocked/infeasible, los candidates están vacíos
+        (no se simulan holdings). Lo verificamos vía el caso de "sin filter run":
+        no es trivial forzar 'blocked' desde el flujo full, así que solo
+        afirmamos que cuando status != completed, candidates es lista vacía.
+        """
+        ctx = _full_setup(client, patch_ai_client)
+        body = _post_proposal(client, ctx["case"]["case_id"]).json()
+        if body["status"] == "completed":
+            return  # path feliz, no aplica
+        assert body["candidates"] == [], (
+            f"non-completed proposal ({body['status']!r}) leaked candidates"
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Validation
 # ═════════════════════════════════════════════════════════════════════════════
 

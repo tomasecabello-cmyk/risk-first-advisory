@@ -4417,16 +4417,80 @@ def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_candidate_for_proposal(variant_name: str, portfolio: Any, meta: Any) -> dict[str, Any]:
+def _serialize_candidate_for_proposal(
+    variant_name: str,
+    portfolio: Any,
+    meta: Any,
+    instruments_by_ticker: dict[str, dict[str, Any]] | None = None,
+    risk_budget: Any = None,
+) -> dict[str, Any]:
     """
     Mismo shape que LivePortfolioCandidateResponse para coherencia con
     /ai/filtered-portfolio-demo. Pesos ordenados mayor→menor, solo > 1e-6.
+
+    Phase 3.6 — composición visible:
+        Además de `weights` (mantenido por compatibilidad), agrega
+        `holdings` enriquecidas con metadata del instrumento (nombre,
+        tipo, moneda, asset_class, sector, etc.), `holdings_count` y
+        `total_weight`. Esto permite al frontend / reporte mostrar la
+        composición real de cada cartera candidata sin que el visitante
+        tenga que abrir Swagger.
+
+        `instruments_by_ticker` se construye desde el snapshot del filter
+        run (`filter_data["eligible_instruments"]`), keyed por ticker.
+        Si un ticker del portfolio no aparece en el snapshot (caso edge),
+        la holding se emite con metadata `None` pero conserva ticker/weight.
     """
     sorted_weights = sorted(
         ((t, w) for t, w in portfolio.weights.items() if w > 1e-6),
         key=lambda kv: kv[1],
         reverse=True,
     )
+    instruments_by_ticker = instruments_by_ticker or {}
+    max_single_asset = getattr(risk_budget, "max_single_asset", None) if risk_budget else None
+
+    holdings: list[dict[str, Any]] = []
+    total_weight = 0.0
+    for ticker, weight in sorted_weights:
+        total_weight += float(weight)
+        instr = instruments_by_ticker.get(ticker) or {}
+        risk_flags: list[str] = []
+        if isinstance(max_single_asset, (int, float)) and max_single_asset > 0 and float(weight) > float(max_single_asset) + 1e-9:
+            risk_flags.append("exceeds_max_single_asset")
+        # rationale humano-legible derivado de metadata del instrumento
+        rationale_bits: list[str] = []
+        if instr.get("asset_class"):
+            rationale_bits.append(str(instr["asset_class"]))
+        if instr.get("instrument_type"):
+            rationale_bits.append(str(instr["instrument_type"]))
+        if instr.get("currency"):
+            rationale_bits.append(str(instr["currency"]))
+        rationale = " · ".join(rationale_bits) if rationale_bits else None
+        # Reason codes derivadas de la composición del instrumento (informativo,
+        # NO viene del optimizador per-instrument).
+        inclusion_reason_codes: list[str] = []
+        if instr.get("asset_class"):
+            inclusion_reason_codes.append(f"asset_class:{instr['asset_class']}")
+        if instr.get("hard_dollar"):
+            inclusion_reason_codes.append("hard_dollar")
+        holdings.append({
+            "instrument_id":          ticker,
+            "ticker":                 ticker,
+            "name":                   instr.get("name"),
+            "issuer":                 instr.get("issuer"),
+            "instrument_type":        instr.get("instrument_type"),
+            "asset_class":            instr.get("asset_class"),
+            "currency":               instr.get("currency"),
+            "sector":                 instr.get("sector"),
+            "country":                instr.get("country"),
+            "weight":                 float(weight),
+            "weight_percent":         round(float(weight) * 100.0, 4),
+            "rationale":              rationale,
+            "inclusion_reason_codes": inclusion_reason_codes,
+            "risk_flags":             risk_flags,
+            "suitability_status":     None,  # TODO Fase 4: suitability per-instrument
+        })
+
     return {
         "variant":                variant_name,
         "objective":              portfolio.objective.value,
@@ -4443,7 +4507,13 @@ def _serialize_candidate_for_proposal(variant_name: str, portfolio: Any, meta: A
             "reason_codes":              list(meta.reason_codes) if meta else [],
             "notes":                     list(meta.notes) if meta else [],
         },
+        # `weights` se mantiene para no romper consumidores existentes (UI legacy,
+        # reportes anteriores, smoke checks).
         "weights": [{"ticker": t, "weight": w} for t, w in sorted_weights],
+        # `holdings` enriquece la composición con metadata visible al asesor.
+        "holdings":       holdings,
+        "holdings_count": len(holdings),
+        "total_weight":   round(total_weight, 6),
     }
 
 
@@ -4705,6 +4775,12 @@ def create_case_portfolio_proposal(
         PortfolioVariant.BALANCED,
         PortfolioVariant.GROWTH,
     ]
+    # Lookup ticker → instrument metadata desde el snapshot del filter run, así
+    # las holdings serializadas exponen nombre / tipo / moneda / asset_class
+    # sin que el frontend tenga que re-cruzar.
+    instruments_by_ticker: dict[str, dict[str, Any]] = {
+        d["ticker"]: d for d in eligible_dicts if isinstance(d, dict) and "ticker" in d
+    }
     candidates_serialized: list[dict[str, Any]] = []
     for variant in _variant_order:
         if variant not in candidate_set.candidates:
@@ -4712,7 +4788,11 @@ def create_case_portfolio_proposal(
         portfolio = candidate_set.candidates[variant]
         meta = candidate_set.metadata.get(variant)
         candidates_serialized.append(
-            _serialize_candidate_for_proposal(variant.value, portfolio, meta)
+            _serialize_candidate_for_proposal(
+                variant.value, portfolio, meta,
+                instruments_by_ticker=instruments_by_ticker,
+                risk_budget=risk_budget,
+            )
         )
 
     return _persist_and_return(

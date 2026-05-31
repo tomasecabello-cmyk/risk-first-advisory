@@ -8,7 +8,7 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **3072 tests, todos verdes** (unit + integration)
+- **3087 tests, todos verdes** (unit + integration)
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
 - **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
 - **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
@@ -39,6 +39,7 @@ Tras un `pip install -e .` y un `python scripts/bootstrap_local_demo.py`:
 - Levantar el frontend estático (`python -m http.server 5500 -d frontend`) en `http://127.0.0.1:5500`.
 - Abrir el **Case Dashboard** y navegar el CRUD de firms / advisors / clients / cases + cargar `GET /cases/{id}/summary`.
 - Abrir el **Case Workbench** sobre `case_demo_local` (creado por el seed) y recorrer el flujo case-scoped end-to-end desde el navegador, **con un step indicator visual de 11 pasos** que se autocolorea (pending / ready / completed) a medida que avanzás: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation. Los pasos quedan agrupados visualmente en bandas "Profile", "Portfolio inputs", "Portfolio decisions", "Outputs" y "Audit &amp; Compliance".
+- Ver la **composición de cada cartera candidata** (Fase 3.6): DEFENSIVE / BALANCED / GROWTH se muestran como cards con tabla `Instrumento · Tipo · Moneda · Peso · Motivo` + barra visual de peso + pill "requiere override" / "dentro del presupuesto". La variante seleccionada muestra su composición final en el panel de selección. El reporte Markdown incluye tabla de composición + tabla comparativa de variantes. **Limitación**: el universo demo (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos ficticios) NO es un market data provider productivo — para piloto real va a Fase 4 (live market data + manual universe upload).
 - Revisar el **audit trail** (hash chain SHA-256 por case) y verificar su integridad (`/cases/{id}/audit/verify`) desde el panel del Workbench.
 - Revisar los **AI request logs** con PII redactada por el backend.
 - Generar el **report Markdown determinístico** (4 disclaimers fijos + secciones estándar).
@@ -749,7 +750,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~3 minutos, **3072 tests** (todos verdes).
+Suite completa (unit + integration): ~5 minutos, **3087 tests** (todos verdes — incluye 15 tests nuevos de holdings/composición de cartera).
 
 ```powershell
 # Solo tests de API

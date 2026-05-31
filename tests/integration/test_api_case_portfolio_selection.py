@@ -382,6 +382,33 @@ class TestCreateNoOverride:
         assert "weights" in cand
         assert "expected_return_annual" in cand
 
+    def test_selected_candidate_has_holdings(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Phase 3.6: la selección debe incluir el snapshot de holdings
+        de la variante elegida (instrument_id, ticker, name, instrument_type,
+        currency, weight, …). Esto permite al frontend / reporte pintar la
+        composición sin re-cruzar con el proposal."""
+        ctx = _full_setup(client, patch_ai_client)
+        variant = _find_non_override_variant(ctx["proposal"])
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+        )
+        cand = r.json()["selected_candidate"]
+        assert cand["variant"] == variant
+        assert isinstance(cand.get("holdings"), list)
+        assert len(cand["holdings"]) > 0
+        # cada holding tiene los campos mínimos
+        for h in cand["holdings"]:
+            assert h.get("instrument_id")
+            assert h.get("ticker") == h["instrument_id"]
+            assert isinstance(h.get("weight"), (int, float)) and h["weight"] > 0
+        # cuenta + total_weight
+        assert cand.get("holdings_count") == len(cand["holdings"])
+        tw = cand.get("total_weight")
+        assert isinstance(tw, (int, float)) and 0.99 <= tw <= 1.01
+
     def test_override_approval_id_none(
         self, client: TestClient, patch_ai_client
     ) -> None:

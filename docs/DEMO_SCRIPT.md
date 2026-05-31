@@ -64,9 +64,13 @@ Saltar al Step 7 ("Portfolio Proposal") → Step 8 ("Override Approval"). Coment
 
 ### Paso 5 · El output es un reporte revisable (45 s)
 
-Bajar al Step 10 ("Report Generation"). Mostrar el botón **Generate Report**.
+Bajar al Step 10 ("Generación del reporte"). Mostrar el botón **Generar reporte**.
 
-> "El output final es un reporte en Markdown que el asesor revisa antes de compartirlo con el cliente. **No hay un botón de 'enviar al cliente automáticamente'**. Esto no es un robo-advisor que decide por vos — es un copilot que prepara el material para que vos decidas."
+> "El output final es un reporte en Markdown que el asesor revisa antes de compartirlo con el cliente. El reporte ya incluye la **composición exacta** de la cartera seleccionada — instrumento, tipo, moneda, peso y motivo — más una **tabla comparativa** de las tres variantes que evaluó el optimizador. **No hay un botón de 'enviar al cliente automáticamente'**. Esto no es un robo-advisor que decide por vos — es un copilot que prepara el material para que vos decidas."
+
+Aclaración para la audiencia (si pregunta cómo ve la composición sin abrir el JSON):
+
+> "Antes del reporte, fijate la sección 'Propuesta de cartera' del Workbench. Cada variante tiene su propia card con la tabla de holdings: por ejemplo BALANCED tiene 8 instrumentos — ONs hard dollar argentinas y bonos soberanos — con sus pesos en barra. La selección final también la muestra. Todo en español, sin tocar Swagger."
 
 ### Paso 6 · Cada decisión queda auditada (60 s)
 
