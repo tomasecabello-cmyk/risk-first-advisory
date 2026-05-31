@@ -4,11 +4,14 @@ Página HTML estática para probar visualmente el backend sin usar terminal ni c
 
 ## Estado actual
 
-**Fase 3 cerrada como UI local/dev plug-and-play ✅.** Hoy entregado:
+**Fase 3 cerrada como UI local/dev plug-and-play ✅, con rediseño visual showable.** Hoy entregado:
 
-- **Case Dashboard** disponible (CRUD de firms / advisors / clients / cases + carga `GET /cases/{id}/summary`).
-- **Case Workbench end-to-end** disponible (15 paneles: KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override → selection → report + audit trail / verify / AI logs / compliance snapshot).
-- **Frontend split** en `css/base.css` + `js/{common, legacy-demo, case-dashboard, case-workbench}.js` (sin build step, sin frameworks, sin CDN).
+- **Hero + sticky nav + story-strip** que explica en 5 segundos qué hace la IA, qué decide el advisor y qué queda auditado. CTA "Open case_demo_local in Workbench" salta directo al flujo principal.
+- **Case Dashboard** disponible (CRUD de firms / advisors / clients / cases + carga `GET /cases/{id}/summary`), con KPI strip y disclaimer compacto.
+- **Case Workbench end-to-end** disponible (15 paneles agrupados en 5 bandas: Profile · Portfolio inputs · Portfolio decisions · Outputs · Audit & Compliance), con un **step indicator visual de 11 pasos** que se autocolorea según el summary cargado (pending / ready / completed).
+- **Resultados JSON colapsables**: cada panel del Workbench renderiza un summary ejecutivo arriba y mete el JSON crudo dentro de `<details>` (folded por default), para que la pantalla no se llene de payload.
+- **Frontend split** en `css/base.css` + `js/{common, legacy-demo, case-dashboard, case-workbench}.js` (sin build step, sin frameworks, sin CDN, sin librerías externas).
+- **Diseño**: paleta institutional-fintech (navy `#0b1e3f` + cyan `#0ea5e9` + emerald `#059669` + amber `#d97706` para accents), Inter como tipo (con fallback a system fonts), sombras suaves, radios 10–18px, gradientes sutiles. Cards "demoted" para legacy demos (sombra más liviana, headers más chicos) para que el case-scoped flow domine la pantalla.
 - **Setup recomendado:** `python scripts/bootstrap_local_demo.py` antes del primer `uvicorn` + `http.server` (idempotente; aplica migrations + crea `case_demo_local` listo para abrir). Ver "Cómo abrir el frontend" abajo y la sección "Local plug-and-play demo" del `README.md` raíz.
 
 **Pendiente Fase 4 (NO incluido en este cierre):**

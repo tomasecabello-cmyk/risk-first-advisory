@@ -85,8 +85,17 @@ Abrir en el navegador: **`http://127.0.0.1:5500`**
 
 ### En el navegador
 
+Lo primero que ve el visitante: un **hero institutional-fintech** ("AI proposes. The advisor decides. Every step audited.") con un CTA grande **"Open `case_demo_local` in Workbench →"**, una story-strip de 3 tarjetas explicando AI / advisor / audit, y una barra sticky con anchors a Workbench / Dashboard / Audit & Logs / Legacy.
+
+Atajo recomendado para demos a profesores / asesores no técnicos:
+
+1. **Clic en "Open `case_demo_local` in Workbench →"** del hero. Esto pre-completa el `case_id` en Dashboard + Workbench, hace scroll al Workbench y dispara `Load Summary`. El step indicator de 11 pasos (KYC → AI Analysis → Approval → Preferences → Filter → Proposal → Override → Selection → Report → Summary) se autocolorea según lo que ya hizo el case.
+2. Bajar y recorrer las **bandas agrupadas** ("Profile" → "Portfolio inputs" → "Portfolio decisions" → "Outputs" → "Audit & Compliance"). Cada sección tiene un panel con summary ejecutivo arriba y `Raw JSON response` plegado en `<details>` abajo.
+3. Para los paneles 12–15 (audit trail / verify / AI logs / compliance snapshot) cambiar el token a `dev-compliance-token` en el input del Dashboard antes de presionar **"Verify Audit Chain"** o **"Load AI Logs"**.
+
+Camino manual equivalente (sin el CTA del hero):
 - En la card **"Case Dashboard — Phase 2"** escribir `case_demo_local` en "Selected case_id" (sección 7) y clic en **"Load Summary"** para abrir el case que dejó el seed.
-- En la card **"Case Workbench — Phase 2 Workflow"** escribir el mismo `case_demo_local` en la sección 1 y clic en **"Load Summary"** o **"Use selected case from Dashboard"**. Recorrer los pasos 2–10 (KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override → selection → report). Para los paneles 12–14 (audit trail / verify / AI logs / compliance snapshot) cambiar el token a `dev-compliance-token` en el input del Dashboard.
+- En la card **"Case Workbench — Phase 2 Workflow"** escribir el mismo `case_demo_local` en la sección 1 y clic en **"Load Summary"** o **"Use selected case from Dashboard"**. Recorrer los pasos 2–10 (KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override → selection → report).
 
 ### Si OPENAI_API_KEY no está configurada
 

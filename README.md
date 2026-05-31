@@ -32,11 +32,12 @@ Fase 3 quedó cerrada como **demo local plug-and-play operable desde navegador**
 
 Tras un `pip install -e .` y un `python scripts/bootstrap_local_demo.py`:
 
+- Ver una UI con **estética institutional-fintech** (hero claro, nav sticky con anchors a Workbench / Dashboard / Audit / Legacy, story-strip "AI propone · advisor decide · audit chain", KPI strip, paleta navy + cyan + emerald + amber, sin frameworks ni CDN — sigue siendo HTML/CSS/JS estáticos sin build step).
 - Correr `bootstrap_local_demo` (idempotente; aplica migrations + crea entidades demo + valida frontend + detecta config + imprime los comandos siguientes).
 - Levantar el backend FastAPI local (`python -m uvicorn risk_first_advisory.api_layer.main:app --reload`) en `http://127.0.0.1:8000` con Swagger UI en `/docs`.
 - Levantar el frontend estático (`python -m http.server 5500 -d frontend`) en `http://127.0.0.1:5500`.
 - Abrir el **Case Dashboard** y navegar el CRUD de firms / advisors / clients / cases + cargar `GET /cases/{id}/summary`.
-- Abrir el **Case Workbench** sobre `case_demo_local` (creado por el seed) y recorrer el flujo case-scoped end-to-end desde el navegador: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation.
+- Abrir el **Case Workbench** sobre `case_demo_local` (creado por el seed) y recorrer el flujo case-scoped end-to-end desde el navegador, **con un step indicator visual de 11 pasos** que se autocolorea (pending / ready / completed) a medida que avanzás: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation. Los pasos quedan agrupados visualmente en bandas "Profile", "Portfolio inputs", "Portfolio decisions", "Outputs" y "Audit &amp; Compliance".
 - Revisar el **audit trail** (hash chain SHA-256 por case) y verificar su integridad (`/cases/{id}/audit/verify`) desde el panel del Workbench.
 - Revisar los **AI request logs** con PII redactada por el backend.
 - Generar el **report Markdown determinístico** (4 disclaimers fijos + secciones estándar).

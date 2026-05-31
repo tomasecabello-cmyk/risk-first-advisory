@@ -3,736 +3,167 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Risk-First Advisory — Dev UI</title>
+  <title>Risk-First Advisory — Wealth Advisory Demo</title>
+  <meta name="description" content="AI proposes. The advisor decides. Every step audited. A local plug-and-play wealth-advisory backend demo." />
   <link rel="stylesheet" href="css/base.css">
 </head>
 <body>
 
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- HERO                                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <div class="hero-eyebrow">Risk-First Advisory · Local plug-and-play demo</div>
+      <h1 class="hero-title">
+        AI proposes. <span class="hero-em">The advisor decides.</span><br>
+        Every step <span class="hero-em-2">audited.</span>
+      </h1>
+      <p class="hero-sub">
+        A wealth-advisory backend that turns structured KYC and free-text preferences
+        into vetted portfolio candidates — with a hash-chain audit trail and PII-redacted
+        AI request logs built in. End-to-end from a single local machine.
+      </p>
+      <div class="hero-cta">
+        <button class="btn-primary btn-lg" onclick="heroOpenDemoCase()">
+          Open <code style="background:rgba(255,255,255,.14);padding:1px 6px;border-radius:4px;font-size:13px;">case_demo_local</code> in Workbench →
+        </button>
+        <a href="#case-workbench" class="btn-ghost">Skip to the workflow</a>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-num">15</div>
+        <div class="hero-stat-label">Workflow steps</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num is-mono">SHA-256</div>
+        <div class="hero-stat-label">Audit chain · per case</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num">PII-redacted</div>
+        <div class="hero-stat-label">AI request logs</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num">0</div>
+        <div class="hero-stat-label">Frameworks · no build</div>
+      </div>
+    </div>
+  </div>
+  <div class="hero-badges">
+    <span class="badge badge-ai">AI-assisted KYC</span>
+    <span class="badge badge-advisor">Advisor-approved decisions</span>
+    <span class="badge badge-audit">Audit-ready by design</span>
+    <span class="badge badge-local">Local demo · not production</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- STICKY NAV                                                              -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <span class="nav-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</span>
+    <a href="#case-workbench" class="nav-item nav-item-primary">Case Workbench</a>
+    <a href="#dash-anchor" class="nav-item">Dashboard</a>
+    <a href="#audit-anchor" class="nav-item">Audit &amp; AI Logs</a>
+    <a href="#legacy" class="nav-item nav-item-muted">Legacy demos</a>
+    <a href="#utilities" class="nav-item nav-item-muted">Utilities</a>
+    <span class="nav-spacer"></span>
+    <span class="nav-tag">Phase 3 · ready</span>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- HEADER (legacy fallback — hidden by CSS, kept for a11y/search)          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <header>
   <h1>Risk-First Advisory</h1>
-  <span class="badge">Dev UI — M1/M2-prep</span>
+  <span class="badge">Local plug-and-play demo</span>
 </header>
 
-<div class="page">
+<main class="page">
 
-  <!-- ── 1. HEALTH ─────────────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>API Health</h2>
-    </div>
-    <div class="card-body">
-      <p style="color:#718096;font-size:13px;margin-bottom:14px;">
-        Verifica que el backend FastAPI esté corriendo en
-        <code style="background:#eef2f9;padding:1px 5px;border-radius:3px;">http://127.0.0.1:8000</code>.
-      </p>
-      <button class="btn-primary" onclick="checkHealth()">
-        Check API
-      </button>
-      <div id="health-result" class="hidden"></div>
-    </div>
-  </div>
-
-  <!-- ── 2. RUN WORKFLOW ────────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>Scripted Workflow Demo — POST /workflow/run</h2>
-      <span class="pill pill-orange" style="font-size:10px;">scripted · no AI · no advisor</span>
-    </div>
-    <div class="card-body">
-
-      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;">
-        <strong>This endpoint is a scripted deterministic demo. It does NOT use OpenAI and does NOT involve a real advisor.</strong>
-        <ul>
-          <li>Uses <code>MockAIClient</code> — the preliminary profile is preprogrammed (always <code>moderado</code>, no contradictions, no follow-up).</li>
-          <li>Uses <code>ScriptedAdvisorInterface</code> — advisor approval is auto-approved, no human in the loop.</li>
-          <li>Does <strong>not</strong> call OpenAI. <code>OPENAI_API_KEY</code> is not required.</li>
-          <li>Useful for validating the deterministic pipeline: governance → suitability → ESG → data quality → optimizer, plus SQLite persistence, audit trail and Markdown report.</li>
-          <li><strong>Do not use as a productive advisory flow.</strong> Real AI lives in <code>/ai/profile-demo</code>, <code>/ai/profile-follow-up</code>, <code>/ai/filter-universe-demo</code> and <code>/ai/filtered-portfolio-demo</code>.</li>
-        </ul>
+  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <!-- STORY STRIP — what the AI / advisor / audit each do                   -->
+  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <section class="story-strip">
+    <div class="story-card">
+      <div class="story-eyebrow">What the AI does</div>
+      <div class="story-title">Reads KYC, flags contradictions</div>
+      <div class="story-body">
+        Proposes a preliminary risk profile and surfaces tensions between scores,
+        horizon and free-text answers. The AI never decides — it never approves
+        a profile, never picks a portfolio, never signs anything.
       </div>
+    </div>
+    <div class="story-card is-advisor">
+      <div class="story-eyebrow">What the advisor does</div>
+      <div class="story-title">Approves, modifies or rejects</div>
+      <div class="story-body">
+        Reviews the AI proposal, lands the approved profile, signs off any
+        risk-budget overrides and selects the final portfolio variant the
+        client will see. The advisor is always the binding actor.
+      </div>
+    </div>
+    <div class="story-card is-audit">
+      <div class="story-eyebrow">What stays auditable</div>
+      <div class="story-title">Hash-chained, PII-redacted</div>
+      <div class="story-body">
+        Every meaningful step is appended to a SHA-256 chain per case. AI calls
+        are stored with PII redacted by the backend. Compliance gets a single
+        snapshot of <code>summary + audit + AI logs</code> in one click.
+      </div>
+    </div>
+  </section>
 
-      <form id="workflow-form" onsubmit="runWorkflow(event)">
-
-        <!-- identifiers -->
-        <div class="section-label" style="margin-bottom:12px;">Identifiers</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>client_id</label>
-            <input type="text" id="f-client_id" value="CLI-123" required />
-          </div>
-          <div class="field">
-            <label>advisor_id</label>
-            <input type="text" id="f-advisor_id" value="ADV-001" required />
-          </div>
-        </div>
-
-        <!-- kyc scores -->
-        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>risk_tolerance_score <span class="hint">1–10</span></label>
-            <input type="number" id="f-risk_tolerance_score" value="6" min="1" max="10" step="1" required />
-          </div>
-          <div class="field">
-            <label>risk_capacity_score <span class="hint">1–10</span></label>
-            <input type="number" id="f-risk_capacity_score" value="7" min="1" max="10" step="1" required />
-          </div>
-          <div class="field">
-            <label>liquidity_need_score <span class="hint">1–10</span></label>
-            <input type="number" id="f-liquidity_need_score" value="3" min="1" max="10" step="1" required />
-          </div>
-          <div class="field">
-            <label>investment_horizon_years</label>
-            <input type="number" id="f-investment_horizon_years" value="10" min="1" max="50" step="1" required />
-          </div>
-          <div class="field">
-            <label>max_acceptable_drawdown_pct</label>
-            <input type="number" id="f-max_acceptable_drawdown_pct" value="25" min="0" max="100" step="0.5" required />
-          </div>
-          <div class="field">
-            <label>declared_return_expectation_pct <span class="hint">optional</span></label>
-            <input type="number" id="f-declared_return_expectation_pct" value="" min="0" max="100" step="0.1" placeholder="leave blank" />
-          </div>
-        </div>
-
-        <!-- kyc qualitative -->
-        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>investment_experience</label>
-            <select id="f-investment_experience">
-              <option value="ninguna">ninguna</option>
-              <option value="básica">básica</option>
-              <option value="moderada" selected>moderada</option>
-              <option value="avanzada">avanzada</option>
-              <option value="experto">experto</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>income_stability</label>
-            <select id="f-income_stability">
-              <option value="stable" selected>stable</option>
-              <option value="variable">variable</option>
-              <option value="unstable">unstable</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- kyc financial -->
-        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>net_worth</label>
-            <input type="number" id="f-net_worth" value="500000" min="0" step="1000" required />
-          </div>
-          <div class="field">
-            <label>liquid_net_worth</label>
-            <input type="number" id="f-liquid_net_worth" value="200000" min="0" step="1000" required />
-          </div>
-        </div>
-
-        <!-- kyc open fields -->
-        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:#718096;">(optional)</span></div>
-        <div class="form-grid">
-          <div class="field">
-            <label>open_investment_goal</label>
-            <textarea id="f-open_investment_goal" placeholder="e.g. Save for retirement in 10 years"></textarea>
-          </div>
-          <div class="field">
-            <label>open_risk_reaction</label>
-            <textarea id="f-open_risk_reaction" placeholder="e.g. I'd hold through drawdowns up to 20%"></textarea>
-          </div>
-          <div class="field">
-            <label>open_past_experience</label>
-            <textarea id="f-open_past_experience" placeholder="e.g. Held ETFs for 5 years"></textarea>
-          </div>
-          <div class="field">
-            <label>open_concerns</label>
-            <textarea id="f-open_concerns" placeholder="e.g. Worried about inflation eroding savings"></textarea>
-          </div>
-        </div>
-
-        <!-- financial goal -->
-        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">Financial Goal</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>initial_amount</label>
-            <input type="number" id="f-initial_amount" value="100000" min="0" step="1000" required />
-          </div>
-          <div class="field">
-            <label>target_amount</label>
-            <input type="number" id="f-target_amount" value="200000" min="0" step="1000" required />
-          </div>
-          <div class="field">
-            <label>horizon_years</label>
-            <input type="number" id="f-goal_horizon_years" value="10" min="1" max="50" step="1" required />
-          </div>
-          <div class="field">
-            <label>annual_contribution</label>
-            <input type="number" id="f-annual_contribution" value="5000" min="0" step="500" required />
-          </div>
-        </div>
-
-        <div class="actions">
-          <button type="submit" class="btn-primary" id="btn-run">
-            Run Workflow
-          </button>
-          <button type="button" class="btn-secondary" onclick="clearWorkflowResult()">
-            Clear
-          </button>
-        </div>
-
-      </form>
-
-      <div id="workflow-result" class="hidden"></div>
-
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- 01 · CASE DASHBOARD                                                    -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div class="section-band" id="dash-anchor">
+    <span class="num">01</span>
+    <div>
+      <h2>Case Dashboard</h2>
+      <div class="sub">
+        The control room for firms, advisors, clients and cases. Start here with
+        the <strong>"Create demo firm + advisor + client + case"</strong> button —
+        it seeds <code class="inline-code">case_demo_local</code> for the Workbench below.
+      </div>
     </div>
   </div>
 
-  <!-- ── 3. LIVE PORTFOLIO DEMO ───────────────────────────── -->
-  <div class="card" id="card-live-portfolio">
-    <div class="card-header">
-      <h2>Live Portfolio Demo — POST /live/portfolio-demo</h2>
-      <span class="pill pill-blue" style="font-size:10px;">yfinance · free data</span>
+  <!-- KPI strip — quick orientation of what the Dashboard manages -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Firms</div>
+      <div class="kpi-value">Multi-tenant</div>
+      <div class="kpi-sub">CRUD via <code class="inline-code">/firms</code></div>
     </div>
-    <div class="card-body">
-
-      <p style="color:#718096;font-size:13px;margin-bottom:16px;">
-        Descarga datos históricos de ETFs reales desde <strong>yfinance</strong>, los pasa por
-        DataQualityGate + ReturnEstimator + CovarianceEngine y genera hasta 3 portfolios candidatos
-        (DEFENSIVE / BALANCED / GROWTH) para el perfil seleccionado.
-        <br><span style="color:#92400e;">⏱ Puede tardar 5–15 s. Requiere internet. No usa IA ni KYC.</span>
-      </p>
-
-      <div class="form-grid cols-3">
-        <div class="field">
-          <label>profile</label>
-          <select id="lp-profile">
-            <option value="conservador">conservador</option>
-            <option value="moderado-defensivo">moderado-defensivo</option>
-            <option value="moderado" selected>moderado</option>
-            <option value="moderado-agresivo">moderado-agresivo</option>
-            <option value="agresivo">agresivo</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>period <span class="hint">lookback histórico</span></label>
-          <select id="lp-period">
-            <option value="1y">1y</option>
-            <option value="2y">2y</option>
-            <option value="3y" selected>3y</option>
-            <option value="5y">5y</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>interval <span class="hint">frecuencia</span></label>
-          <select id="lp-interval">
-            <option value="1d" selected>1d (daily)</option>
-            <option value="1wk">1wk (weekly)</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="actions">
-        <button class="btn-primary" id="btn-live" onclick="runLivePortfolio()">
-          Run Live Portfolio
-        </button>
-        <button class="btn-secondary" onclick="clearLivePortfolioResult()">Clear</button>
-      </div>
-
-      <div id="live-result" class="hidden"></div>
-
+    <div class="kpi-card">
+      <div class="kpi-label">Advisors</div>
+      <div class="kpi-value">Per firm</div>
+      <div class="kpi-sub">RBAC: admin · advisor · compliance · viewer</div>
+    </div>
+    <div class="kpi-card is-accent">
+      <div class="kpi-label">Clients</div>
+      <div class="kpi-value">Per advisor</div>
+      <div class="kpi-sub">Linked to firm + lead advisor</div>
+    </div>
+    <div class="kpi-card is-success">
+      <div class="kpi-label">Advisory cases</div>
+      <div class="kpi-value">FSM-driven</div>
+      <div class="kpi-sub">DRAFT → IN_PROGRESS → PORTFOLIO_SELECTED → CLOSED</div>
     </div>
   </div>
 
-  <!-- ── 4. AI PROFILE DEMO ────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>AI Profile Demo — POST /ai/profile-demo</h2>
-      <span class="pill pill-blue" style="font-size:10px;">OpenAI · no persist</span>
-    </div>
-    <div class="card-body">
-
-      <div class="ai-disclaimer">
-        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
-        Ver comando de inicio más abajo.
-        <ul>
-          <li>La IA <strong>no aprueba</strong> el perfil final — solo el asesor puede hacerlo.</li>
-          <li>La IA <strong>no recomienda</strong> productos, tickers ni ETFs.</li>
-          <li>La IA <strong>no genera</strong> portfolios ni allocations.</li>
-          <li>La IA <strong>no usa</strong> <code>declared_return_expectation_pct</code> para construir el perfil.</li>
-          <li>Solo analiza coherencia del KYC y propone follow-up questions para el asesor.</li>
-          <li>No persiste resultados. Sin SQLite, sin reporte.</li>
-        </ul>
-        <div style="margin-top:8px;padding:7px 10px;background:#dbeafe;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#1e40af;">
-          $env:OPENAI_API_KEY="your_key_here"<br>
-          uvicorn risk_first_advisory.api_layer.main:app --reload
-        </div>
-      </div>
-
-      <!-- identifiers -->
-      <div class="section-label" style="margin-bottom:12px;">Identifier</div>
-      <div class="form-grid cols-3">
-        <div class="field">
-          <label>client_id</label>
-          <input type="text" id="ai-client_id" value="CLI-AI-001" required />
-        </div>
-      </div>
-
-      <!-- scores -->
-      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
-      <div class="form-grid cols-3">
-        <div class="field">
-          <label>risk_tolerance_score <span class="hint">1–10</span></label>
-          <input type="number" id="ai-risk_tolerance_score" value="4" min="1" max="10" step="1" required />
-        </div>
-        <div class="field">
-          <label>risk_capacity_score <span class="hint">1–10</span></label>
-          <input type="number" id="ai-risk_capacity_score" value="8" min="1" max="10" step="1" required />
-        </div>
-        <div class="field">
-          <label>liquidity_need_score <span class="hint">1–10</span></label>
-          <input type="number" id="ai-liquidity_need_score" value="7" min="1" max="10" step="1" required />
-        </div>
-        <div class="field">
-          <label>investment_horizon_years</label>
-          <input type="number" id="ai-investment_horizon_years" value="15" min="1" max="50" step="1" required />
-        </div>
-        <div class="field">
-          <label>max_acceptable_drawdown_pct</label>
-          <input type="number" id="ai-max_acceptable_drawdown_pct" value="10" min="0" max="100" step="0.5" required />
-        </div>
-        <div class="field">
-          <label>declared_return_expectation_pct <span class="hint">optional</span></label>
-          <input type="number" id="ai-declared_return_expectation_pct" value="15" min="0" max="100" step="0.1" placeholder="leave blank" />
-        </div>
-      </div>
-
-      <!-- qualitative -->
-      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
-      <div class="form-grid cols-3">
-        <div class="field">
-          <label>investment_experience</label>
-          <select id="ai-investment_experience">
-            <option value="ninguna">ninguna</option>
-            <option value="basica">basica</option>
-            <option value="moderada" selected>moderada</option>
-            <option value="avanzada">avanzada</option>
-            <option value="experto">experto</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>income_stability</label>
-          <select id="ai-income_stability">
-            <option value="stable" selected>stable</option>
-            <option value="variable">variable</option>
-            <option value="unstable">unstable</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- financials -->
-      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
-      <div class="form-grid cols-3">
-        <div class="field">
-          <label>net_worth</label>
-          <input type="number" id="ai-net_worth" value="500000" min="0" step="1000" required />
-        </div>
-        <div class="field">
-          <label>liquid_net_worth</label>
-          <input type="number" id="ai-liquid_net_worth" value="150000" min="0" step="1000" required />
-        </div>
-      </div>
-
-      <!-- open fields -->
-      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:#718096;">(optional)</span></div>
-      <div class="form-grid">
-        <div class="field">
-          <label>open_investment_goal</label>
-          <textarea id="ai-open_investment_goal">Quiero crecer mi capital para jubilacion, pero sin asumir perdidas grandes.</textarea>
-        </div>
-        <div class="field">
-          <label>open_risk_reaction</label>
-          <textarea id="ai-open_risk_reaction">Me preocuparia mucho una caida mayor al 10 por ciento.</textarea>
-        </div>
-        <div class="field">
-          <label>open_past_experience</label>
-          <textarea id="ai-open_past_experience">Vendi durante una caida fuerte de mercado.</textarea>
-        </div>
-        <div class="field">
-          <label>open_concerns</label>
-          <textarea id="ai-open_concerns">Me preocupa la inflacion y perder capital.</textarea>
-        </div>
-      </div>
-
-      <div class="actions">
-        <button class="btn-primary" id="btn-ai" onclick="runAIProfile()">
-          Analyze KYC with AI
-        </button>
-        <button class="btn-secondary" onclick="clearAIProfileResult()">Clear</button>
-      </div>
-
-      <div id="ai-result" class="hidden"></div>
-      <div id="ai-followup-result" class="hidden"></div>
-
-    </div>
-  </div>
-
-  <!-- ── 5. AI UNIVERSE FILTER DEMO ──────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>AI Universe Filter Demo — POST /ai/filter-universe-demo</h2>
-      <span class="pill pill-blue" style="font-size:10px;">OpenAI + universe · no persist</span>
-    </div>
-    <div class="card-body">
-
-      <div class="ai-disclaimer">
-        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
-        <ul>
-          <li>Paso 1 — la IA (OpenAI) extrae preferencias estructuradas desde texto libre.</li>
-          <li>Paso 2 — <code>PreferenceFilterEngine</code> aplica esas preferencias al CSV del universo de instrumentos.</li>
-          <li>Devuelve: instrumentos elegibles, excluidos con razones, filtros aplicados y warnings.</li>
-          <li><strong>No genera portfolios.</strong> No trae datos de mercado. No persiste resultados.</li>
-          <li><strong>No aprueba</strong> ningún perfil — solo el asesor puede hacerlo.</li>
-          <li>Universo: <code>tests/fixtures/universe/sample_instrument_universe.csv</code> (20 instrumentos).</li>
-        </ul>
-        <div style="margin-top:8px;padding:7px 10px;background:#dbeafe;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#1e40af;">
-          $env:OPENAI_API_KEY="your_key_here"<br>
-          uvicorn risk_first_advisory.api_layer.main:app --reload
-        </div>
-      </div>
-
-      <div class="form-grid cols-3" style="margin-bottom:14px;">
-        <div class="field">
-          <label>client_id</label>
-          <input type="text" id="aif-client_id" value="CLI-PREF-001" />
-        </div>
-      </div>
-
-      <div class="field full-span" style="margin-bottom:18px;">
-        <label>natural_language_preferences</label>
-        <textarea id="aif-preferences" rows="3"
-          style="font-size:13px;line-height:1.6;"
-        >Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia.</textarea>
-      </div>
-
-      <div class="actions">
-        <button class="btn-primary" id="btn-aif" onclick="runAIUniverseFilter()">
-          Filter Universe with AI
-        </button>
-        <button class="btn-secondary" onclick="clearAIUniverseFilterResult()">Clear</button>
-      </div>
-
-      <div id="aif-result" class="hidden"></div>
-
-    </div>
-  </div>
-
-  <!-- ── 6. AI FILTERED PORTFOLIO DEMO ─────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>AI Filtered Portfolio Demo — POST /ai/filtered-portfolio-demo</h2>
-      <span class="pill pill-blue" style="font-size:10px;">OpenAI + universe + portfolio · no persist</span>
-    </div>
-    <div class="card-body">
-
-      <div class="ai-disclaimer">
-        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
-        <ul>
-          <li>Paso 1 — la IA (OpenAI) extrae preferencias estructuradas desde texto libre del cliente.</li>
-          <li>Paso 2 — <code>PreferenceFilterEngine</code> filtra el universo CSV con esas preferencias.</li>
-          <li>Paso 3 — <code>InstrumentMarketDataAdapter</code> convierte los elegibles a snapshots de mercado.</li>
-          <li>Paso 4 — <code>ReturnEstimator</code> + <code>CovarianceEngine</code> + <code>PortfolioGenerationCoordinator</code> generan hasta 3 variantes (<strong>DEFENSIVE / BALANCED / GROWTH</strong>).</li>
-          <li>Si el universo filtrado es insuficiente o no es factible, devuelve el motivo del bloqueo sin generar portfolios.</li>
-          <li><strong>No persiste resultados.</strong> No aprueba ningún perfil. Solo para demo.</li>
-          <li>Universo: <code>tests/fixtures/universe/sample_instrument_universe.csv</code> (20 instrumentos).</li>
-        </ul>
-        <div style="margin-top:8px;padding:7px 10px;background:#dbeafe;border-radius:4px;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#1e40af;">
-          $env:OPENAI_API_KEY="your_key_here"<br>
-          uvicorn risk_first_advisory.api_layer.main:app --reload
-        </div>
-      </div>
-
-      <div class="form-grid cols-3" style="margin-bottom:14px;">
-        <div class="field">
-          <label>client_id</label>
-          <input type="text" id="aifp-client_id" value="CLI-PREF-PORT-001" />
-        </div>
-        <div class="field">
-          <label>profile</label>
-          <select id="aifp-profile">
-            <option value="conservador">conservador</option>
-            <option value="moderado-defensivo">moderado-defensivo</option>
-            <option value="moderado" selected>moderado</option>
-            <option value="moderado-agresivo">moderado-agresivo</option>
-            <option value="agresivo">agresivo</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="field full-span" style="margin-bottom:18px;">
-        <label>natural_language_preferences</label>
-        <textarea id="aifp-preferences" rows="3"
-          style="font-size:13px;line-height:1.6;"
-        >Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia.</textarea>
-      </div>
-
-      <div class="actions">
-        <button class="btn-primary" id="btn-aifp" onclick="runAIFilteredPortfolio()">
-          Generate AI Filtered Portfolio
-        </button>
-        <button class="btn-secondary" onclick="clearAIFilteredPortfolioResult()">Clear</button>
-      </div>
-
-      <div id="aifp-result" class="hidden"></div>
-
-    </div>
-  </div>
-
-  <!-- ── 7. ADVISOR DECISIONS DEMO ─────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>Advisor Decisions Demo — Phase 1</h2>
-      <span class="pill pill-blue" style="font-size:10px;">advisor actions · dev auth</span>
-    </div>
-    <div class="card-body">
-
-      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;">
-        <strong>Development-only advisor authentication.</strong>
-        <ul>
-          <li>Uses hard-coded demo Bearer tokens (<code>dev-advisor-token</code>, <code>dev-compliance-token</code>). NOT a productive identity provider.</li>
-          <li>Records formal advisor acts: profile approval, override approval, final portfolio selection.</li>
-          <li>The backend does NOT yet validate that <code>related_record_id</code> / <code>override_approval_record_id</code> point to real, consistent records.</li>
-          <li>Does NOT replace a digital signature, role-based access control, or any compliance sign-off.</li>
-          <li>Endpoints: <code>GET /auth/me</code>, <code>POST /advisor/profile-approval</code>, <code>POST /advisor/override-approval</code>, <code>POST /advisor/portfolio-selection</code>.</li>
-        </ul>
-      </div>
-
-      <!-- ── Section 1: Advisor token + auth check ─────────── -->
-      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
-        <div class="ai-section-title" style="margin-bottom:10px;">1. Advisor token</div>
-        <div class="form-grid cols-3">
-          <div class="field full-span">
-            <label>advisor_token <span class="hint">sent as <code>Authorization: Bearer &lt;token&gt;</code> to all advisor endpoints below</span></label>
-            <input type="text" id="adv-token" value="dev-advisor-token" autocomplete="off" spellcheck="false" />
-          </div>
-        </div>
-        <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="btn-adv-auth" onclick="checkAdvisorAuth()">Check Advisor Auth</button>
-          <button class="btn-secondary" onclick="clearAdvisorAuthResult()">Clear</button>
-        </div>
-        <div id="adv-auth-result" style="margin-top:12px;"></div>
-      </div>
-
-      <!-- ── Section 2: Profile Approval ───────────────────── -->
-      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
-        <div class="ai-section-title" style="margin-bottom:10px;">2. Profile approval — POST /advisor/profile-approval</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>client_id</label>
-            <input type="text" id="adv-prof-client_id" value="CLI-PREF-PORT-001" />
-          </div>
-          <div class="field">
-            <label>proposed_profile</label>
-            <select id="adv-prof-proposed">
-              <option value="conservador">conservador</option>
-              <option value="moderado-defensivo">moderado-defensivo</option>
-              <option value="moderado" selected>moderado</option>
-              <option value="moderado-agresivo">moderado-agresivo</option>
-              <option value="agresivo">agresivo</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>decision</label>
-            <select id="adv-prof-decision">
-              <option value="approve" selected>approve</option>
-              <option value="modify">modify</option>
-              <option value="reject">reject</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>approved_profile <span class="hint">required for <code>modify</code>; must be <code>null</code> for <code>reject</code></span></label>
-            <select id="adv-prof-approved">
-              <option value="">(none / inherit from proposed for approve)</option>
-              <option value="conservador">conservador</option>
-              <option value="moderado-defensivo">moderado-defensivo</option>
-              <option value="moderado">moderado</option>
-              <option value="moderado-agresivo">moderado-agresivo</option>
-              <option value="agresivo">agresivo</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>source</label>
-            <input type="text" id="adv-prof-source" value="manual" />
-          </div>
-          <div class="field">
-            <label>related_record_id <span class="hint">optional</span></label>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="adv-prof-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
-              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
-                onclick="fillLastAIFPRecordId('adv-prof-related', 'adv-prof-related-msg')">
-                Use last AIFP
-              </button>
-            </div>
-            <span id="adv-prof-related-msg" style="font-size:11px;color:#718096;"></span>
-          </div>
-        </div>
-        <div class="field full-span" style="margin-top:12px;">
-          <label>rationale</label>
-          <textarea id="adv-prof-rationale" rows="2" style="font-size:13px;line-height:1.6;"
-          >Advisor reviewed the AI profile proposal and confirms suitability for this client.</textarea>
-        </div>
-        <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="btn-adv-prof" onclick="submitProfileApproval()">Submit Profile Approval</button>
-          <button class="btn-secondary" onclick="clearProfileApprovalResult()">Clear</button>
-        </div>
-        <div id="adv-prof-result" style="margin-top:12px;"></div>
-      </div>
-
-      <!-- ── Section 3: Override Approval ──────────────────── -->
-      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
-        <div class="ai-section-title" style="margin-bottom:10px;">3. Override approval — POST /advisor/override-approval</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>client_id</label>
-            <input type="text" id="adv-ovr-client_id" value="CLI-PREF-PORT-001" />
-          </div>
-          <div class="field">
-            <label>candidate_variant</label>
-            <select id="adv-ovr-variant">
-              <option value="DEFENSIVE">DEFENSIVE</option>
-              <option value="BALANCED">BALANCED</option>
-              <option value="GROWTH" selected>GROWTH</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>decision</label>
-            <select id="adv-ovr-decision">
-              <option value="approve" selected>approve</option>
-              <option value="reject">reject</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>source</label>
-            <input type="text" id="adv-ovr-source" value="manual" />
-          </div>
-          <div class="field full-span">
-            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="adv-ovr-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
-              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
-                onclick="fillLastAIFPRecordId('adv-ovr-related', 'adv-ovr-related-msg')">
-                Use last AIFP
-              </button>
-            </div>
-            <span id="adv-ovr-related-msg" style="font-size:11px;color:#718096;"></span>
-          </div>
-          <div class="field">
-            <label>reason_codes <span class="hint">one per line</span></label>
-            <textarea id="adv-ovr-reasons" rows="2" style="font-size:12px;font-family:'Menlo','Consolas',monospace;"
-            >PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET</textarea>
-          </div>
-          <div class="field">
-            <label>exceeded_constraints <span class="hint">one per line</span></label>
-            <textarea id="adv-ovr-exceeded" rows="2" style="font-size:12px;font-family:'Menlo','Consolas',monospace;"
-            >max_volatility</textarea>
-          </div>
-        </div>
-        <div class="field full-span" style="margin-top:12px;">
-          <label>rationale</label>
-          <textarea id="adv-ovr-rationale" rows="2" style="font-size:13px;line-height:1.6;"
-          >Advisor reviewed the GROWTH variant and accepts the risk budget override for discussion with the client.</textarea>
-        </div>
-        <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="btn-adv-ovr" onclick="submitOverrideApproval()">Submit Override Approval</button>
-          <button class="btn-secondary" onclick="clearOverrideApprovalResult()">Clear</button>
-        </div>
-        <div id="adv-ovr-result" style="margin-top:12px;"></div>
-      </div>
-
-      <!-- ── Section 4: Portfolio Selection ────────────────── -->
-      <div style="padding:14px 0;">
-        <div class="ai-section-title" style="margin-bottom:10px;">4. Portfolio selection — POST /advisor/portfolio-selection</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>client_id</label>
-            <input type="text" id="adv-sel-client_id" value="CLI-PREF-PORT-001" />
-          </div>
-          <div class="field">
-            <label>selected_variant</label>
-            <select id="adv-sel-variant">
-              <option value="DEFENSIVE">DEFENSIVE</option>
-              <option value="BALANCED" selected>BALANCED</option>
-              <option value="GROWTH">GROWTH</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>source</label>
-            <input type="text" id="adv-sel-source" value="manual" />
-          </div>
-          <div class="field full-span">
-            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="adv-sel-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
-              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
-                onclick="fillLastAIFPRecordId('adv-sel-related', 'adv-sel-related-msg')">
-                Use last AIFP
-              </button>
-            </div>
-            <span id="adv-sel-related-msg" style="font-size:11px;color:#718096;"></span>
-          </div>
-          <div class="field full-span">
-            <label>override_approval_record_id <span class="hint">optional — recommended when selecting <code>GROWTH</code></span></label>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="adv-sel-override" placeholder="advisor_override_approval_NNNNNN" style="flex:1;" />
-              <button class="btn-secondary" type="button" style="white-space:nowrap;padding:5px 10px;font-size:11px;"
-                onclick="fillLastOverrideRecordId('adv-sel-override', 'adv-sel-override-msg')">
-                Use last override
-              </button>
-            </div>
-            <span id="adv-sel-override-msg" style="font-size:11px;color:#718096;"></span>
-          </div>
-        </div>
-        <div class="field full-span" style="margin-top:12px;">
-          <label>rationale</label>
-          <textarea id="adv-sel-rationale" rows="2" style="font-size:13px;line-height:1.6;"
-          >Advisor selected BALANCED as the final client-facing portfolio proposal.</textarea>
-        </div>
-        <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="btn-adv-sel" onclick="submitPortfolioSelection()">Submit Portfolio Selection</button>
-          <button class="btn-secondary" onclick="clearPortfolioSelectionResult()">Clear</button>
-        </div>
-        <div id="adv-sel-result" style="margin-top:12px;"></div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ── 8. PERSISTED WORKFLOWS ────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2>Persisted Workflows — GET /workflow</h2>
-    </div>
-    <div class="card-body">
-      <div class="filter-row">
-        <div class="field">
-          <label>Filter by client_id <span class="hint">optional</span></label>
-          <input type="text" id="filter-client_id" placeholder="e.g. CLI-123" />
-        </div>
-        <button class="btn-primary" onclick="loadWorkflows()">Load Workflows</button>
-        <button class="btn-secondary" onclick="clearWorkflowsTable()">Clear</button>
-      </div>
-      <div id="workflows-result"></div>
-    </div>
-  </div>
-
-  <!-- ── 9. CASE DASHBOARD — PHASE 2 ───────────────────────── -->
+  <!-- PRESERVED VERBATIM: Case Dashboard card (was section 9) -->
   <!--
     Entrada inicial al workflow case-scoped de Fase 2: CRUD de entidades base
     (firms / advisors / clients / cases) + summary. Las acciones case-scoped
     del workflow (KYC, AI analysis, profile approval, preferences, universe
     filter, portfolio proposal, override, selection, reports, audit, AI logs)
-    viven en el Case Workbench (sección 10).
+    viven en el Case Workbench (sección 02 abajo).
 
     Alternativas sin UI (Phase 2 backend end-to-end, OpenAI mockeado):
       python scripts/run_case_workflow_smoke_check.py
@@ -741,18 +172,18 @@
   <div class="card" id="card-case-dashboard">
     <div class="card-header">
       <h2>Case Dashboard — Phase 2</h2>
-      <span class="pill pill-blue" style="font-size:10px;">case-scoped · dev UI</span>
+      <div class="pill-cluster">
+        <span class="pill pill-blue">case-scoped</span>
+        <span class="pill pill-grey">dev UI</span>
+      </div>
     </div>
     <div class="card-body">
 
-      <div class="ai-disclaimer" style="background:#eff6ff;border-color:#93c5fd;color:#1e40af;">
-        <strong>Phase 2 backend workflow — local/dev UI.</strong>
-        <ul>
-          <li><strong>NOT production-ready.</strong> Tokens son strings opacos en YAML; sin JWT, sin IdP, sin firm-level access control.</li>
-          <li>Esta vista expone el <strong>CRUD de entidades base</strong> (firms / advisors / clients / cases) + carga summary. El <strong>Case Workbench</strong> end-to-end (15 paneles del flujo case-scoped) está disponible más abajo, en la sección 10.</li>
-          <li>Las acciones del workflow case-scoped (KYC, AI analysis, approval, preferences, universe filter, proposal, override, selection, report, audit, AI logs) están en el <strong>Case Workbench</strong>. Alternativas sin UI: <code>python scripts/run_case_workflow_smoke_check.py</code> (end-to-end con OpenAI mockeado) o Swagger UI <code>/docs</code>.</li>
-          <li>RBAC: POSTs de firms requieren <code>admin</code>; advisors/clients/cases requieren <code>admin</code> o <code>advisor</code> según endpoint. GETs son lectura abierta a cualquier rol válido.</li>
-        </ul>
+      <div class="ai-disclaimer">
+        <strong>What this card does</strong> · CRUD of base entities (firms / advisors / clients / cases) + load case summary.
+        The full case-scoped workflow (KYC, AI analysis, approval, preferences, filter, proposal, override, selection, report,
+        audit, AI logs) lives in the <strong>Case Workbench</strong> below.
+        <br><span style="font-size:11.5px;opacity:.85;">RBAC: POSTs of firms require <code>admin</code>; advisors / clients / cases require <code>admin</code> or <code>advisor</code>. GETs are open to any valid role.</span>
       </div>
 
       <!-- ── Section 1: Auth / token ──────────────────────── -->
@@ -760,7 +191,7 @@
         <div class="ai-section-title" style="margin-bottom:10px;">1. Auth — token activo</div>
         <div class="form-grid cols-3">
           <div class="field full-span">
-            <label>Bearer token <span class="hint">enviado como <code>Authorization: Bearer &lt;token&gt;</code> en todas las requests del dashboard</span></label>
+            <label>Bearer token <span class="hint">sent as <code>Authorization: Bearer &lt;token&gt;</code> on every dashboard request</span></label>
             <input type="text" id="cd-token" value="dev-advisor-token" autocomplete="off" spellcheck="false" />
           </div>
         </div>
@@ -789,7 +220,7 @@
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="cd-btn-create-firm" onclick="cdCreateFirm()">Create Firm <span class="hint" style="color:#fff;">admin required</span></button>
+          <button class="btn-primary" id="cd-btn-create-firm" onclick="cdCreateFirm()">Create Firm</button>
           <button class="btn-secondary" id="cd-btn-list-firms" onclick="cdListFirms()">List Firms</button>
           <button class="btn-secondary" onclick="cdClearResult('cd-firms-result')">Clear</button>
         </div>
@@ -822,7 +253,7 @@
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="cd-btn-create-advisor" onclick="cdCreateAdvisor()">Create Advisor <span class="hint" style="color:#fff;">admin required</span></button>
+          <button class="btn-primary" id="cd-btn-create-advisor" onclick="cdCreateAdvisor()">Create Advisor</button>
           <button class="btn-secondary" id="cd-btn-list-advisors" onclick="cdListAdvisors()">List Advisors</button>
           <button class="btn-secondary" onclick="cdClearResult('cd-advisors-result')">Clear</button>
         </div>
@@ -851,7 +282,7 @@
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="cd-btn-create-client" onclick="cdCreateClient()">Create Client <span class="hint" style="color:#fff;">admin / advisor</span></button>
+          <button class="btn-primary" id="cd-btn-create-client" onclick="cdCreateClient()">Create Client</button>
           <button class="btn-secondary" id="cd-btn-list-clients" onclick="cdListClients()">List Clients</button>
           <button class="btn-secondary" onclick="cdClearResult('cd-clients-result')">Clear</button>
         </div>
@@ -880,7 +311,7 @@
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
-          <button class="btn-primary" id="cd-btn-create-case" onclick="cdCreateCase()">Create Case <span class="hint" style="color:#fff;">admin / advisor</span></button>
+          <button class="btn-primary" id="cd-btn-create-case" onclick="cdCreateCase()">Create Case</button>
           <button class="btn-secondary" id="cd-btn-list-cases" onclick="cdListCases()">List Cases</button>
           <button class="btn-secondary" onclick="cdClearResult('cd-cases-result')">Clear</button>
         </div>
@@ -889,10 +320,11 @@
 
       <!-- ── Section 6: Quick demo seed ───────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
-        <div class="ai-section-title" style="margin-bottom:10px;">6. Quick demo seed <span class="hint">requiere admin token</span></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Crea en cascada firm → advisor → client → case demo. Si alguno ya existe (409 duplicate), se reusa el row existente y se prosigue con los IDs encontrados.
-          Al finalizar, popula los inputs de las secciones anteriores con los IDs creados y los del summary.
+        <div class="ai-section-title" style="margin-bottom:10px;">6. Quick demo seed <span class="hint">admin token required</span></div>
+        <p style="font-size:13px;color:var(--rf-text-body);margin:0 0 12px;">
+          Creates a demo firm → advisor → client → case in cascade. If any already exists (409),
+          it reuses the existing row and continues. After it succeeds, the inputs of the sections
+          above are populated with the resulting IDs.
         </p>
         <div class="actions">
           <button class="btn-primary" id="cd-btn-seed" onclick="cdSeedDemo()">Create demo firm + advisor + client + case</button>
@@ -906,8 +338,8 @@
         <div class="ai-section-title" style="margin-bottom:10px;">7. Case Summary — <code>GET /cases/{case_id}/summary</code></div>
         <div class="form-grid cols-3">
           <div class="field full-span">
-            <label>Selected case_id <span class="hint">poblado automáticamente al crear/seed; editable manualmente</span></label>
-            <input type="text" id="cd-summary-case-id" placeholder="case_000001" />
+            <label>Selected case_id <span class="hint">auto-filled when you create/seed; manually editable</span></label>
+            <input type="text" id="cd-summary-case-id" placeholder="case_demo_local" />
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
@@ -917,45 +349,78 @@
         <div id="cd-summary-result" style="margin-top:12px;"></div>
       </div>
 
-      <!-- ── Footer: next steps ───────────────────────────── -->
-      <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Siguiente:</strong> abrir el <strong>Case Workbench</strong> (sección 10 abajo) para ejercer el flujo case-scoped end-to-end — KYC → AI profile analysis → profile approval → investment preferences → universe filter → portfolio proposal → override approval → portfolio selection → report + audit trail / verify / AI logs / compliance snapshot. Endpoints documentados en
-        <code>docs/TODO_DESIGN_NOTES.md</code> y <code>docs/ARCHITECTURE.md</code>.
+      <div class="fine-print">
+        <strong>Next:</strong> open the <strong>Case Workbench</strong> below to run the case-scoped
+        workflow end-to-end — KYC → AI analysis → profile approval → preferences → universe filter →
+        portfolio proposal → override → selection → report + audit trail / verify / AI logs / compliance snapshot.
       </div>
 
     </div>
   </div>
 
-  <!-- ── 10. CASE WORKBENCH — PROFILE STEPS ───────────────── -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- 02 · CASE WORKBENCH (primary)                                          -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div class="section-band" id="case-workbench">
+    <span class="num">02</span>
+    <div>
+      <h2>Case Workbench <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:var(--rf-emerald-100);color:var(--rf-emerald-700);border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Primary flow</span></h2>
+      <div class="sub">
+        The case-scoped end-to-end workflow. Each step has a clear action, writes to the SHA-256
+        audit chain, and auto-refreshes the case summary. Load <code class="inline-code">case_demo_local</code>
+        in section 1 to follow along.
+      </div>
+    </div>
+  </div>
+
   <!--
-    Case Workbench (Fase 3). Cubre el flujo case-scoped end-to-end en 15 secciones:
-      1. Workbench case_id + summary
-      2. KYC → 3. AI Profile Analysis → 4. Advisor Profile Approval
-      5. Investment Preferences → 6. Universe Filter
-      7. Portfolio Proposal → 8. Override Approval → 9. Portfolio Selection
-      10. Report Generation → 11. Compact Final Summary
-      12. Audit Trail → 13. Audit Verification
-      14. AI Request Logs → 15. Compliance Snapshot
-    Reusa el token del Case Dashboard.
+    Case Workbench (Fase 3). Cubre el flujo case-scoped end-to-end en 15 secciones,
+    agrupadas visualmente en 4 bloques (Profile / Portfolio inputs / Portfolio decisions
+    / Outputs) + Audit & Compliance. Reusa el token del Case Dashboard.
     Pendiente Fase 4: PDF export del report + compliance ZIP package.
   -->
-  <div class="card" id="card-case-workbench">
+  <div class="card card-hero" id="card-case-workbench">
     <div class="card-header">
       <h2>Case Workbench — Phase 2 Workflow</h2>
-      <span class="pill pill-blue" style="font-size:10px;">case-scoped workflow · dev UI</span>
+      <div class="pill-cluster">
+        <span class="pill pill-violet">15 panels</span>
+        <span class="pill pill-blue">case-scoped</span>
+        <span class="pill pill-green">audit-ready</span>
+      </div>
     </div>
+
+    <!-- ── Visual step indicator (11 primary steps + audit at the end) ── -->
+    <div class="step-indicator" aria-label="Workflow steps">
+      <div class="step-cell" data-state="ready"><div class="step-dot"><span>1</span></div><div class="step-label">Case</div></div>
+      <div class="step-cell"><div class="step-dot"><span>2</span></div><div class="step-label">KYC</div></div>
+      <div class="step-cell"><div class="step-dot"><span>3</span></div><div class="step-label">AI Analysis</div></div>
+      <div class="step-cell"><div class="step-dot"><span>4</span></div><div class="step-label">Approval</div></div>
+      <div class="step-cell"><div class="step-dot"><span>5</span></div><div class="step-label">Preferences</div></div>
+      <div class="step-cell"><div class="step-dot"><span>6</span></div><div class="step-label">Filter</div></div>
+      <div class="step-cell"><div class="step-dot"><span>7</span></div><div class="step-label">Proposal</div></div>
+      <div class="step-cell"><div class="step-dot"><span>8</span></div><div class="step-label">Override</div></div>
+      <div class="step-cell"><div class="step-dot"><span>9</span></div><div class="step-label">Selection</div></div>
+      <div class="step-cell"><div class="step-dot"><span>10</span></div><div class="step-label">Report</div></div>
+      <div class="step-cell"><div class="step-dot"><span>11</span></div><div class="step-label">Summary</div></div>
+    </div>
+
     <div class="card-body">
 
-      <div class="ai-disclaimer" style="background:#eff6ff;border-color:#93c5fd;color:#1e40af;">
-        <strong>Phase 2 case-scoped workflow — Workbench end-to-end.</strong>
-        <ul>
-          <li>Cubre el flujo completo: <strong>KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report</strong>.</li>
-          <li>El <code>case_id</code> debe existir previamente — crear vía Case Dashboard (sección 6 "Quick demo seed") o vía <code>POST /cases</code> directo.</li>
-          <li>Reusa el token del Case Dashboard (input <code>cd-token</code>); cambiar ahí afecta también acá.</li>
-          <li>Cada POST exitoso <strong>auto-refresca el summary</strong>. Los inputs downstream se autopopulan desde el último summary.</li>
-          <li><strong>Audit Trail / Audit Verification / AI Request Logs / Compliance Snapshot</strong> ya disponibles (secciones 12–15). <strong>PDF export del report</strong> y <strong>compliance ZIP package</strong> siguen pendientes (Fase 4); el report es markdown.</li>
-          <li><strong>NOT production-ready.</strong> Sin firm-level access control, sin JWT, sin firma digital del advisor.</li>
-        </ul>
+      <div class="ai-disclaimer">
+        <strong>End-to-end case-scoped workflow.</strong> Each <code>POST</code> appends an
+        audit event and auto-refreshes the summary. Downstream inputs are pre-filled from
+        the last summary. <strong>Audit Trail / Verification / AI Logs / Compliance Snapshot</strong>
+        live at the bottom (sections 12–15) — those panels require <code>admin</code> or
+        <code>compliance</code> in the token from the Dashboard above.
+      </div>
+
+      <!-- ─── BAND: Case selector ─────────────────────────── -->
+      <div class="wb-group-band">
+        <div>
+          <div class="wb-group-eyebrow">Section 1 · Case selector</div>
+          <div class="wb-group-title">Pick the case you want to work</div>
+        </div>
+        <div class="wb-group-help">Use <code>case_demo_local</code> from the Dashboard seed, or any other case_id you already have.</div>
       </div>
 
       <!-- ── Section 1: Workbench case_id + summary ───────── -->
@@ -963,8 +428,8 @@
         <div class="ai-section-title" style="margin-bottom:10px;">1. Workbench case_id</div>
         <div class="form-grid cols-3">
           <div class="field full-span">
-            <label>case_id <span class="hint">case que se va a trabajar; los inputs downstream usan este valor</span></label>
-            <input type="text" id="cw-case-id" placeholder="case_000001" />
+            <label>case_id <span class="hint">case you're working on — downstream inputs use this value</span></label>
+            <input type="text" id="cw-case-id" placeholder="case_demo_local" />
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
@@ -975,11 +440,20 @@
         <div id="cw-summary-result" style="margin-top:12px;"></div>
       </div>
 
+      <!-- ─── BAND: Profile steps ─────────────────────────── -->
+      <div class="wb-group-band">
+        <div>
+          <div class="wb-group-eyebrow">Sections 2–4 · Profile</div>
+          <div class="wb-group-title">From client data to an approved risk profile</div>
+        </div>
+        <div class="wb-group-help">The AI proposes; the advisor decides. The approved profile is the input to everything downstream.</div>
+      </div>
+
       <!-- ── Section 2: KYC submission ────────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">2. KYC Submission — <code>POST /cases/{case_id}/kyc</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Defaults demo razonables. Todos los campos editables. El backend valida rangos (age 18–120, scores 1–10, horizon &gt; 0, etc.).
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Reasonable demo defaults. All fields editable. The backend validates ranges (age 18–120, scores 1–10, horizon &gt; 0, etc.).
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1057,20 +531,20 @@
         </div>
         <div class="form-grid cols-2" style="margin-top:10px;">
           <div class="field full-span">
-            <label>open_investment_goal <span class="hint">texto libre</span></label>
-            <textarea id="cw-kyc-goal" rows="2" style="font-size:13px;line-height:1.5;">Ahorro de largo plazo con horizonte 10 años.</textarea>
+            <label>open_investment_goal <span class="hint">free text</span></label>
+            <textarea id="cw-kyc-goal" rows="2">Ahorro de largo plazo con horizonte 10 años.</textarea>
           </div>
           <div class="field full-span">
             <label>open_risk_reaction</label>
-            <textarea id="cw-kyc-risk-reaction" rows="2" style="font-size:13px;line-height:1.5;">Tolerancia moderada — drawdowns ≤ 20% son aceptables si se recuperan en mediano plazo.</textarea>
+            <textarea id="cw-kyc-risk-reaction" rows="2">Tolerancia moderada — drawdowns ≤ 20% son aceptables si se recuperan en mediano plazo.</textarea>
           </div>
           <div class="field full-span">
             <label>open_past_experience</label>
-            <textarea id="cw-kyc-past" rows="2" style="font-size:13px;line-height:1.5;">Inversiones previas en ETFs y bonos USD.</textarea>
+            <textarea id="cw-kyc-past" rows="2">Inversiones previas en ETFs y bonos USD.</textarea>
           </div>
           <div class="field full-span">
             <label>open_concerns</label>
-            <textarea id="cw-kyc-concerns" rows="2" style="font-size:13px;line-height:1.5;">Volatilidad cambiaria y riesgo de duración en renta fija.</textarea>
+            <textarea id="cw-kyc-concerns" rows="2">Volatilidad cambiaria y riesgo de duración en renta fija.</textarea>
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
@@ -1083,9 +557,10 @@
       <!-- ── Section 3: AI Profile Analysis ───────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">3. AI Profile Analysis — <code>POST /cases/{case_id}/ai/profile-analysis</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Si no se especifica <code>kyc_submission_id</code>, el backend usa <code>case.current_kyc_submission_id</code>.
-          Requiere <code>OPENAI_API_KEY</code> en el entorno del backend; si no está configurada, devuelve 400.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          If <code>kyc_submission_id</code> is empty, the backend uses <code>case.current_kyc_submission_id</code>.
+          Requires <code>OPENAI_API_KEY</code> in the backend env; without it, returns 400 — use the
+          smoke check instead.
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1110,9 +585,9 @@
       <!-- ── Section 4: Advisor Profile Approval ──────────── -->
       <div style="padding:14px 0;">
         <div class="ai-section-title" style="margin-bottom:10px;">4. Advisor Profile Approval — <code>POST /cases/{case_id}/profile-approval</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          <code>proposed_profile</code> se prellena con el último análisis si existe.
-          <code>approved_profile</code>: vacío en <code>approve</code> (backend auto-completa) y <code>reject</code>; requerido en <code>modify</code>.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          <code>proposed_profile</code> is pre-filled from the latest analysis if one exists.
+          <code>approved_profile</code>: empty on <code>approve</code> (backend auto-fills) and <code>reject</code>; required for <code>modify</code>.
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1135,7 +610,7 @@
             </select>
           </div>
           <div class="field">
-            <label>approved_profile <span class="hint">requerido para modify</span></label>
+            <label>approved_profile <span class="hint">required for modify</span></label>
             <select id="cw-pa-approved">
               <option value="">(none / auto for approve)</option>
               <option value="conservador">conservador</option>
@@ -1150,7 +625,7 @@
             <input type="text" id="cw-pa-source" value="manual" />
           </div>
           <div class="field">
-            <label>ai_profile_analysis_id <span class="hint">opcional — usa último si vacío</span></label>
+            <label>ai_profile_analysis_id <span class="hint">opcional</span></label>
             <input type="text" id="cw-pa-analysis-id" placeholder="(latest analysis)" />
           </div>
           <div class="field">
@@ -1160,7 +635,7 @@
         </div>
         <div class="field full-span" style="margin-top:10px;">
           <label>rationale</label>
-          <textarea id="cw-pa-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor reviewed the AI analysis and approved the profile for demo purposes.</textarea>
+          <textarea id="cw-pa-rationale" rows="2">Advisor reviewed the AI analysis and approved the profile for demo purposes.</textarea>
         </div>
         <div class="actions" style="margin-top:12px;">
           <button class="btn-primary" id="cw-btn-submit-approval" onclick="cwSubmitApproval()">Submit Profile Approval</button>
@@ -1169,12 +644,21 @@
         <div id="cw-pa-result" style="margin-top:12px;"></div>
       </div>
 
+      <!-- ─── BAND: Portfolio inputs ──────────────────────── -->
+      <div class="wb-group-band is-portfolio">
+        <div>
+          <div class="wb-group-eyebrow">Sections 5–6 · Portfolio inputs</div>
+          <div class="wb-group-title">Preferences + universe filter</div>
+        </div>
+        <div class="wb-group-help">Translate client preferences (manual JSON or NLP) into an eligible instrument universe.</div>
+      </div>
+
       <!-- ── Section 5: Investment Preferences ─────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">5. Investment Preferences — <code>POST /cases/{case_id}/investment-preferences</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Modo <strong>manual</strong> con <code>structured_preferences</code> JSON. Si querés NLP (extracción IA), borrar el JSON y poner texto en el textarea opcional;
-          si están ambos, structured manda y el texto queda como contexto (sin llamar IA).
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          <strong>Manual</strong> mode with <code>structured_preferences</code> JSON. For NLP (AI extraction), clear the JSON
+          and put text in the textarea; if both are present, structured wins and the text is kept as context.
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1188,14 +672,14 @@
         </div>
         <div class="form-grid cols-2" style="margin-top:10px;">
           <div class="field full-span">
-            <label>structured_preferences <span class="hint">JSON dict; debe matchear el shape que entiende PreferenceFilterEngine</span></label>
-            <textarea id="cw-pref-structured" rows="6" style="font-family:monospace;font-size:12px;">{
+            <label>structured_preferences <span class="hint">JSON dict that PreferenceFilterEngine accepts</span></label>
+            <textarea id="cw-pref-structured" rows="6" style="font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12px;">{
   "allowed_instrument_types": ["CORPORATE_BOND", "SOVEREIGN_BOND", "ETF", "STOCK", "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET"]
 }</textarea>
           </div>
           <div class="field full-span">
-            <label>natural_language_preferences <span class="hint">opcional; ignorado si structured viene</span></label>
-            <textarea id="cw-pref-nlp" rows="2" style="font-size:13px;line-height:1.5;" placeholder="(opcional)"></textarea>
+            <label>natural_language_preferences <span class="hint">opcional; ignored when structured is present</span></label>
+            <textarea id="cw-pref-nlp" rows="2" placeholder="(opcional)"></textarea>
           </div>
         </div>
         <div class="actions" style="margin-top:12px;">
@@ -1206,10 +690,11 @@
       </div>
 
       <!-- ── Section 6: Universe Filter ────────────────────── -->
-      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+      <div style="padding:14px 0;">
         <div class="ai-section-title" style="margin-bottom:10px;">6. Universe Filter — <code>POST /cases/{case_id}/universe-filter</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Aplica las preferences vigentes al universo CSV via <code>PreferenceFilterEngine</code>. Si <code>preference_id</code> vacío → usa la current del case.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Applies the current preferences to the universe CSV via <code>PreferenceFilterEngine</code>.
+          Empty <code>preference_id</code> → uses the case's current preference.
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1228,11 +713,20 @@
         <div id="cw-uf-result" style="margin-top:12px;"></div>
       </div>
 
+      <!-- ─── BAND: Portfolio decisions ───────────────────── -->
+      <div class="wb-group-band is-portfolio">
+        <div>
+          <div class="wb-group-eyebrow">Sections 7–9 · Portfolio decisions</div>
+          <div class="wb-group-title">Proposal · override · final selection</div>
+        </div>
+        <div class="wb-group-help">Generate candidates, sign off any risk-budget override, and pick the final variant the client will see.</div>
+      </div>
+
       <!-- ── Section 7: Portfolio Proposal ─────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">7. Portfolio Proposal — <code>POST /cases/{case_id}/portfolio-proposal</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Genera DEFENSIVE / BALANCED / GROWTH a partir del filter run + approved profile current. Si <code>variant_policy=standard</code> (default), corre el coordinator estándar.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Generates DEFENSIVE / BALANCED / GROWTH candidates from the current filter run + current approved profile.
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1258,10 +752,11 @@
       <!-- ── Section 8: Override Approval ──────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">8. Override Approval — <code>POST /cases/{case_id}/override-approval</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Aprobar/rechazar override para una variante que excede el RiskBudget aprobado (típicamente GROWTH). Si el current proposal tiene candidate que requiere override, se preselecciona esa variante.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Approve / reject the override for a candidate that exceeds the approved risk budget (typically GROWTH).
+          If the current proposal has a candidate that requires override, it's pre-selected.
         </p>
-        <div id="cw-ovr-hint" style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
+        <div id="cw-ovr-hint" style="font-size:11.5px;color:var(--rf-amber-700);background:#fffbeb;border:1px solid #fde68a;padding:8px 12px;border-radius:6px;margin-bottom:10px;display:none;"></div>
         <div class="form-grid cols-3">
           <div class="field">
             <label>proposal_id <span class="hint">opcional — current</span></label>
@@ -1288,18 +783,16 @@
           </div>
           <div class="field">
             <label>reason_codes <span class="hint">CSV</span></label>
-            <input type="text" id="cw-ovr-reasons"
-                   value="PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET" />
+            <input type="text" id="cw-ovr-reasons" value="PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET" />
           </div>
           <div class="field">
             <label>exceeded_constraints <span class="hint">CSV</span></label>
-            <input type="text" id="cw-ovr-exceeded"
-                   value="max_volatility" />
+            <input type="text" id="cw-ovr-exceeded" value="max_volatility" />
           </div>
         </div>
         <div class="field full-span" style="margin-top:10px;">
           <label>rationale</label>
-          <textarea id="cw-ovr-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor reviewed the candidate and approves the override for demo purposes.</textarea>
+          <textarea id="cw-ovr-rationale" rows="2">Advisor reviewed the candidate and approves the override for demo purposes.</textarea>
         </div>
         <div class="actions" style="margin-top:12px;">
           <button class="btn-primary" id="cw-btn-submit-ovr" onclick="cwSubmitOverride()">Submit Override Approval</button>
@@ -1309,12 +802,13 @@
       </div>
 
       <!-- ── Section 9: Portfolio Selection ────────────────── -->
-      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+      <div style="padding:14px 0;">
         <div class="ai-section-title" style="margin-bottom:10px;">9. Portfolio Selection — <code>POST /cases/{case_id}/portfolio-selection</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Selección final del advisor. Si el variant requiere override, debe ir <code>override_approval_id</code> aprobado (current si vacío). Si el variant NO requiere override, dejar <code>override_approval_id</code> vacío.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Advisor's final selection. If the variant requires override, supply an approved <code>override_approval_id</code>
+          (current if empty). If the variant doesn't require override, leave it empty.
         </p>
-        <div id="cw-sel-hint" style="font-size:11px;color:#1e40af;background:#eff6ff;border:1px solid #93c5fd;padding:6px 10px;border-radius:4px;margin-bottom:10px;display:none;"></div>
+        <div id="cw-sel-hint" style="font-size:11.5px;color:#1e40af;background:var(--rf-blue-100);border:1px solid rgba(29,78,216,.18);padding:8px 12px;border-radius:6px;margin-bottom:10px;display:none;"></div>
         <div class="form-grid cols-3">
           <div class="field">
             <label>proposal_id <span class="hint">opcional — current</span></label>
@@ -1339,7 +833,7 @@
         </div>
         <div class="field full-span" style="margin-top:10px;">
           <label>rationale</label>
-          <textarea id="cw-sel-rationale" rows="2" style="font-size:13px;line-height:1.6;">Advisor selects this variant as the final recommendation for the client.</textarea>
+          <textarea id="cw-sel-rationale" rows="2">Advisor selects this variant as the final recommendation for the client.</textarea>
         </div>
         <div class="actions" style="margin-top:12px;">
           <button class="btn-primary" id="cw-btn-submit-sel" onclick="cwSubmitSelection()">Submit Portfolio Selection</button>
@@ -1348,11 +842,21 @@
         <div id="cw-sel-result" style="margin-top:12px;"></div>
       </div>
 
+      <!-- ─── BAND: Outputs ───────────────────────────────── -->
+      <div class="wb-group-band is-output">
+        <div>
+          <div class="wb-group-eyebrow">Sections 10–11 · Outputs</div>
+          <div class="wb-group-title">Client-facing report + final state</div>
+        </div>
+        <div class="wb-group-help">Generate the deterministic Markdown report and refresh the consolidated summary.</div>
+      </div>
+
       <!-- ── Section 10: Report Generation ─────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">10. Report Generation — <code>POST /cases/{case_id}/reports</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Markdown determinístico que consolida la selection final. Sin PDF todavía. Versionado por case (UNIQUE(case_id, version)).
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Deterministic Markdown that consolidates the final selection. No PDF yet. Versioned per case
+          (<code>UNIQUE(case_id, version)</code>).
         </p>
         <div class="form-grid cols-3">
           <div class="field">
@@ -1383,8 +887,8 @@
       <!-- ── Section 11: Compact Final Summary ─────────────── -->
       <div style="padding:14px 0;">
         <div class="ai-section-title" style="margin-bottom:10px;">11. Compact final summary</div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Refresca el summary del case y muestra los flags del segundo tramo del workflow + IDs derivados.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Refreshes the case summary and shows portfolio-side flags and derived IDs.
         </p>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn-primary" id="cw-btn-final" onclick="cwLoadFinalSummary()">Refresh Final Summary</button>
@@ -1393,11 +897,20 @@
         <div id="cw-final-result"></div>
       </div>
 
+      <!-- ─── BAND: Audit & Compliance ───────────────────── -->
+      <div class="wb-group-band is-audit" id="audit-anchor">
+        <div>
+          <div class="wb-group-eyebrow">Sections 12–15 · Audit &amp; Compliance</div>
+          <div class="wb-group-title">Hash-chain · verification · AI logs · snapshot</div>
+        </div>
+        <div class="wb-group-help">Verification + AI logs require <code>dev-compliance-token</code> (or any token with <code>admin</code> / <code>compliance</code>).</div>
+      </div>
+
       <!-- ── Section 12: Audit Trail ──────────────────────── -->
-      <div style="padding:14px 0;border-top:2px solid #cbd5e0;border-bottom:1px solid #dde2ea;margin-bottom:14px;margin-top:18px;">
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">12. Audit Trail — <code>GET /cases/{case_id}/audit</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Lista cronológica de <code>AuditEvent</code> del case (hash chain SHA-256). Cualquier rol válido puede leer.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Chronological list of <code>AuditEvent</code> for the case (SHA-256 hash chain). Any valid role can read.
         </p>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn-primary" id="cw-btn-audit" onclick="cwLoadAuditEvents()">Load Audit Events</button>
@@ -1409,8 +922,9 @@
       <!-- ── Section 13: Audit Verification ────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">13. Audit Verification — <code>GET /cases/{case_id}/audit/verify</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Recomputa el hash chain y reporta <code>is_intact</code>. <strong>Requiere rol <code>admin</code> o <code>compliance</code></strong> (advisor recibe 403). Cambiar token en Case Dashboard si es necesario.
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Recomputes the hash chain and reports <code>is_intact</code>. <strong>Requires role <code>admin</code> or
+          <code>compliance</code></strong> — switch the Dashboard token to <code>dev-compliance-token</code> if needed.
         </p>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn-primary" id="cw-btn-verify" onclick="cwVerifyAudit()">Verify Audit Chain</button>
@@ -1422,11 +936,12 @@
       <!-- ── Section 14: AI Request Logs ───────────────────── -->
       <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
         <div class="ai-section-title" style="margin-bottom:10px;">14. AI Request Logs — <code>GET /cases/{case_id}/ai-logs</code></div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Llamadas a OpenAI persistidas para este case. <strong>input_redacted</strong> es la versión sanitizada por backend (texto libre + <code>client_id</code> redactados). <strong>Requiere rol <code>admin</code> o <code>compliance</code></strong> (advisor recibe 403).
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Persisted OpenAI calls for this case. <strong>input_redacted</strong> is the version sanitized by the backend
+          (free text + <code>client_id</code> redacted). <strong>Requires role <code>admin</code> or <code>compliance</code></strong>.
         </p>
-        <div id="cw-logs-privacy" style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;padding:6px 10px;border-radius:4px;margin-bottom:10px;">
-          <strong>Privacidad:</strong> los detalles "raw_response" y campos no whitelisted vienen sin redacción a nivel API. Revisar antes de compartir exportes.
+        <div id="cw-logs-privacy" style="font-size:11.5px;color:var(--rf-amber-700);background:#fffbeb;border:1px solid #fde68a;padding:8px 12px;border-radius:6px;margin-bottom:10px;">
+          <strong>Privacy:</strong> <code>raw_response</code> and non-whitelisted fields are stored unredacted at the API level. Review before sharing exports.
         </div>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn-primary" id="cw-btn-logs" onclick="cwLoadAiLogs()">Load AI Logs</button>
@@ -1438,8 +953,10 @@
       <!-- ── Section 15: Compliance Snapshot ───────────────── -->
       <div style="padding:14px 0;">
         <div class="ai-section-title" style="margin-bottom:10px;">15. Compliance Snapshot</div>
-        <p style="font-size:12px;color:#4a5568;margin:0 0 10px;">
-          Vista combinada: <code>summary</code> + <code>audit/verify</code> + <code>ai-logs</code> en un solo render. Útil para handoff a compliance review. Si el token actual no tiene rol <code>admin</code>/<code>compliance</code>, las partes verify/ai-logs aparecerán como "skipped (403)".
+        <p style="font-size:12.5px;color:var(--rf-text-muted);margin:0 0 12px;">
+          Combined view: <code>summary</code> + <code>audit/verify</code> + <code>ai-logs</code> in one render.
+          Useful as a compliance review handoff. If the current token lacks <code>admin</code> / <code>compliance</code>,
+          the verify / ai-logs sub-requests appear as "skipped (403)".
         </p>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn-primary" id="cw-btn-compliance" onclick="cwRefreshComplianceSnapshot()">Refresh Compliance Snapshot</button>
@@ -1448,23 +965,772 @@
         <div id="cw-compliance-result"></div>
       </div>
 
-      <!-- ── Footer: next steps ───────────────────────────── -->
-      <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Pendiente Fase 4:</strong> PDF export del report, export package compliance-ready (ZIP con report + audit + logs), live market data provider, manual universe upload, firm-level access control. <strong>Polish Fase 3:</strong> refresh automático de audit/logs después de cada POST (hoy es carga manual para evitar polling agresivo); <code>/health/full</code> endpoint runtime.
+      <div class="fine-print">
+        <strong>Pendiente Fase 4:</strong> PDF export of the report, compliance-ready ZIP (report + audit + logs),
+        live market data provider, manual universe upload, firm-level access control.
+        <strong>Polish Fase 3:</strong> auto-refresh of audit / logs after each POST (currently manual to avoid aggressive polling);
+        <code>/health/full</code> runtime endpoint.
       </div>
 
     </div>
   </div>
 
-</div><!-- /page -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- 03 · LEGACY DEMOS & UTILITIES (demoted)                                -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div class="legacy-divider" id="legacy">
+    <h2>Legacy demos &amp; utilities</h2>
+    <p>
+      Earlier phases (Fase 0/1) and ops utilities. Kept here as reference and for quick AI / portfolio probes
+      outside the case-scoped workflow. The Case Workbench above is the primary surface.
+    </p>
+  </div>
 
+  <div class="legacy-group" id="utilities">
 
+  <!-- ── 1. HEALTH ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>API Health</h2>
+    </div>
+    <div class="card-body">
+      <p style="color:var(--rf-text-muted);font-size:13px;margin-bottom:14px;">
+        Verifica que el backend FastAPI esté corriendo en
+        <code class="inline-code">http://127.0.0.1:8000</code>.
+      </p>
+      <button class="btn-primary" onclick="checkHealth()">
+        Check API
+      </button>
+      <div id="health-result" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- ── 2. RUN WORKFLOW ────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Scripted Workflow Demo — POST /workflow/run</h2>
+      <span class="pill pill-orange">scripted · no AI · no advisor</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fde68a;color:var(--rf-amber-700);border-left-color:var(--rf-amber-600);">
+        <strong>This endpoint is a scripted deterministic demo. It does NOT use OpenAI and does NOT involve a real advisor.</strong>
+        <ul>
+          <li>Uses <code>MockAIClient</code> — the preliminary profile is preprogrammed (always <code>moderado</code>, no contradictions, no follow-up).</li>
+          <li>Uses <code>ScriptedAdvisorInterface</code> — advisor approval is auto-approved, no human in the loop.</li>
+          <li>Does <strong>not</strong> call OpenAI. <code>OPENAI_API_KEY</code> is not required.</li>
+          <li>Useful for validating the deterministic pipeline: governance → suitability → ESG → data quality → optimizer, plus SQLite persistence, audit trail and Markdown report.</li>
+          <li><strong>Do not use as a productive advisory flow.</strong> Real AI lives in <code>/ai/profile-demo</code>, <code>/ai/profile-follow-up</code>, <code>/ai/filter-universe-demo</code> and <code>/ai/filtered-portfolio-demo</code>.</li>
+        </ul>
+      </div>
+
+      <form id="workflow-form" onsubmit="runWorkflow(event)">
+
+        <div class="section-label" style="margin-bottom:12px;">Identifiers</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="f-client_id" value="CLI-123" required />
+          </div>
+          <div class="field">
+            <label>advisor_id</label>
+            <input type="text" id="f-advisor_id" value="ADV-001" required />
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>risk_tolerance_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-risk_tolerance_score" value="6" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>risk_capacity_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-risk_capacity_score" value="7" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>liquidity_need_score <span class="hint">1–10</span></label>
+            <input type="number" id="f-liquidity_need_score" value="3" min="1" max="10" step="1" required />
+          </div>
+          <div class="field">
+            <label>investment_horizon_years</label>
+            <input type="number" id="f-investment_horizon_years" value="10" min="1" max="50" step="1" required />
+          </div>
+          <div class="field">
+            <label>max_acceptable_drawdown_pct</label>
+            <input type="number" id="f-max_acceptable_drawdown_pct" value="25" min="0" max="100" step="0.5" required />
+          </div>
+          <div class="field">
+            <label>declared_return_expectation_pct <span class="hint">optional</span></label>
+            <input type="number" id="f-declared_return_expectation_pct" value="" min="0" max="100" step="0.1" placeholder="leave blank" />
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>investment_experience</label>
+            <select id="f-investment_experience">
+              <option value="ninguna">ninguna</option>
+              <option value="básica">básica</option>
+              <option value="moderada" selected>moderada</option>
+              <option value="avanzada">avanzada</option>
+              <option value="experto">experto</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>income_stability</label>
+            <select id="f-income_stability">
+              <option value="stable" selected>stable</option>
+              <option value="variable">variable</option>
+              <option value="unstable">unstable</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>net_worth</label>
+            <input type="number" id="f-net_worth" value="500000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>liquid_net_worth</label>
+            <input type="number" id="f-liquid_net_worth" value="200000" min="0" step="1000" required />
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:var(--rf-text-muted);">(optional)</span></div>
+        <div class="form-grid">
+          <div class="field">
+            <label>open_investment_goal</label>
+            <textarea id="f-open_investment_goal" placeholder="e.g. Save for retirement in 10 years"></textarea>
+          </div>
+          <div class="field">
+            <label>open_risk_reaction</label>
+            <textarea id="f-open_risk_reaction" placeholder="e.g. I'd hold through drawdowns up to 20%"></textarea>
+          </div>
+          <div class="field">
+            <label>open_past_experience</label>
+            <textarea id="f-open_past_experience" placeholder="e.g. Held ETFs for 5 years"></textarea>
+          </div>
+          <div class="field">
+            <label>open_concerns</label>
+            <textarea id="f-open_concerns" placeholder="e.g. Worried about inflation eroding savings"></textarea>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:20px;margin-bottom:12px;">Financial Goal</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>initial_amount</label>
+            <input type="number" id="f-initial_amount" value="100000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>target_amount</label>
+            <input type="number" id="f-target_amount" value="200000" min="0" step="1000" required />
+          </div>
+          <div class="field">
+            <label>horizon_years</label>
+            <input type="number" id="f-goal_horizon_years" value="10" min="1" max="50" step="1" required />
+          </div>
+          <div class="field">
+            <label>annual_contribution</label>
+            <input type="number" id="f-annual_contribution" value="5000" min="0" step="500" required />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="btn-run">
+            Run Workflow
+          </button>
+          <button type="button" class="btn-secondary" onclick="clearWorkflowResult()">
+            Clear
+          </button>
+        </div>
+
+      </form>
+
+      <div id="workflow-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 3. LIVE PORTFOLIO DEMO ───────────────────────────── -->
+  <div class="card" id="card-live-portfolio">
+    <div class="card-header">
+      <h2>Live Portfolio Demo — POST /live/portfolio-demo</h2>
+      <span class="pill pill-blue">yfinance · free data</span>
+    </div>
+    <div class="card-body">
+
+      <p style="color:var(--rf-text-muted);font-size:13px;margin-bottom:16px;">
+        Descarga datos históricos de ETFs reales desde <strong>yfinance</strong>, los pasa por
+        DataQualityGate + ReturnEstimator + CovarianceEngine y genera hasta 3 portfolios candidatos
+        (DEFENSIVE / BALANCED / GROWTH) para el perfil seleccionado.
+        <br><span style="color:var(--rf-amber-700);">⏱ Puede tardar 5–15 s. Requiere internet. No usa IA ni KYC.</span>
+      </p>
+
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>profile</label>
+          <select id="lp-profile">
+            <option value="conservador">conservador</option>
+            <option value="moderado-defensivo">moderado-defensivo</option>
+            <option value="moderado" selected>moderado</option>
+            <option value="moderado-agresivo">moderado-agresivo</option>
+            <option value="agresivo">agresivo</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>period <span class="hint">lookback histórico</span></label>
+          <select id="lp-period">
+            <option value="1y">1y</option>
+            <option value="2y">2y</option>
+            <option value="3y" selected>3y</option>
+            <option value="5y">5y</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>interval <span class="hint">frecuencia</span></label>
+          <select id="lp-interval">
+            <option value="1d" selected>1d (daily)</option>
+            <option value="1wk">1wk (weekly)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-live" onclick="runLivePortfolio()">
+          Run Live Portfolio
+        </button>
+        <button class="btn-secondary" onclick="clearLivePortfolioResult()">Clear</button>
+      </div>
+
+      <div id="live-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 4. AI PROFILE DEMO ────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>AI Profile Demo — POST /ai/profile-demo</h2>
+      <span class="pill pill-blue">OpenAI · no persist</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
+        <ul>
+          <li>La IA <strong>no aprueba</strong> el perfil final — solo el asesor puede hacerlo.</li>
+          <li>La IA <strong>no recomienda</strong> productos, tickers ni ETFs.</li>
+          <li>La IA <strong>no genera</strong> portfolios ni allocations.</li>
+          <li>La IA <strong>no usa</strong> <code>declared_return_expectation_pct</code> para construir el perfil.</li>
+          <li>Solo analiza coherencia del KYC y propone follow-up questions para el asesor.</li>
+          <li>No persiste resultados. Sin SQLite, sin reporte.</li>
+        </ul>
+        <div style="margin-top:10px;padding:8px 12px;background:rgba(29,78,216,.10);border-radius:6px;font-family:'JetBrains Mono','Consolas',monospace;font-size:11.5px;color:#1e40af;">
+          $env:OPENAI_API_KEY="your_key_here"<br>
+          uvicorn risk_first_advisory.api_layer.main:app --reload
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-bottom:12px;">Identifier</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>client_id</label>
+          <input type="text" id="ai-client_id" value="CLI-AI-001" required />
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Risk Scores</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>risk_tolerance_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-risk_tolerance_score" value="4" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>risk_capacity_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-risk_capacity_score" value="8" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>liquidity_need_score <span class="hint">1–10</span></label>
+          <input type="number" id="ai-liquidity_need_score" value="7" min="1" max="10" step="1" required />
+        </div>
+        <div class="field">
+          <label>investment_horizon_years</label>
+          <input type="number" id="ai-investment_horizon_years" value="15" min="1" max="50" step="1" required />
+        </div>
+        <div class="field">
+          <label>max_acceptable_drawdown_pct</label>
+          <input type="number" id="ai-max_acceptable_drawdown_pct" value="10" min="0" max="100" step="0.5" required />
+        </div>
+        <div class="field">
+          <label>declared_return_expectation_pct <span class="hint">optional</span></label>
+          <input type="number" id="ai-declared_return_expectation_pct" value="15" min="0" max="100" step="0.1" placeholder="leave blank" />
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Profile</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>investment_experience</label>
+          <select id="ai-investment_experience">
+            <option value="ninguna">ninguna</option>
+            <option value="basica">basica</option>
+            <option value="moderada" selected>moderada</option>
+            <option value="avanzada">avanzada</option>
+            <option value="experto">experto</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>income_stability</label>
+          <select id="ai-income_stability">
+            <option value="stable" selected>stable</option>
+            <option value="variable">variable</option>
+            <option value="unstable">unstable</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Financials</div>
+      <div class="form-grid cols-3">
+        <div class="field">
+          <label>net_worth</label>
+          <input type="number" id="ai-net_worth" value="500000" min="0" step="1000" required />
+        </div>
+        <div class="field">
+          <label>liquid_net_worth</label>
+          <input type="number" id="ai-liquid_net_worth" value="150000" min="0" step="1000" required />
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:20px;margin-bottom:12px;">KYC — Open Fields <span style="font-weight:400;color:var(--rf-text-muted);">(optional)</span></div>
+      <div class="form-grid">
+        <div class="field">
+          <label>open_investment_goal</label>
+          <textarea id="ai-open_investment_goal">Quiero crecer mi capital para jubilacion, pero sin asumir perdidas grandes.</textarea>
+        </div>
+        <div class="field">
+          <label>open_risk_reaction</label>
+          <textarea id="ai-open_risk_reaction">Me preocuparia mucho una caida mayor al 10 por ciento.</textarea>
+        </div>
+        <div class="field">
+          <label>open_past_experience</label>
+          <textarea id="ai-open_past_experience">Vendi durante una caida fuerte de mercado.</textarea>
+        </div>
+        <div class="field">
+          <label>open_concerns</label>
+          <textarea id="ai-open_concerns">Me preocupa la inflacion y perder capital.</textarea>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-ai" onclick="runAIProfile()">
+          Analyze KYC with AI
+        </button>
+        <button class="btn-secondary" onclick="clearAIProfileResult()">Clear</button>
+      </div>
+
+      <div id="ai-result" class="hidden"></div>
+      <div id="ai-followup-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 5. AI UNIVERSE FILTER DEMO ──────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>AI Universe Filter Demo — POST /ai/filter-universe-demo</h2>
+      <span class="pill pill-blue">OpenAI + universe · no persist</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
+        <ul>
+          <li>Paso 1 — la IA (OpenAI) extrae preferencias estructuradas desde texto libre.</li>
+          <li>Paso 2 — <code>PreferenceFilterEngine</code> aplica esas preferencias al CSV del universo de instrumentos.</li>
+          <li>Devuelve: instrumentos elegibles, excluidos con razones, filtros aplicados y warnings.</li>
+          <li><strong>No genera portfolios.</strong> No trae datos de mercado. No persiste resultados.</li>
+          <li><strong>No aprueba</strong> ningún perfil — solo el asesor puede hacerlo.</li>
+          <li>Universo: <code>tests/fixtures/universe/sample_instrument_universe.csv</code> (20 instrumentos).</li>
+        </ul>
+      </div>
+
+      <div class="form-grid cols-3" style="margin-bottom:14px;">
+        <div class="field">
+          <label>client_id</label>
+          <input type="text" id="aif-client_id" value="CLI-PREF-001" />
+        </div>
+      </div>
+
+      <div class="field full-span" style="margin-bottom:18px;">
+        <label>natural_language_preferences</label>
+        <textarea id="aif-preferences" rows="3">Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia.</textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-aif" onclick="runAIUniverseFilter()">
+          Filter Universe with AI
+        </button>
+        <button class="btn-secondary" onclick="clearAIUniverseFilterResult()">Clear</button>
+      </div>
+
+      <div id="aif-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 6. AI FILTERED PORTFOLIO DEMO ─────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>AI Filtered Portfolio Demo — POST /ai/filtered-portfolio-demo</h2>
+      <span class="pill pill-blue">OpenAI + universe + portfolio · no persist</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Requiere OPENAI_API_KEY en la terminal donde corre uvicorn.</strong>
+        <ul>
+          <li>Paso 1 — la IA (OpenAI) extrae preferencias estructuradas desde texto libre del cliente.</li>
+          <li>Paso 2 — <code>PreferenceFilterEngine</code> filtra el universo CSV con esas preferencias.</li>
+          <li>Paso 3 — <code>InstrumentMarketDataAdapter</code> convierte los elegibles a snapshots de mercado.</li>
+          <li>Paso 4 — <code>ReturnEstimator</code> + <code>CovarianceEngine</code> + <code>PortfolioGenerationCoordinator</code> generan hasta 3 variantes (<strong>DEFENSIVE / BALANCED / GROWTH</strong>).</li>
+          <li>Si el universo filtrado es insuficiente o no es factible, devuelve el motivo del bloqueo sin generar portfolios.</li>
+          <li><strong>No persiste resultados.</strong> No aprueba ningún perfil. Solo para demo.</li>
+        </ul>
+      </div>
+
+      <div class="form-grid cols-3" style="margin-bottom:14px;">
+        <div class="field">
+          <label>client_id</label>
+          <input type="text" id="aifp-client_id" value="CLI-PREF-PORT-001" />
+        </div>
+        <div class="field">
+          <label>profile</label>
+          <select id="aifp-profile">
+            <option value="conservador">conservador</option>
+            <option value="moderado-defensivo">moderado-defensivo</option>
+            <option value="moderado" selected>moderado</option>
+            <option value="moderado-agresivo">moderado-agresivo</option>
+            <option value="agresivo">agresivo</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field full-span" style="margin-bottom:18px;">
+        <label>natural_language_preferences</label>
+        <textarea id="aifp-preferences" rows="3">Solo quiero invertir en ONs hard dollar argentinas disponibles en Balanz y evitar energia.</textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="btn-aifp" onclick="runAIFilteredPortfolio()">
+          Generate AI Filtered Portfolio
+        </button>
+        <button class="btn-secondary" onclick="clearAIFilteredPortfolioResult()">Clear</button>
+      </div>
+
+      <div id="aifp-result" class="hidden"></div>
+
+    </div>
+  </div>
+
+  <!-- ── 7. ADVISOR DECISIONS DEMO ─────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Advisor Decisions Demo — Phase 1</h2>
+      <span class="pill pill-blue">advisor actions · dev auth</span>
+    </div>
+    <div class="card-body">
+
+      <div class="ai-disclaimer" style="background:#fffbeb;border-color:#fde68a;color:var(--rf-amber-700);border-left-color:var(--rf-amber-600);">
+        <strong>Development-only advisor authentication.</strong>
+        <ul>
+          <li>Uses hard-coded demo Bearer tokens (<code>dev-advisor-token</code>, <code>dev-compliance-token</code>). NOT a productive identity provider.</li>
+          <li>Records formal advisor acts: profile approval, override approval, final portfolio selection.</li>
+          <li>The backend does NOT yet validate that <code>related_record_id</code> / <code>override_approval_record_id</code> point to real, consistent records.</li>
+          <li>Does NOT replace a digital signature, role-based access control, or any compliance sign-off.</li>
+          <li>Endpoints: <code>GET /auth/me</code>, <code>POST /advisor/profile-approval</code>, <code>POST /advisor/override-approval</code>, <code>POST /advisor/portfolio-selection</code>.</li>
+        </ul>
+      </div>
+
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">1. Advisor token</div>
+        <div class="form-grid cols-3">
+          <div class="field full-span">
+            <label>advisor_token <span class="hint">sent as <code>Authorization: Bearer &lt;token&gt;</code> to all advisor endpoints below</span></label>
+            <input type="text" id="adv-token" value="dev-advisor-token" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-auth" onclick="checkAdvisorAuth()">Check Advisor Auth</button>
+          <button class="btn-secondary" onclick="clearAdvisorAuthResult()">Clear</button>
+        </div>
+        <div id="adv-auth-result" style="margin-top:12px;"></div>
+      </div>
+
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">2. Profile approval — POST /advisor/profile-approval</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-prof-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>proposed_profile</label>
+            <select id="adv-prof-proposed">
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado" selected>moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>decision</label>
+            <select id="adv-prof-decision">
+              <option value="approve" selected>approve</option>
+              <option value="modify">modify</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>approved_profile <span class="hint">required for <code>modify</code>; must be <code>null</code> for <code>reject</code></span></label>
+            <select id="adv-prof-approved">
+              <option value="">(none / inherit from proposed for approve)</option>
+              <option value="conservador">conservador</option>
+              <option value="moderado-defensivo">moderado-defensivo</option>
+              <option value="moderado">moderado</option>
+              <option value="moderado-agresivo">moderado-agresivo</option>
+              <option value="agresivo">agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-prof-source" value="manual" />
+          </div>
+          <div class="field">
+            <label>related_record_id <span class="hint">optional</span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-prof-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary btn-sm" type="button" style="white-space:nowrap;"
+                onclick="fillLastAIFPRecordId('adv-prof-related', 'adv-prof-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-prof-related-msg" style="font-size:11px;color:var(--rf-text-muted);"></span>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-prof-rationale" rows="2">Advisor reviewed the AI profile proposal and confirms suitability for this client.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-prof" onclick="submitProfileApproval()">Submit Profile Approval</button>
+          <button class="btn-secondary" onclick="clearProfileApprovalResult()">Clear</button>
+        </div>
+        <div id="adv-prof-result" style="margin-top:12px;"></div>
+      </div>
+
+      <div style="padding:14px 0;border-bottom:1px solid #dde2ea;margin-bottom:14px;">
+        <div class="ai-section-title" style="margin-bottom:10px;">3. Override approval — POST /advisor/override-approval</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-ovr-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>candidate_variant</label>
+            <select id="adv-ovr-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED">BALANCED</option>
+              <option value="GROWTH" selected>GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>decision</label>
+            <select id="adv-ovr-decision">
+              <option value="approve" selected>approve</option>
+              <option value="reject">reject</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-ovr-source" value="manual" />
+          </div>
+          <div class="field full-span">
+            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-ovr-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary btn-sm" type="button" style="white-space:nowrap;"
+                onclick="fillLastAIFPRecordId('adv-ovr-related', 'adv-ovr-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-ovr-related-msg" style="font-size:11px;color:var(--rf-text-muted);"></span>
+          </div>
+          <div class="field">
+            <label>reason_codes <span class="hint">one per line</span></label>
+            <textarea id="adv-ovr-reasons" rows="2" style="font-family:'JetBrains Mono','Consolas',monospace;font-size:12px;">PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET</textarea>
+          </div>
+          <div class="field">
+            <label>exceeded_constraints <span class="hint">one per line</span></label>
+            <textarea id="adv-ovr-exceeded" rows="2" style="font-family:'JetBrains Mono','Consolas',monospace;font-size:12px;">max_volatility</textarea>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-ovr-rationale" rows="2">Advisor reviewed the GROWTH variant and accepts the risk budget override for discussion with the client.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-ovr" onclick="submitOverrideApproval()">Submit Override Approval</button>
+          <button class="btn-secondary" onclick="clearOverrideApprovalResult()">Clear</button>
+        </div>
+        <div id="adv-ovr-result" style="margin-top:12px;"></div>
+      </div>
+
+      <div style="padding:14px 0;">
+        <div class="ai-section-title" style="margin-bottom:10px;">4. Portfolio selection — POST /advisor/portfolio-selection</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>client_id</label>
+            <input type="text" id="adv-sel-client_id" value="CLI-PREF-PORT-001" />
+          </div>
+          <div class="field">
+            <label>selected_variant</label>
+            <select id="adv-sel-variant">
+              <option value="DEFENSIVE">DEFENSIVE</option>
+              <option value="BALANCED" selected>BALANCED</option>
+              <option value="GROWTH">GROWTH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>source</label>
+            <input type="text" id="adv-sel-source" value="manual" />
+          </div>
+          <div class="field full-span">
+            <label>related_record_id <span class="hint">optional — typically <code>ai_filtered_portfolio_NNNNNN</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-sel-related" placeholder="ai_filtered_portfolio_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary btn-sm" type="button" style="white-space:nowrap;"
+                onclick="fillLastAIFPRecordId('adv-sel-related', 'adv-sel-related-msg')">
+                Use last AIFP
+              </button>
+            </div>
+            <span id="adv-sel-related-msg" style="font-size:11px;color:var(--rf-text-muted);"></span>
+          </div>
+          <div class="field full-span">
+            <label>override_approval_record_id <span class="hint">optional — recommended when selecting <code>GROWTH</code></span></label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" id="adv-sel-override" placeholder="advisor_override_approval_NNNNNN" style="flex:1;" />
+              <button class="btn-secondary btn-sm" type="button" style="white-space:nowrap;"
+                onclick="fillLastOverrideRecordId('adv-sel-override', 'adv-sel-override-msg')">
+                Use last override
+              </button>
+            </div>
+            <span id="adv-sel-override-msg" style="font-size:11px;color:var(--rf-text-muted);"></span>
+          </div>
+        </div>
+        <div class="field full-span" style="margin-top:12px;">
+          <label>rationale</label>
+          <textarea id="adv-sel-rationale" rows="2">Advisor selected BALANCED as the final client-facing portfolio proposal.</textarea>
+        </div>
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn-primary" id="btn-adv-sel" onclick="submitPortfolioSelection()">Submit Portfolio Selection</button>
+          <button class="btn-secondary" onclick="clearPortfolioSelectionResult()">Clear</button>
+        </div>
+        <div id="adv-sel-result" style="margin-top:12px;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── 8. PERSISTED WORKFLOWS ────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Persisted Workflows — GET /workflow</h2>
+    </div>
+    <div class="card-body">
+      <div class="filter-row">
+        <div class="field">
+          <label>Filter by client_id <span class="hint">optional</span></label>
+          <input type="text" id="filter-client_id" placeholder="e.g. CLI-123" />
+        </div>
+        <button class="btn-primary" onclick="loadWorkflows()">Load Workflows</button>
+        <button class="btn-secondary" onclick="clearWorkflowsTable()">Clear</button>
+      </div>
+      <div id="workflows-result"></div>
+    </div>
+  </div>
+
+  </div><!-- /legacy-group -->
+
+</main>
 
 <script src="js/common.js"></script>
 <script src="js/legacy-demo.js"></script>
 <script src="js/case-dashboard.js"></script>
 <script src="js/case-workbench.js"></script>
 
+<!-- Inline glue for the hero CTA + step-indicator state sync -->
+<script>
+  // Hero CTA: pre-fill case_demo_local, scroll to the Workbench, load summary
+  function heroOpenDemoCase() {
+    const cd = document.getElementById("cd-summary-case-id");
+    const cw = document.getElementById("cw-case-id");
+    if (cd && !cd.value) cd.value = "case_demo_local";
+    if (cw) cw.value = "case_demo_local";
+    const anchor = document.getElementById("card-case-workbench");
+    if (anchor) anchor.scrollIntoView({behavior:"smooth", block:"start"});
+    if (typeof cwLoadSummary === "function") {
+      try { cwLoadSummary(); } catch (e) { /* swallow — backend may be down */ }
+    }
+  }
+
+  // Step indicator state sync: read the Workbench summary and color the dots
+  // Hooks into the existing cwAutofillFromSummary, which is called after every
+  // successful cwLoadSummary (and after every successful POST via cwRefreshAfterPost).
+  function rfaUpdateStepIndicator(summary) {
+    if (!summary) return;
+    const p = summary.progress || {};
+    const cps = summary.current_portfolio_selection || null;
+    const cr  = summary.current_report || null;
+    // Map per step (index 0 = step 1 "Case")
+    const states = [
+      "completed",                                                                              // 1. Case (always loaded if we have a summary)
+      p.has_kyc                          ? "completed" : "ready",                               // 2. KYC
+      p.has_ai_profile_analysis          ? "completed" : (p.has_kyc ? "ready" : "pending"),     // 3. AI Analysis
+      p.has_profile_approval             ? "completed" : (p.has_ai_profile_analysis ? "ready" : "pending"), // 4. Approval
+      p.has_investment_preferences       ? "completed" : (p.has_profile_approval ? "ready" : "pending"),    // 5. Preferences
+      p.has_universe_filter              ? "completed" : (p.has_investment_preferences ? "ready" : "pending"), // 6. Filter
+      p.has_portfolio_proposal           ? "completed" : (p.has_universe_filter ? "ready" : "pending"),     // 7. Proposal
+      p.has_override_approval            ? "completed" : (p.has_portfolio_proposal ? "ready" : "pending"),  // 8. Override
+      cps                                ? "completed" : (p.has_portfolio_proposal ? "ready" : "pending"), // 9. Selection
+      cr                                 ? "completed" : (cps ? "ready" : "pending"),                       // 10. Report
+      cr                                 ? "completed" : "pending"                                          // 11. Summary
+    ];
+    const cells = document.querySelectorAll("#card-case-workbench .step-indicator .step-cell");
+    cells.forEach((cell, idx) => {
+      const state = states[idx] || "pending";
+      cell.setAttribute("data-state", state);
+    });
+  }
+
+  // Patch into cwAutofillFromSummary if it exists (defined in case-workbench.js)
+  // We wrap (don't replace) so original behaviour stays intact.
+  (function () {
+    if (typeof cwAutofillFromSummary === "function") {
+      const _orig = cwAutofillFromSummary;
+      window.cwAutofillFromSummary = function (s) {
+        try { _orig(s); } finally {
+          try { rfaUpdateStepIndicator(s); } catch (e) { /* never break the flow */ }
+        }
+      };
+    }
+  })();
+</script>
 
 </body>
 </html>

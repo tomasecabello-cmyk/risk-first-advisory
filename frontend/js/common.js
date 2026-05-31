@@ -60,3 +60,16 @@ function setButtonLoading(btnId, loading) {
     : "Run Workflow";
 }
 
+// ── tiny JSON details wrapper (used by cw*/cd* renderers) ─────────────
+// Renders a `<details>` collapsible with the raw JSON inside a <pre>.
+// Keeps executive summaries above the fold; technical JSON below.
+// `escapeHTML` is defined in legacy-demo.js and loaded by the time these
+// run, so we reference it lazily.
+function rfaJsonDetails(data, label) {
+  const heading = label || "Raw JSON response";
+  const safeJson = (typeof escapeHTML === "function")
+    ? escapeHTML(formatJSON(data))
+    : formatJSON(data).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  return `<details><summary>${heading}</summary><pre class="json-block">${safeJson}</pre></details>`;
+}
+

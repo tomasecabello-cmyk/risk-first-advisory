@@ -27,7 +27,8 @@ function cwClearResult(elId) {
 function cwRenderJson(elId, data, prefixHtml = "") {
   const target = el(elId);
   if (!target) return;
-  target.innerHTML = prefixHtml + `<pre class="json-block">${escapeHTML(formatJSON(data))}</pre>`;
+  // Executive summary (prefixHtml) on top; raw JSON folded into <details> below.
+  target.innerHTML = prefixHtml + rfaJsonDetails(data, "Raw JSON response");
 }
 
 function cwRenderError(elId, msgHtml) {
@@ -41,7 +42,7 @@ function cwRenderSuccess(elId, msgHtml, data) {
   if (!target) return;
   const head = `<div class="msg msg-success">${msgHtml}</div>`;
   const body = data !== undefined
-    ? `<pre class="json-block" style="margin-top:8px;">${escapeHTML(formatJSON(data))}</pre>`
+    ? `<div style="margin-top:10px;">${rfaJsonDetails(data, "Raw JSON response")}</div>`
     : "";
   target.innerHTML = head + body;
 }
