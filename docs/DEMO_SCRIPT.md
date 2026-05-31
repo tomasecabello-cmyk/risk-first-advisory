@@ -2,13 +2,15 @@
 
 Guía de recorrido de demo de 5–7 minutos para mostrar el producto a un asesor financiero o potencial usuario.
 
-Hay **tres caminos de demo**:
+**Demo visual local lista (Fase 3 cerrada como plug-and-play).** Hay **tres caminos** según el escenario:
 
-- **A. Demo visual completa (recomendada).** Bootstrap local + frontend con Case Dashboard + Case Workbench (15 paneles del flujo case-scoped). Es el camino que el dev/asesor/mentor debería ver primero. Ver sección "Camino A — Demo visual completa" abajo.
-- **B. Smoke check backend end-to-end.** Ejecutable de consola que valida `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn. Útil como "candado" de Fase 2 o como verificación rápida en CI. Ver "Camino B — Smoke check backend".
-- **C. Seed-only / cards legacy.** Para demos rápidas de las cards Fase 0/1 (`/ai/profile-demo`, `/live/portfolio-demo`, etc.) o cuando solo se necesitan las entidades demo sin levantar el frontend. Ver "Camino C — Cards legacy / seed-only".
+- **Camino A — Demo visual completa (recomendada).** Bootstrap local + backend + frontend + Case Dashboard + Case Workbench (15 paneles del flujo case-scoped). Es el camino que el dev / asesor / mentor debería ver primero. Ver sección "Camino A — Demo visual completa" abajo.
+- **Camino B — Smoke check backend end-to-end.** Ejecutable de consola que valida `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn corriendo. Útil como "candado" en CI o como alternativa cuando `OPENAI_API_KEY` no está disponible (el smoke check usa **mock determinístico** de OpenAI). Ver "Camino B — Smoke check backend".
+- **Camino C — Seed-only / cards legacy / manual.** Para demos rápidas de las cards Fase 0/1 (`/ai/profile-demo`, `/live/portfolio-demo`, etc.), o cuando solo se necesitan las entidades demo sin levantar el frontend, o para ejercitar a mano vía Swagger. Ver "Camino C — Cards legacy / seed-only".
 
-> **OPENAI_API_KEY**: NO es necesaria para los caminos A (Workbench), B (smoke), ni C (seed). Solo los endpoints `/ai/*` reales del Workbench (AI Profile Analysis, AI Investment Preferences NLP) y las cards AI legacy (Fase 0/1) la requieren. El smoke check y los tests usan mocks determinísticos.
+> **OPENAI_API_KEY**: NO es obligatoria para los tres caminos. **Excepción**: en el Camino A, el panel "AI Profile Analysis" del Workbench (sección 3) llama OpenAI real y devolverá HTTP 400 sin la key — el resto del Workbench (KYC, profile approval, preferences manual, universe filter, portfolio proposal, override, selection, report, audit, AI logs) funciona sin ella. El Camino B usa mock determinístico, no requiere la key. Las cards AI legacy del Camino C (Fase 0/1) sí la requieren.
+
+> **No usar con datos reales sensibles.** Esta demo es para dev / pilot interno con datos demo. No cargar PII real de clientes — no hay encryption at-rest, no hay firm-level access control completo, los tokens dev viajan en plano por HTTP local. **Local demo NO es production-ready** — ver `README.md` sección "Phase 3 local demo readiness" y `docs/COMPLIANCE_NOTES.md` para el detalle de scope vs out-of-scope.
 
 ---
 

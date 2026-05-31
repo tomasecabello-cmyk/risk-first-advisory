@@ -1,6 +1,6 @@
 # Architecture — risk-first-advisory
 
-**Estado:** M1 completo. Fase 2 cerrada como workflow case-scoped backend (ver sección "Fase 2 — case-scoped entities y workflow" al final). Fase 3 en curso: Case Dashboard + Case Workbench (15 paneles end-to-end) + frontend separado en `frontend/css/`, `frontend/js/{common,legacy-demo,case-dashboard,case-workbench}.js` (scripts clásicos, sin build step) + `scripts/bootstrap_local_demo.py` como entrypoint dev/demo (migrate + seed + check + imprime URLs/tokens/comandos) — todos operativos. Resta `/health/full` opcional.
+**Estado:** M1 completo. Fase 2 cerrada como workflow case-scoped backend (ver sección "Fase 2 — case-scoped entities y workflow" al final). Fase 3 **cerrada como local/demo plug-and-play** ✅: Case Dashboard + Case Workbench (15 paneles end-to-end) + frontend separado en `frontend/index.html` + `frontend/css/base.css` + `frontend/js/{common,legacy-demo,case-dashboard,case-workbench}.js` (scripts clásicos, sin build step) + `scripts/bootstrap_local_demo.py` como entrypoint dev/demo (migrate + seed + check + imprime URLs / tokens / comandos). **Esto NO significa production-ready ni piloto B2B vendible** — ver `README.md` → "Phase 3 local demo readiness" para scope exacto. **Fase 4 próxima**: pilot readiness / hardening (market data, PDF, firm-level access, production auth, backup/restore, `/health/full` runtime, deployment productivo).
 
 ---
 

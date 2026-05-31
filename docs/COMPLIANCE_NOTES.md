@@ -2,7 +2,17 @@
 
 Notas de diseño relevantes para la revisión regulatoria y de compliance del sistema. Este documento no es asesoramiento legal. Describe las decisiones de arquitectura que soportan los requisitos de compliance de un sistema de asesoría de inversiones (MiFID II, CNBV, SEC/FINRA según jurisdicción).
 
-**Estado actual:** Fase 2 cerrada como backend/workflow case-scoped. **NO production-ready.** No reemplaza al asesor humano. No constituye recomendación automática de inversión. Sign-off legal/compliance formal pendiente.
+**Estado actual:** Fase 2 cerrada como backend/workflow case-scoped. Fase 3 cerrada como **demo local plug-and-play** (Case Dashboard + Case Workbench operables desde navegador en una máquina dev). El cierre de Fase 3 **no cambia** el estado de compliance / productivo: sigue siendo dev local, no production-ready, sin sign-off legal. **NO production-ready.** No reemplaza al asesor humano. No constituye recomendación automática de inversión. Sign-off legal/compliance formal pendiente (Fase 4 — pilot readiness).
+
+### Qué NO significa Fase 3 cerrada (desde compliance)
+
+El cierre de Fase 3 habilita demos operables en una máquina dev. Lo que sigue siendo cierto independientemente de Fase 3:
+
+- **No usar con datos reales sensibles** (PII de clientes reales). El stack local está pensado para datos demo.
+- **Local audit chain ≠ WORM / blockchain.** El hash chain SHA-256 por case (sección "Límites duros de esta implementación" abajo) sigue siendo útil para demo/dev y para defenderse contra mutación puntual de un payload, pero no contra reescritura coordinada por un actor con acceso directo a la SQLite.
+- **Auth dev tokens ≠ control productivo.** Los tokens `dev-advisor-token` / `dev-compliance-token` (o un YAML local) son strings opacos en claro; sin JWT, sin IdP, sin rotación, sin revocation, sin firma.
+- **Sin firm-level access control completo, sin cifrado at-rest, sin retention policy, sin firma digital del advisor sobre las decisiones, sin anclaje externo del audit chain.** Todo eso está en Fase 4.
+- **Local demo NO es piloto B2B vendible.** Fase 3 cerrada habilita demos a stakeholders internos, mentores y asesores curiosos en una máquina dev — no habilita un acuerdo comercial con una firma cliente.
 
 ---
 

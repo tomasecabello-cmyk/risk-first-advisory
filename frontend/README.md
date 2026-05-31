@@ -2,7 +2,29 @@
 
 Página HTML estática para probar visualmente el backend sin usar terminal ni curl.
 
-Estructura (Phase 3 frontend split — sin build step ni dependencias):
+## Estado actual
+
+**Fase 3 cerrada como UI local/dev plug-and-play ✅.** Hoy entregado:
+
+- **Case Dashboard** disponible (CRUD de firms / advisors / clients / cases + carga `GET /cases/{id}/summary`).
+- **Case Workbench end-to-end** disponible (15 paneles: KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override → selection → report + audit trail / verify / AI logs / compliance snapshot).
+- **Frontend split** en `css/base.css` + `js/{common, legacy-demo, case-dashboard, case-workbench}.js` (sin build step, sin frameworks, sin CDN).
+- **Setup recomendado:** `python scripts/bootstrap_local_demo.py` antes del primer `uvicorn` + `http.server` (idempotente; aplica migrations + crea `case_demo_local` listo para abrir). Ver "Cómo abrir el frontend" abajo y la sección "Local plug-and-play demo" del `README.md` raíz.
+
+**Pendiente Fase 4 (NO incluido en este cierre):**
+
+- PDF / branding del report (hoy solo Markdown).
+- Compliance export package (ZIP con report + audit + logs sanitizados).
+- Market data provider productivo + manual universe upload (universe-filter sigue contra el CSV fixture).
+- Auth productiva (JWT/OIDC/IdP, rotación, revocation) + firm-level access control completo.
+
+**No production-ready.** Esta UI es para dev/demo local — no usar contra un backend expuesto en red pública, no cargar PII real de clientes.
+
+---
+
+## Estructura del frontend
+
+(Phase 3 frontend split — sin build step ni dependencias):
 
 ```
 frontend/

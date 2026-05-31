@@ -33,7 +33,7 @@ Fase 2 está **funcionalmente cerrada a nivel backend/workflow**. El flujo compl
 
 Esto está documentado para evitar confusiones operativas, **no** son bugs ni regresiones:
 
-- **Frontend nuevo case-scoped** — ✅ entregado en Fase 3 (Case Dashboard + Case Workbench con 15 paneles).
+- **Frontend nuevo case-scoped** — ✅ entregado en Fase 3 cerrada como local/demo (Case Dashboard + Case Workbench con 15 paneles).
 - **Firm-level access control** completo — cualquier token con rol válido ve cualquier case. Item Fase 4.
 - **Auth productiva** (JWT/OIDC/IdP) — tokens son strings opacos en YAML. Item Fase 4.
 - **Live market data provider** — el universe-filter sigue usando CSV fixture. Item Fase 4.
@@ -44,36 +44,49 @@ Esto está documentado para evitar confusiones operativas, **no** son bugs ni re
 
 ### Próximos focos
 
-- **Fase 3 (en curso, operativa)**: Case Dashboard + Case Workbench + bootstrap local ya entregados. Resta `/health/full` opcional. Ver sección "Fase 3 — UI + bootstrap local" más abajo.
-- **Fase 4**: pilot readiness / production hardening (market data, PDF, firm-level access, auth productiva, manual universe upload). Ver sección "Fase 4 — Pilot readiness".
+- **Fase 3 cerrada como local/demo plug-and-play ✅**: Case Dashboard + Case Workbench end-to-end + bootstrap local + plug-and-play docs + cleanup de copy obsoleto. Ver sección "Fase 3 — UI + bootstrap local ✅ (cerrada como local/demo)" más abajo.
+- **Fase 4 próxima**: pilot readiness / production hardening (market data, PDF, firm-level access, auth productiva, manual universe upload, backup/restore, `/health/full` runtime, deployment productivo). Ver sección "Fase 4 — Pilot readiness".
 
 ---
 
-## Fase 3 — UI + bootstrap local (en curso — operable end-to-end)
+## Fase 3 — UI + bootstrap local ✅ (cerrada como local/demo plug-and-play)
 
-Objetivo: que un dev nuevo pueda clonar el repo, correr un script, y ver el flujo case-scoped end-to-end en el navegador sin pasos manuales adicionales.
+Objetivo: que un dev / asesor / mentor pueda clonar el repo, correr un script, y ver el flujo case-scoped end-to-end en el navegador sin pasos manuales adicionales.
 
-Estado: **el camino plug-and-play está operable**. Un dev/asesor/mentor puede levantar el demo desde cero siguiendo `README.md → "Local plug-and-play demo"` o `docs/DEMO_SCRIPT.md → "Camino A"`. Resta solamente el endpoint `/health/full` como hardening opcional.
+Estado: **cerrada como demo local plug-and-play**. Un dev / asesor / mentor puede levantar el demo desde cero siguiendo `README.md → "Local plug-and-play demo"` o `docs/DEMO_SCRIPT.md → "Camino A"`.
+
+**Importante:** "cerrada" acá significa cerrada como **demo local operable desde navegador**. **NO** significa production-ready, **NO** significa piloto B2B vendible, **NO** significa que se pueda cargar PII real de clientes. El scope explícito de qué entra y qué NO entra está en `README.md` → "Phase 3 local demo readiness". Los entregables de production / pilot hardening pasaron a Fase 4 (sección siguiente).
+
+### Entregables Fase 3 cerrados
 
 - ~~**Case Dashboard frontend** — listado de cases con `current_*` flags y `next_recommended_action` consumidos de `GET /cases/{id}/summary`.~~ ✅
 - ~~**Case Workbench frontend** — vista detalle por case con tabs para KYC / análisis / approval / preferences / filter / proposal / override / selection / report / audit / AI logs / compliance snapshot.~~ ✅ (15 paneles end-to-end)
+- ~~**Audit + AI logs panels** — secciones 12 (Audit Trail), 13 (Audit Verification), 14 (AI Request Logs) y 15 (Compliance Snapshot) del Workbench operativos.~~ ✅
 - ~~**Frontend cleanup / split** — separar HTML estructural de CSS/JS.~~ ✅ (`css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js`)
 - ~~**Seed demo data script** — crea/reusa firm/advisor/client/case demo con IDs estables `*_demo_local`; idempotente; aplica migrations automáticamente.~~ ✅ (`scripts/seed_demo_data.py`)
 - ~~**Local bootstrap script** — un comando que aplica migrations + corre seed + valida archivos del frontend + detecta config + imprime comandos backend/frontend + tokens. Flags `--check-only`, `--skip-migrate`, `--skip-seed`, `--run-smoke`.~~ ✅ (`scripts/bootstrap_local_demo.py`)
-- ~~**Plug-and-play docs** — README "Local plug-and-play demo" + `frontend/README.md` flujo recomendado + `docs/DEMO_SCRIPT.md` con caminos A/B/C.~~ ✅
-- **Setup health checks** — parcialmente cubierto: `bootstrap_local_demo.py --check-only` valida archivos del frontend, scripts, python imports y detecta config (tokens YAML, OPENAI_API_KEY). **Pendiente**: endpoint `GET /health/full` runtime que valide migrations aplicadas + tokens cargados + fixtures presentes desde un backend ya en marcha (útil para monitoreo post-deploy más allá del bootstrap inicial).
+- ~~**Plug-and-play docs** — README "Local plug-and-play demo" + "Phase 3 local demo readiness" + `frontend/README.md` flujo recomendado + `docs/DEMO_SCRIPT.md` con caminos A/B/C.~~ ✅
+- ~~**Stale frontend copy cleanup** — corregidos textos visibles e HTML comments en `frontend/index.html` y `frontend/README.md` que afirmaban "Case Workbench pendiente", "Audit panel pendiente", "Frontend refactor / split pendiente", "Fase 3 próxima".~~ ✅ (commit `4fa2678`)
+
+### Lo que Fase 3 cerrada NO incluye (movido a Fase 4)
+
+- **`/health/full` runtime endpoint** — el `bootstrap_local_demo --check-only` ya cubre validación pre-arranque (archivos, scripts, imports, config). Un endpoint runtime separado que valide migrations aplicadas + tokens cargados + fixtures presentes desde un backend ya en marcha es **pilot-hardening**, no demo local: pasa a Fase 4.
+- Todo lo que no sea local / dev / demo (production auth, firm-level access control, PostgreSQL, market data productivo, PDF, backup/restore, deployment, sign-off legal, etc.) — ver Fase 4.
 
 ## Fase 4 — Pilot readiness (después de Fase 3)
 
 Hardening necesario para correr el sistema con un asesor piloto real (no producción aún):
 
 - **Firm-level access control** — `firm_id` en token + filtrado por firm en todos los `/cases/*`.
-- **Production auth** — JWT/OIDC/IdP integration; rotación de tokens; revocation.
+- **Production auth** — JWT/OIDC/IdP integration; rotación de tokens; revocation; emisión.
 - **Market data provider productivo** — reemplazar el CSV fixture por live provider con SLA de frescura y validación.
 - **Manual universe upload** — admin endpoint para reemplazar el CSV sin redeploy.
 - **PDF / branding del report** — render de markdown a PDF con logo + colores + header de la firm.
+- **Compliance export package (ZIP)** — bundle automático de report + audit trail + AI logs sanitizados.
 - **Lifecycle formal de reports** (draft → reviewed → final → sent).
 - **Backup / restore** de la DB SQLite (o migración a PostgreSQL si la escala lo pide).
+- **`/health/full` runtime endpoint** — valida migrations aplicadas + tokens cargados + fixtures presentes desde un backend en marcha (complementa el `bootstrap_local_demo --check-only` pre-arranque).
+- **Deployment productivo** — Dockerfile / compose / Helm + CI/CD pipeline + observabilidad (logs estructurados, métricas, tracing).
 - **Pilot readiness checklist** — documentación legal/compliance, sign-off, runbook de incidentes.
 - **Cifrado at-rest** + retention/pruning policy para `ai_request_logs`, `kyc_submissions`, etc.
 - **Anclaje externo del audit chain** (timestamping authority o append-only external store) para defenderse contra DBA malicioso.

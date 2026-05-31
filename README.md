@@ -12,7 +12,8 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
 - **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
 - **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
-- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). **Bootstrap local en un comando**: `python scripts/bootstrap_local_demo.py` (migrate + seed + checks + instrucciones; `--check-only` para CI; `--run-smoke` para verificar end-to-end). Plug-and-play docs (sección "Local plug-and-play demo" más abajo) cubren el setup completo desde cero. Pendientes: market data provider productivo, manual universe upload, PDF export del report, compliance ZIP package (todos van a Fase 4).
+- **Fase 3 cerrada como local/demo plug-and-play ✅:** Case Dashboard + Case Workbench end-to-end (15 paneles: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**), auto-refresh del summary tras cada POST (audit/logs panels son load manual), frontend separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step), seed demo data idempotente (`scripts/seed_demo_data.py`), bootstrap local en un comando (`scripts/bootstrap_local_demo.py` — migrate + seed + checks + imprime instrucciones; `--check-only` / `--skip-*` / `--run-smoke`), plug-and-play docs completos (sección "Local plug-and-play demo" más abajo) y limpieza de copy obsoleto del frontend. **Esto NO significa production-ready ni piloto B2B vendible** — ver sección "Phase 3 local demo readiness" abajo para el scope exacto.
+- **Fase 4 próxima — pilot readiness / hardening:** market data provider productivo, manual universe upload, PDF / branding del report, compliance ZIP export package, firm-level access control real, auth productiva (JWT/OIDC/IdP, rotación, revocation), backup/restore (o migración a PostgreSQL si la escala lo pide), cifrado at-rest, retention/pruning policy, anclaje externo del audit chain, `/health/full` runtime, deployment productivo, sign-off legal/compliance formal.
 - **OpenAI** requerido solo para los endpoints `/ai/*` legacy; el flujo case-scoped soporta `POST /cases/{id}/ai/profile-analysis` también, pero los tests y el smoke check usan mocks determinísticos.
 - **yfinance** requerido para `/live/portfolio-demo` (legacy).
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para todos los flujos demo, incluyendo `POST /cases/{id}/universe-filter`.
@@ -20,6 +21,42 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - Sin PostgreSQL (SQLite local).
 - **Auth development-only:** Bearer token con mapa configurable vía YAML (`config/advisor_tokens.yaml` o `ADVISOR_TOKENS_FILE` env var). Sin JWT, sin IdP, sin rotación, sin firm-level access control. Exclusivamente desarrollo local — ver sección "Auth scaffold".
 - **Esto NO es production-ready.** No es asesoramiento financiero. No reemplaza al asesor humano. Ver `docs/COMPLIANCE_NOTES.md` para límites detallados.
+
+---
+
+## Phase 3 local demo readiness
+
+Fase 3 quedó cerrada como **demo local plug-and-play operable desde navegador**. Esta sección documenta con precisión qué entra y qué NO entra en ese cierre, para evitar confusiones operativas o de venta.
+
+### ✅ Qué se puede hacer hoy (in scope)
+
+Tras un `pip install -e .` y un `python scripts/bootstrap_local_demo.py`:
+
+- Correr `bootstrap_local_demo` (idempotente; aplica migrations + crea entidades demo + valida frontend + detecta config + imprime los comandos siguientes).
+- Levantar el backend FastAPI local (`python -m uvicorn risk_first_advisory.api_layer.main:app --reload`) en `http://127.0.0.1:8000` con Swagger UI en `/docs`.
+- Levantar el frontend estático (`python -m http.server 5500 -d frontend`) en `http://127.0.0.1:5500`.
+- Abrir el **Case Dashboard** y navegar el CRUD de firms / advisors / clients / cases + cargar `GET /cases/{id}/summary`.
+- Abrir el **Case Workbench** sobre `case_demo_local` (creado por el seed) y recorrer el flujo case-scoped end-to-end desde el navegador: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation.
+- Revisar el **audit trail** (hash chain SHA-256 por case) y verificar su integridad (`/cases/{id}/audit/verify`) desde el panel del Workbench.
+- Revisar los **AI request logs** con PII redactada por el backend.
+- Generar el **report Markdown determinístico** (4 disclaimers fijos + secciones estándar).
+- Correr el smoke check end-to-end sin frontend ni OpenAI (`python scripts/run_case_workflow_smoke_check.py`) con mock determinístico — Exit 0 = PASS.
+
+### ❌ Qué NO incluye este cierre (queda para Fase 4)
+
+Phase 3 cerrada **no** significa ninguna de las siguientes capacidades, todas explícitamente fuera de scope:
+
+- **Production auth.** Tokens son strings opacos en YAML (`config/advisor_tokens.yaml` o `ADVISOR_TOKENS_FILE` env var). Sin JWT, sin IdP, sin OIDC, sin rotación, sin revocation, sin emisión.
+- **Firm-level access control completo.** Cualquier token con rol válido ve y opera sobre cualquier case (el `firm_id` existe en las tablas pero no se filtra en los endpoints).
+- **PostgreSQL.** Solo SQLite local (`data/demo_api.db`); sin pool de conexiones, sin réplica, sin clustering.
+- **Market data provider productivo.** El universe-filter sigue contra el CSV fixture (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos); sin SLA de frescura, sin validación contra Bloomberg / Refinitiv / Yahoo en tiempo real (excepto la card legacy `/live/portfolio-demo` que usa yfinance solo para demo).
+- **Manual universe upload.** No hay admin endpoint para reemplazar el CSV sin redeploy.
+- **PDF / branding del report.** El report es Markdown determinístico; sin render PDF, sin logo de la firm, sin colores corporativos.
+- **Compliance export package (ZIP).** Sin bundle automático de report + audit trail + AI logs sanitizados.
+- **Backup / restore.** Sin política de backup automático ni runbook de restore; solo `scripts/backup_db.py` manual.
+- **Deployment productivo.** Sin Dockerfile, sin compose, sin Helm chart, sin CI/CD pipeline, sin healthcheck `/health/full` runtime, sin observabilidad (logs estructurados / métricas / tracing).
+- **Uso con datos reales sensibles.** El sistema está pensado para dev local con datos demo. **No cargar PII real de clientes**: no hay encryption at-rest, no hay retention policy, no hay sign-off legal/compliance formal, los tokens dev viajan en plano por HTTP local. Ver `docs/COMPLIANCE_NOTES.md` para el detalle.
+- **Piloto B2B vendible.** Fase 3 cerrada habilita demos a stakeholders internos, mentores, asesores curiosos en una máquina dev — NO habilita un acuerdo comercial con una firma cliente. Para eso hay que cerrar Fase 4 (pilot readiness).
 
 ---
 
