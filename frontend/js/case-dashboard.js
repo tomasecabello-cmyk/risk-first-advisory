@@ -56,7 +56,7 @@ function cdRenderSuccess(elId, msgHtml, data) {
   target.innerHTML = head + body;
 }
 
-function cdRenderLoading(elId, msg = "Loading…") {
+function cdRenderLoading(elId, msg = "Cargando…") {
   const target = el(elId);
   if (target) target.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>${msg}</div>`;
 }
@@ -92,7 +92,7 @@ async function cdApiFetch(path, options = {}) {
 // ── 1. Auth ────────────────────────────────────────────────────────────
 
 async function cdCheckAuth() {
-  cdRenderLoading("cd-auth-result", "Calling GET /auth/me…");
+  cdRenderLoading("cd-auth-result", "Llamando a GET /auth/me…");
   const headers = cdAuthHeaders();
   if (!headers["Authorization"]) {
     cdRenderError("cd-auth-result", "<strong>Token vacío.</strong> Ingresar un Bearer token primero.");
@@ -127,7 +127,7 @@ async function cdCreateFirm() {
   const fid = cdNullIfBlank(el("cd-firm-id").value);
   if (fid) body.firm_id = fid;
 
-  cdRenderLoading("cd-firms-result", "Creating firm…");
+  cdRenderLoading("cd-firms-result", "Creando firm…");
   const res = await cdApiFetch("/firms", {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -158,7 +158,7 @@ async function cdCreateFirm() {
 }
 
 async function cdListFirms() {
-  cdRenderLoading("cd-firms-result", "Loading firms…");
+  cdRenderLoading("cd-firms-result", "Cargando firms…");
   const res = await cdApiFetch("/firms", { headers: cdAuthHeaders() });
   if (!res.ok) {
     if (res.networkError) { el("cd-firms-result").innerHTML = apiError(res.err); return; }
@@ -198,7 +198,7 @@ async function cdCreateAdvisor() {
   const aid = cdNullIfBlank(el("cd-advisor-id").value);
   if (aid) body.advisor_id = aid;
 
-  cdRenderLoading("cd-advisors-result", "Creating advisor…");
+  cdRenderLoading("cd-advisors-result", "Creando asesor…");
   const res = await cdApiFetch("/advisors", {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -232,7 +232,7 @@ async function cdCreateAdvisor() {
 }
 
 async function cdListAdvisors() {
-  cdRenderLoading("cd-advisors-result", "Loading advisors…");
+  cdRenderLoading("cd-advisors-result", "Cargando asesores…");
   const res = await cdApiFetch("/advisors", { headers: cdAuthHeaders() });
   if (!res.ok) {
     if (res.networkError) { el("cd-advisors-result").innerHTML = apiError(res.err); return; }
@@ -260,7 +260,7 @@ async function cdCreateClient() {
   const cid = cdNullIfBlank(el("cd-client-id").value);
   if (cid) body.client_id = cid;
 
-  cdRenderLoading("cd-clients-result", "Creating client…");
+  cdRenderLoading("cd-clients-result", "Creando cliente…");
   const res = await cdApiFetch("/clients", {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -293,7 +293,7 @@ async function cdCreateClient() {
 }
 
 async function cdListClients() {
-  cdRenderLoading("cd-clients-result", "Loading clients…");
+  cdRenderLoading("cd-clients-result", "Cargando clientes…");
   const res = await cdApiFetch("/clients", { headers: cdAuthHeaders() });
   if (!res.ok) {
     if (res.networkError) { el("cd-clients-result").innerHTML = apiError(res.err); return; }
@@ -322,7 +322,7 @@ async function cdCreateCase() {
     title:           (el("cd-case-title").value || "").trim() || "Untitled case",
   };
 
-  cdRenderLoading("cd-cases-result", "Creating case…");
+  cdRenderLoading("cd-cases-result", "Creando caso…");
   const res = await cdApiFetch("/cases", {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -352,7 +352,7 @@ async function cdCreateCase() {
 }
 
 async function cdListCases() {
-  cdRenderLoading("cd-cases-result", "Loading cases…");
+  cdRenderLoading("cd-cases-result", "Cargando casos…");
   const res = await cdApiFetch("/cases", { headers: cdAuthHeaders() });
   if (!res.ok) {
     if (res.networkError) { el("cd-cases-result").innerHTML = apiError(res.err); return; }
@@ -366,7 +366,7 @@ async function cdListCases() {
 // ── 6. Quick demo seed ─────────────────────────────────────────────────
 
 async function cdSeedDemo() {
-  cdRenderLoading("cd-seed-result", "Seeding demo data…");
+  cdRenderLoading("cd-seed-result", "Cargando datos demo…");
   const headers = cdAuthHeaders(true);
   if (!headers["Authorization"]) {
     cdRenderError("cd-seed-result", "<strong>Token vacío.</strong>");

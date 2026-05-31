@@ -28,21 +28,23 @@ El eje central:
 
 Guion para mostrar el producto a un **profesor de finanzas o asesor no técnico** sin entrar en detalles de implementación. Cubre los 6 mensajes core sin tocar Swagger, ni JSON, ni endpoints.
 
-> **Pre-requisito:** levantar el entorno (Camino A más abajo). El frontend tiene un panel <em>"Recommended demo path"</em> y <em>"Demo presenter notes"</em> arriba que reproducen este guion sin que tengas que abrir este doc.
+> **Pre-requisito:** levantar el entorno (Camino A más abajo). El frontend tiene un panel <em>"Recorrido recomendado"</em> y <em>"Guion de presentación"</em> arriba que reproducen este guion sin que tengas que abrir este doc.
 
-> **Aviso para el visitante:** "Esto es una demo local de desarrollo. No es producto comercial, no es asesoramiento financiero, y no se usa con datos reales de clientes."
+> **UI en español:** la experiencia principal del frontend (hero, story-strip, recorrido, guion, Workbench, Dashboard, botones, mensajes de carga) está localizada al español. Los identificadores técnicos (`case_id`, `firm_id`, endpoints `/cases/...`, nombres de schema como `kyc_submission_id`, role names `admin`/`advisor`/`compliance`, reason_codes y status del backend) permanecen en inglés porque son contratos del backend.
+
+> **Aviso para el visitante:** "Esto es una demo local de desarrollo. No es producto comercial, no es asesoramiento financiero automático, y no se usa con datos reales de clientes."
 
 ### Paso 1 · Carta de presentación (30 s)
 
 > "Este es un backend de asesoría de inversiones. Convierte el KYC y las preferencias del cliente en una cartera **aprobada por el asesor**, con trazabilidad completa. La IA propone, el asesor decide, y cada paso queda auditado."
 
-Mostrar el hero y la story-strip de 4 cards (**What the AI does / What the advisor does / What the system enforces / What stays auditable**).
+Mostrar el hero y la story-strip de 4 cards (**Qué hace la IA / Qué hace el asesor / Qué controla el sistema / Qué queda auditado**).
 
 ### Paso 2 · La IA no decide (45 s)
 
-Hacer clic en el CTA **"Open case_demo_local in Workbench"**. El navegador hace scroll al Workbench y carga el case.
+Hacer clic en el CTA **"Abrir case_demo_local en el Workbench"**. El navegador hace scroll al Workbench y carga el case.
 
-Bajar al Step 3 ("AI Profile Analysis") y comentar:
+Bajar al Paso 3 ("Análisis de perfil con IA") y comentar:
 
 > "La IA analiza el KYC y propone un perfil de riesgo preliminar. Detecta contradicciones — por ejemplo, alguien que pide retornos altos pero declara intolerancia a drawdowns. **Nunca aprueba un perfil, nunca firma una decisión, nunca elige una cartera.**"
 

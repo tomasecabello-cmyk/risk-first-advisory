@@ -28,7 +28,7 @@ function cwRenderJson(elId, data, prefixHtml = "") {
   const target = el(elId);
   if (!target) return;
   // Executive summary (prefixHtml) on top; raw JSON folded into <details> below.
-  target.innerHTML = prefixHtml + rfaJsonDetails(data, "Raw JSON response");
+  target.innerHTML = prefixHtml + rfaJsonDetails(data, "Detalles técnicos · respuesta JSON");
 }
 
 function cwRenderError(elId, msgHtml) {
@@ -42,12 +42,12 @@ function cwRenderSuccess(elId, msgHtml, data) {
   if (!target) return;
   const head = `<div class="msg msg-success">${msgHtml}</div>`;
   const body = data !== undefined
-    ? `<div style="margin-top:10px;">${rfaJsonDetails(data, "Raw JSON response")}</div>`
+    ? `<div style="margin-top:10px;">${rfaJsonDetails(data, "Detalles técnicos · respuesta JSON")}</div>`
     : "";
   target.innerHTML = head + body;
 }
 
-function cwRenderLoading(elId, msg = "Loading…") {
+function cwRenderLoading(elId, msg = "Cargando…") {
   const target = el(elId);
   if (target) target.innerHTML = `<div class="msg msg-info"><span class="spinner"></span>${msg}</div>`;
 }
@@ -80,32 +80,32 @@ function cwSummaryHighlights(s) {
   const ap  = s.current_profile_approval || null;
 
   const row = (k, v) => `<tr><td style="padding:4px 10px;font-weight:600;color:#4a5568;font-size:12px;">${escapeHTML(k)}</td><td style="padding:4px 10px;font-size:12px;">${v}</td></tr>`;
-  const flagPill = (v) => v ? '<span class="pill pill-green">yes</span>' : '<span class="pill pill-grey">no</span>';
+  const flagPill = (v) => v ? '<span class="pill pill-green">sí</span>' : '<span class="pill pill-grey">no</span>';
   const statusBadge = (st) => st ? `<span class="pill pill-blue">${escapeHTML(st)}</span>` : "—";
-  const intactBadge = (v) => v ? '<span class="pill pill-green">intact</span>' : '<span class="pill pill-red">broken</span>';
+  const intactBadge = (v) => v ? '<span class="pill pill-green">intacta</span>' : '<span class="pill pill-red">rota</span>';
 
   return `
     <div style="border:1px solid #dde2ea;border-radius:6px;padding:10px;margin-bottom:10px;background:#fafbfd;">
-      <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Workbench overview</div>
+      <div style="font-weight:600;color:#2d3748;margin-bottom:8px;">Resumen del caso</div>
       <table style="width:100%;border-collapse:collapse;">
-        ${row("case_id",                 `<code>${escapeHTML(c.case_id || "—")}</code>`)}
-        ${row("status",                  statusBadge(c.status))}
-        ${row("completion_ratio",        `<strong>${(p.completion_ratio !== undefined ? p.completion_ratio : "—")}</strong>`)}
-        ${row("next_recommended_action", `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
-        ${row("has_kyc",                 flagPill(p.has_kyc))}
-        ${row("has_ai_profile_analysis", flagPill(p.has_ai_profile_analysis))}
-        ${row("has_profile_approval",    flagPill(p.has_profile_approval))}
-        ${row("latest_kyc.kyc_submission_id",
+        ${row("ID del caso",                  `<code>${escapeHTML(c.case_id || "—")}</code>`)}
+        ${row("Estado",                       statusBadge(c.status))}
+        ${row("Avance",                       `<strong>${(p.completion_ratio !== undefined ? p.completion_ratio : "—")}</strong>`)}
+        ${row("Próxima acción sugerida",      `<code>${escapeHTML(p.next_recommended_action || "—")}</code>`)}
+        ${row("KYC enviado",                  flagPill(p.has_kyc))}
+        ${row("Análisis IA del perfil",       flagPill(p.has_ai_profile_analysis))}
+        ${row("Perfil aprobado por asesor",   flagPill(p.has_profile_approval))}
+        ${row("Último KYC (kyc_submission_id)",
               kyc && kyc.kyc_submission_id ? `<code>${escapeHTML(kyc.kyc_submission_id)}</code>` : "—")}
-        ${row("latest_ai_profile_analysis.analysis_id",
+        ${row("Último análisis (analysis_id)",
               an && an.analysis_id ? `<code>${escapeHTML(an.analysis_id)}</code>` : "—")}
-        ${row("latest_ai_profile_analysis.preliminary_profile",
+        ${row("Perfil preliminar (IA)",
               an && an.preliminary_profile ? `<code>${escapeHTML(an.preliminary_profile)}</code>` : "—")}
-        ${row("current_profile_approval.approval_id",
+        ${row("Aprobación vigente (approval_id)",
               ap && ap.approval_id ? `<code>${escapeHTML(ap.approval_id)}</code>` : "—")}
-        ${row("current_profile_approval.approved_profile",
+        ${row("Perfil aprobado",
               ap && ap.approved_profile ? `<code>${escapeHTML(ap.approved_profile)}</code>` : "—")}
-        ${row("audit.is_intact",         intactBadge(a.is_intact))}
+        ${row("Cadena de auditoría intacta",  intactBadge(a.is_intact))}
       </table>
     </div>
   `;
@@ -179,7 +179,7 @@ async function cwLoadSummary(silent = false) {
     return null;
   }
   if (!silent) {
-    cwRenderLoading("cw-summary-result", `Loading summary for ${escapeHTML(caseId)}…`);
+    cwRenderLoading("cw-summary-result", `Cargando resumen de ${escapeHTML(caseId)}…`);
   }
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/summary`, {
     headers: cdAuthHeaders(),
@@ -251,7 +251,7 @@ async function cwSubmitKYC() {
     return;
   }
   const body = cwBuildKycPayload();
-  cwRenderLoading("cw-kyc-result", "Submitting KYC…");
+  cwRenderLoading("cw-kyc-result", "Enviando KYC…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/kyc`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -301,7 +301,7 @@ async function cwRunAnalysis() {
   const kycId = cdNullIfBlank(el("cw-ai-kyc-id").value);
   if (kycId) body.kyc_submission_id = kycId;
 
-  cwRenderLoading("cw-ai-result", "Running AI profile analysis…");
+  cwRenderLoading("cw-ai-result", "Corriendo análisis de IA del perfil…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/ai/profile-analysis`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -380,7 +380,7 @@ async function cwSubmitApproval() {
   const kId = cdNullIfBlank(el("cw-pa-kyc-id").value);
   if (kId) body.kyc_submission_id = kId;
 
-  cwRenderLoading("cw-pa-result", "Submitting profile approval…");
+  cwRenderLoading("cw-pa-result", "Enviando aprobación del perfil…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/profile-approval`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -503,7 +503,7 @@ function cwRenderOverrideHint(proposal, currentOverride) {
   const hint = el("cw-ovr-hint");
   hint.style.display = "block";
   if (overrideVariant !== null) {
-    hint.innerHTML = `<strong>${escapeHTML(overrideVariant)}</strong> en current proposal requiere advisor override.`;
+    hint.innerHTML = `<strong>${escapeHTML(overrideVariant)}</strong> en la propuesta actual requiere firma de override del asesor.`;
     el("cw-ovr-variant").value = overrideVariant;
   } else {
     hint.innerHTML = `<em>No override-required candidate detected in current proposal.</em> El submit fallará 422 a menos que la situación cambie; usar solo si insistís.`;
@@ -531,7 +531,7 @@ function cwRenderSelectionHint(proposal, currentOverride) {
     const prefer = variants.includes("BALANCED") ? "BALANCED" : nonOverrideVariant;
     el("cw-sel-variant").value = prefer;
     hint.style.display = "block";
-    hint.innerHTML = `Preselected <strong>${escapeHTML(prefer)}</strong> (no override requerido).`;
+    hint.innerHTML = `Preseleccionado <strong>${escapeHTML(prefer)}</strong> (no requiere override).`;
     return;
   }
   if (overrideVariant !== null) {
@@ -565,7 +565,7 @@ async function cwSubmitPreferences() {
   if (structuredParse.value) body.structured_preferences = structuredParse.value;
   if (nlp) body.natural_language_preferences = nlp;
 
-  cwRenderLoading("cw-pref-result", "Submitting investment preferences…");
+  cwRenderLoading("cw-pref-result", "Enviando preferencias de inversión…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/investment-preferences`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -603,7 +603,7 @@ async function cwRunUniverseFilter() {
   const pid = cdNullIfBlank(el("cw-uf-pref-id").value);
   if (pid) body.preference_id = pid;
 
-  cwRenderLoading("cw-uf-result", "Running universe filter…");
+  cwRenderLoading("cw-uf-result", "Corriendo filtro de universo…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/universe-filter`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -654,7 +654,7 @@ async function cwGenerateProposal() {
   const aid = cdNullIfBlank(el("cw-pp-approval-id").value);
   if (aid) body.approved_profile_id = aid;
 
-  cwRenderLoading("cw-pp-result", "Generating portfolio proposal…");
+  cwRenderLoading("cw-pp-result", "Generando propuesta de cartera…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/portfolio-proposal`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -735,7 +735,7 @@ async function cwSubmitOverride() {
   const pid = cdNullIfBlank(el("cw-ovr-proposal-id").value);
   if (pid) body.proposal_id = pid;
 
-  cwRenderLoading("cw-ovr-result", "Submitting override approval…");
+  cwRenderLoading("cw-ovr-result", "Enviando firma del override…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/override-approval`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -778,7 +778,7 @@ async function cwSubmitSelection() {
   const oid = cdNullIfBlank(el("cw-sel-ovr-id").value);
   if (oid) body.override_approval_id = oid;
 
-  cwRenderLoading("cw-sel-result", "Submitting portfolio selection…");
+  cwRenderLoading("cw-sel-result", "Enviando selección de cartera…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/portfolio-selection`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -825,7 +825,7 @@ async function cwGenerateReport() {
   const sid = cdNullIfBlank(el("cw-rep-selection-id").value);
   if (sid) body.portfolio_selection_id = sid;
 
-  cwRenderLoading("cw-rep-result", "Generating report…");
+  cwRenderLoading("cw-rep-result", "Generando reporte…");
   const res = await cdApiFetch(`/cases/${encodeURIComponent(caseId)}/reports`, {
     method: "POST",
     headers: cdAuthHeaders(true),
@@ -1184,7 +1184,7 @@ async function cwRefreshComplianceSnapshot() {
     cwRenderError("cw-compliance-result", "<strong>case_id requerido</strong> (sección 1).");
     return;
   }
-  cwRenderLoading("cw-compliance-result", "Loading summary + audit/verify + ai-logs…");
+  cwRenderLoading("cw-compliance-result", "Cargando summary + audit/verify + ai-logs…");
   const headers = cdAuthHeaders();
   const enc = encodeURIComponent(caseId);
   const [sRes, vRes, lRes] = await Promise.all([

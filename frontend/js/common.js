@@ -27,25 +27,25 @@ function statusPill(status) {
 }
 
 function boolPill(v) {
-  if (v === true)  return '<span class="pill pill-green">yes</span>';
+  if (v === true)  return '<span class="pill pill-green">sí</span>';
   if (v === false) return '<span class="pill pill-grey">no</span>';
   return '<span class="pill pill-grey">—</span>';
 }
 
 function chips(arr, cls = "chip") {
-  if (!arr || !arr.length) return '<span style="color:#a0aec0;font-size:12px;">none</span>';
+  if (!arr || !arr.length) return '<span style="color:#a0aec0;font-size:12px;">ninguno</span>';
   return `<div class="list-chips">${arr.map(x => `<span class="${cls}">${x}</span>`).join("")}</div>`;
 }
 
 function apiError(err) {
   if (err.name === "TypeError" && err.message.includes("fetch")) {
     return `<div class="msg msg-error">
-      <strong>API not reachable.</strong> Start uvicorn first:<br>
+      <strong>No se puede contactar la API.</strong> Levantá uvicorn primero:<br>
       <code style="font-size:12px;">uvicorn risk_first_advisory.api_layer.main:app --reload</code><br><br>
-      If you're opening this file via <code>file://</code>, the browser may also block requests due to CORS.
-      Serve the frontend instead:<br>
+      Si estás abriendo este archivo con <code>file://</code>, el navegador puede bloquear las requests por CORS.
+      Servilo en su lugar con:<br>
       <code style="font-size:12px;">python -m http.server 5500 -d frontend</code>
-      then open <code>http://127.0.0.1:5500</code>
+      y abrí <code>http://127.0.0.1:5500</code>
     </div>`;
   }
   return `<div class="msg msg-error"><strong>Error:</strong> ${err.message}</div>`;
@@ -56,8 +56,8 @@ function setButtonLoading(btnId, loading) {
   if (!btn) return;
   btn.disabled = loading;
   btn.innerHTML = loading
-    ? `<span class="spinner"></span>Running…`
-    : "Run Workflow";
+    ? `<span class="spinner"></span>Corriendo…`
+    : "Correr Workflow";
 }
 
 // ── tiny JSON details wrapper (used by cw*/cd* renderers) ─────────────
@@ -66,7 +66,7 @@ function setButtonLoading(btnId, loading) {
 // `escapeHTML` is defined in legacy-demo.js and loaded by the time these
 // run, so we reference it lazily.
 function rfaJsonDetails(data, label) {
-  const heading = label || "Raw JSON response";
+  const heading = label || "Respuesta cruda de la API (JSON técnico)";
   const safeJson = (typeof escapeHTML === "function")
     ? escapeHTML(formatJSON(data))
     : formatJSON(data).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
