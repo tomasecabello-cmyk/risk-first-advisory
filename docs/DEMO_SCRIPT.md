@@ -419,7 +419,7 @@ El sistema garantiza trazabilidad en cada punto: qué datos ingresaron, qué dec
 
 ## Case-scoped backend workflow smoke check (Fase 2)
 
-Si la audiencia es técnica y querés mostrar el flujo case-scoped end-to-end **sin frontend** (la UI Case Workbench es el próximo entregable de Fase 3), correr:
+Si la audiencia es técnica y querés mostrar el flujo case-scoped end-to-end **sin frontend** (alternativa al Camino A — útil cuando no querés levantar el frontend o cuando OPENAI_API_KEY no está disponible; el smoke check usa un mock determinístico de OpenAI), correr:
 
 ```powershell
 python scripts/run_case_workflow_smoke_check.py

@@ -153,7 +153,7 @@ Idempotente — correr múltiples veces es seguro. Aplica migrations si hace fal
 
 ## Case Dashboard — Phase 2
 
-Nueva sección al final del index para **visualizar y crear las entidades base del flujo case-scoped**: firms → advisors → clients → cases → summary. Es la primera entrada visual al backend Fase 2; **NO es el Case Workbench completo** (las acciones del workflow — KYC, AI profile analysis, profile approval, investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, report — **todavía no se invocan desde esta UI**).
+Sección al final del index para **visualizar y crear las entidades base del flujo case-scoped**: firms → advisors → clients → cases → summary. Es la **entrada inicial al backend Fase 2**: CRUD de entidades base + summary. Las acciones del workflow case-scoped (KYC, AI profile analysis, profile approval, investment preferences, universe filter, portfolio proposal, override approval, portfolio selection, report, audit, AI logs) viven en el **Case Workbench** (sección siguiente de este doc).
 
 ### Qué permite hoy
 
@@ -165,13 +165,15 @@ Nueva sección al final del index para **visualizar y crear las entidades base d
 6. **Quick demo seed** — botón `Create demo firm + advisor + client + case` que ejecuta los 4 POSTs en cascada con IDs explícitos (`firm_demo_local`, `advisor_demo_local`, `client_demo_local`). Maneja `409 duplicate` reusando los IDs existentes.
 7. **Case Summary** — input `case_id` + botón `Load Summary` que consume `GET /cases/{case_id}/summary` y muestra una tabla con: case overview, `progress.completion_ratio`, `progress.next_recommended_action`, todos los `has_*` flags, `audit.is_intact`, `ai.ai_logs_count`, `current_report.report_id`, más el JSON completo abajo.
 
-### Qué NO permite todavía (queda para Case Workbench, Fase 3)
+### Acciones del workflow case-scoped
+
+Estas acciones están en el **Case Workbench** (descripto en la sección siguiente), no en el Dashboard:
 
 - POST `/cases/{id}/kyc` — KYC submission con formulario completo.
 - POST `/cases/{id}/ai/profile-analysis`, `/profile-approval`, `/investment-preferences`, `/universe-filter`, `/portfolio-proposal`, `/override-approval`, `/portfolio-selection`, `/reports`.
 - GET `/cases/{id}/audit`, `/audit/verify`, `/ai-logs`.
 
-Para ejercitar el workflow case-scoped completo hoy:
+Para ejercitar el workflow sin UI (CI / backend-only / sin OPENAI_API_KEY):
 
 ```powershell
 python scripts/run_case_workflow_smoke_check.py
@@ -187,8 +189,8 @@ La sección usa por default `dev-advisor-token` (fallback hard-coded del backend
 
 - "Phase 2 backend workflow — local/dev UI"
 - "NOT production-ready"
-- "case-scoped flow"
-- "full workbench pending"
+- "CRUD de entidades base"
+- "Case Workbench end-to-end disponible en sección 10"
 
 ---
 
@@ -225,7 +227,7 @@ Card al final del index (después del Case Dashboard) que cubre **el workflow ca
 - **`input_redacted`** se muestra tal cual viene del backend — la redacción es responsabilidad del repo (`SQLiteAIRequestLogRepository`), no del frontend.
 - **`raw_response`** se incluye en el panel pero **con warning visible**: no compartir exportes sin revisar.
 - **El frontend NO agrega lógica de redacción** — para mantener al backend como única fuente de verdad de qué se sanitiza.
-- **Export package compliance-ready (ZIP)** y **PDF export del report** siguen pendientes en Fase 3.
+- **Export package compliance-ready (ZIP)** y **PDF export del report** siguen pendientes en Fase 4.
 
 ### Auto-refresh
 
@@ -262,9 +264,9 @@ El fallback dev-only NO incluye `dev-admin-token` ni `dev-viewer-token`. Operaci
 ### Lo que NO incluye este Workbench
 
 - **Auto-refresh** del audit y AI logs panels después de cada POST (manual por design — ver "Auto-refresh" arriba).
-- **PDF export** del report (solo markdown).
-- **Compliance export package** (ZIP con report + audit + logs sanitizados).
-- **Frontend refactor / split** (sigue siendo single-file HTML + vanilla JS).
+- **PDF export** del report (solo markdown) — Fase 4.
+- **Compliance export package** (ZIP con report + audit + logs sanitizados) — Fase 4.
+- **Live market data provider** y **manual universe upload** — Fase 4 (el filter sigue contra el CSV fixture).
 
 Para ejercitar el workflow completo hoy sin UI:
 

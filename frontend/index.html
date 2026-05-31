@@ -728,14 +728,15 @@
 
   <!-- ── 9. CASE DASHBOARD — PHASE 2 ───────────────────────── -->
   <!--
-    Entrada inicial al workflow case-scoped de Fase 2. NO es el Case Workbench
-    completo — solo lista/crea entidades base y carga summary. Las acciones
-    case-scoped del workflow (KYC, AI analysis, profile approval, preferences,
-    universe filter, portfolio proposal, override, selection, reports) NO se
-    invocan desde esta UI todavía — esos endpoints existen en el backend
-    (Fase 2 ✅) y se ejercitan vía smoke check:
+    Entrada inicial al workflow case-scoped de Fase 2: CRUD de entidades base
+    (firms / advisors / clients / cases) + summary. Las acciones case-scoped
+    del workflow (KYC, AI analysis, profile approval, preferences, universe
+    filter, portfolio proposal, override, selection, reports, audit, AI logs)
+    viven en el Case Workbench (sección 10).
+
+    Alternativas sin UI (Phase 2 backend end-to-end, OpenAI mockeado):
       python scripts/run_case_workflow_smoke_check.py
-    o vía Swagger UI en http://127.0.0.1:8000/docs
+    o Swagger UI en http://127.0.0.1:8000/docs
   -->
   <div class="card" id="card-case-dashboard">
     <div class="card-header">
@@ -748,8 +749,8 @@
         <strong>Phase 2 backend workflow — local/dev UI.</strong>
         <ul>
           <li><strong>NOT production-ready.</strong> Tokens son strings opacos en YAML; sin JWT, sin IdP, sin firm-level access control.</li>
-          <li>Esta vista expone solo el <strong>case-scoped flow</strong> básico: lista/crea firms, advisors, clients, cases y carga summary. <strong>Full Case Workbench pendiente</strong> (Fase 3).</li>
-          <li>Las acciones del workflow case-scoped (KYC, AI analysis, approval, preferences, universe filter, proposal, override, selection, report) están <strong>solo en el backend</strong>. Para ejercitarlas hoy: <code>python scripts/run_case_workflow_smoke_check.py</code> o Swagger UI <code>/docs</code>.</li>
+          <li>Esta vista expone el <strong>CRUD de entidades base</strong> (firms / advisors / clients / cases) + carga summary. El <strong>Case Workbench</strong> end-to-end (15 paneles del flujo case-scoped) está disponible más abajo, en la sección 10.</li>
+          <li>Las acciones del workflow case-scoped (KYC, AI analysis, approval, preferences, universe filter, proposal, override, selection, report, audit, AI logs) están en el <strong>Case Workbench</strong>. Alternativas sin UI: <code>python scripts/run_case_workflow_smoke_check.py</code> (end-to-end con OpenAI mockeado) o Swagger UI <code>/docs</code>.</li>
           <li>RBAC: POSTs de firms requieren <code>admin</code>; advisors/clients/cases requieren <code>admin</code> o <code>advisor</code> según endpoint. GETs son lectura abierta a cualquier rol válido.</li>
         </ul>
       </div>
@@ -918,7 +919,7 @@
 
       <!-- ── Footer: next steps ───────────────────────────── -->
       <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Next steps (Fase 3 pendiente):</strong> Case Workbench con tabs para KYC / AI profile analysis / profile approval / preferences / universe filter / portfolio proposal / override / selection / report. Endpoints case-scoped ya existen en backend — ver
+        <strong>Siguiente:</strong> abrir el <strong>Case Workbench</strong> (sección 10 abajo) para ejercer el flujo case-scoped end-to-end — KYC → AI profile analysis → profile approval → investment preferences → universe filter → portfolio proposal → override approval → portfolio selection → report + audit trail / verify / AI logs / compliance snapshot. Endpoints documentados en
         <code>docs/TODO_DESIGN_NOTES.md</code> y <code>docs/ARCHITECTURE.md</code>.
       </div>
 
@@ -927,11 +928,16 @@
 
   <!-- ── 10. CASE WORKBENCH — PROFILE STEPS ───────────────── -->
   <!--
-    Primera iteración del Case Workbench (Fase 3). Cubre solo:
-      KYC → AI Profile Analysis → Advisor Profile Approval.
-    Las acciones downstream (preferences, universe filter, portfolio proposal,
-    override, selection, reports, audit panel, AI logs panel) quedan para
-    iteraciones siguientes del Workbench. Reusa el token de Case Dashboard.
+    Case Workbench (Fase 3). Cubre el flujo case-scoped end-to-end en 15 secciones:
+      1. Workbench case_id + summary
+      2. KYC → 3. AI Profile Analysis → 4. Advisor Profile Approval
+      5. Investment Preferences → 6. Universe Filter
+      7. Portfolio Proposal → 8. Override Approval → 9. Portfolio Selection
+      10. Report Generation → 11. Compact Final Summary
+      12. Audit Trail → 13. Audit Verification
+      14. AI Request Logs → 15. Compliance Snapshot
+    Reusa el token del Case Dashboard.
+    Pendiente Fase 4: PDF export del report + compliance ZIP package.
   -->
   <div class="card" id="card-case-workbench">
     <div class="card-header">
@@ -947,7 +953,7 @@
           <li>El <code>case_id</code> debe existir previamente — crear vía Case Dashboard (sección 6 "Quick demo seed") o vía <code>POST /cases</code> directo.</li>
           <li>Reusa el token del Case Dashboard (input <code>cd-token</code>); cambiar ahí afecta también acá.</li>
           <li>Cada POST exitoso <strong>auto-refresca el summary</strong>. Los inputs downstream se autopopulan desde el último summary.</li>
-          <li><strong>Audit panel completo y AI logs panel</strong> quedan pendientes (consultar vía <code>GET /cases/{id}/audit</code> / <code>/admin/ai-logs</code> en Swagger). <strong>PDF export</strong> pendiente (el report es markdown).</li>
+          <li><strong>Audit Trail / Audit Verification / AI Request Logs / Compliance Snapshot</strong> ya disponibles (secciones 12–15). <strong>PDF export del report</strong> y <strong>compliance ZIP package</strong> siguen pendientes (Fase 4); el report es markdown.</li>
           <li><strong>NOT production-ready.</strong> Sin firm-level access control, sin JWT, sin firma digital del advisor.</li>
         </ul>
       </div>
@@ -1444,7 +1450,7 @@
 
       <!-- ── Footer: next steps ───────────────────────────── -->
       <div style="margin-top:18px;padding:12px;background:#f9fafb;border:1px dashed #cbd5e0;border-radius:6px;font-size:12px;color:#4a5568;">
-        <strong>Pendiente Fase 3:</strong> PDF export del report, export package compliance-ready (ZIP con report + audit + logs), frontend cleanup / split, refresh automático de audit/logs después de cada POST (hoy es manual para evitar polling agresivo).
+        <strong>Pendiente Fase 4:</strong> PDF export del report, export package compliance-ready (ZIP con report + audit + logs), live market data provider, manual universe upload, firm-level access control. <strong>Polish Fase 3:</strong> refresh automático de audit/logs después de cada POST (hoy es carga manual para evitar polling agresivo); <code>/health/full</code> endpoint runtime.
       </div>
 
     </div>
