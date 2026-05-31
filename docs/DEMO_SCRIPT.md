@@ -2,12 +2,13 @@
 
 Guía de recorrido de demo de 5–7 minutos para mostrar el producto a un asesor financiero o potencial usuario.
 
-Hay **dos modos de demo**:
+Hay **tres caminos de demo**:
 
-- **A. Demo visual legacy (Fase 0/1):** el frontend estático `frontend/index.html` expone los cinco flujos legacy (`/ai/profile-demo`, `/ai/profile-follow-up`, `/live/portfolio-demo`, `/ai/filter-universe-demo`, `/ai/filtered-portfolio-demo`) + el card "Advisor Decisions Demo" con los tres endpoints client-scoped Phase 1. **Esta es la guía principal de abajo.**
-- **B. Smoke check del workflow case-scoped (Fase 2):** ejecutable de consola que valida end-to-end el flujo completo `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn. Sección al final del documento ("Case-scoped backend workflow smoke check").
+- **A. Demo visual completa (recomendada).** Bootstrap local + frontend con Case Dashboard + Case Workbench (15 paneles del flujo case-scoped). Es el camino que el dev/asesor/mentor debería ver primero. Ver sección "Camino A — Demo visual completa" abajo.
+- **B. Smoke check backend end-to-end.** Ejecutable de consola que valida `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn. Útil como "candado" de Fase 2 o como verificación rápida en CI. Ver "Camino B — Smoke check backend".
+- **C. Seed-only / cards legacy.** Para demos rápidas de las cards Fase 0/1 (`/ai/profile-demo`, `/live/portfolio-demo`, etc.) o cuando solo se necesitan las entidades demo sin levantar el frontend. Ver "Camino C — Cards legacy / seed-only".
 
-> **Frontend status (Fase 3 en curso):** además de los cards demo legacy, el frontend ya incluye **"Case Dashboard — Phase 2"** (CRUD de firms/advisors/clients/cases + summary) y **"Case Workbench — Phase 2 Workflow"** que cubre el flujo case-scoped end-to-end en 15 secciones (KYC → … → report → audit trail / verify / AI logs / compliance snapshot). Tras correr el smoke check de Fase 2 (sección al final), el visualizador puede cargar el `case_id` resultante en el Workbench y recorrer audit verify + AI logs sin volver a Swagger. PDF export y compliance ZIP package siguen pendientes.
+> **OPENAI_API_KEY**: NO es necesaria para los caminos A (Workbench), B (smoke), ni C (seed). Solo los endpoints `/ai/*` reales del Workbench (AI Profile Analysis, AI Investment Preferences NLP) y las cards AI legacy (Fase 0/1) la requieren. El smoke check y los tests usan mocks determinísticos.
 
 ---
 
@@ -34,21 +35,11 @@ El eje central:
 
 ---
 
-## Inicio rápido
+## Camino A — Demo visual completa (recomendada)
 
-**Para demo visual de Fase 2 (Case Dashboard + Workbench), correr 1 comando + levantar 2 terminales:**
+**Esta es la guía principal: bootstrap + backend + frontend + Workbench.**
 
-```
-1. bootstrap (migrate + seed + checks + imprime instrucciones)
-   → python scripts/bootstrap_local_demo.py
-2. backend     → Terminal 1 (abajo)
-3. frontend    → Terminal 2 (abajo)
-4. browser     → http://127.0.0.1:5500
-```
-
-El bootstrap es idempotente. Crea `firm_demo_local`, `advisor_demo_local`, `client_demo_local`, `case_demo_local` que el Workbench puede abrir directamente. Para demos legacy (Fase 0/1: AI Profile Demo, Live Portfolio, etc.) el paso 1 es opcional; solo backend + frontend.
-
-### Pre-step recomendado — bootstrap en un comando
+### Pre-step — bootstrap (1 comando)
 
 ```powershell
 cd C:\Users\maria\risk-first-advisory
@@ -56,52 +47,105 @@ cd C:\Users\maria\risk-first-advisory
 python scripts/bootstrap_local_demo.py
 ```
 
-Hace migrate + seed + valida los archivos del frontend + detecta config (tokens YAML, OPENAI_API_KEY) e imprime los comandos exactos de los pasos 2 y 3 + tokens recomendados. Output al final:
+Hace migrate + seed + valida los archivos del frontend + detecta config (tokens YAML, OPENAI_API_KEY) e imprime los comandos exactos de los pasos siguientes + tokens recomendados. Idempotente. Output al final:
 
 ```
 PASS — local demo environment is ready
 ```
 
-Alternativa (si solo querés migrate + seed sin chequeos del entorno):
+Crea `firm_demo_local`, `advisor_demo_local`, `client_demo_local`, `case_demo_local` listos para abrir en el Workbench.
 
-```powershell
-python scripts/migrate.py
-python scripts/seed_demo_data.py
-```
-
-### Terminal 1 — Backend con IA
+### Terminal 1 — Backend
 
 ```powershell
 cd C:\Users\maria\risk-first-advisory
 .\.venv\Scripts\Activate.ps1
-$env:OPENAI_API_KEY="your_key_here"
-uvicorn risk_first_advisory.api_layer.main:app --reload
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
 ```
 
-El backend queda disponible en `http://127.0.0.1:8000`.
-Swagger UI: `http://127.0.0.1:8000/docs`
+Opcional, solo si vas a usar las cards `/ai/*` legacy (Fase 0/1) o el panel "AI Profile Analysis" del Workbench contra OpenAI real:
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+
+El backend queda en `http://127.0.0.1:8000`. Swagger UI: `http://127.0.0.1:8000/docs`.
 
 ### Terminal 2 — Frontend
 
 ```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
 python -m http.server 5500 -d frontend
 ```
 
 Abrir en el navegador: **`http://127.0.0.1:5500`**
 
-En la card "Case Dashboard — Phase 2" tipear `case_demo_local` en "Selected case_id" y clic en "Load Summary" para abrir el case que dejó el seed. En la card "Case Workbench" tipear el mismo `case_demo_local` y empezar el flujo con "Submit KYC".
+### En el navegador
 
-### Verificación offline (sin API key, sin internet)
+- En la card **"Case Dashboard — Phase 2"** escribir `case_demo_local` en "Selected case_id" (sección 7) y clic en **"Load Summary"** para abrir el case que dejó el seed.
+- En la card **"Case Workbench — Phase 2 Workflow"** escribir el mismo `case_demo_local` en la sección 1 y clic en **"Load Summary"** o **"Use selected case from Dashboard"**. Recorrer los pasos 2–10 (KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override → selection → report). Para los paneles 12–14 (audit trail / verify / AI logs / compliance snapshot) cambiar el token a `dev-compliance-token` en el input del Dashboard.
+
+### Si OPENAI_API_KEY no está configurada
+
+El paso "AI Profile Analysis" del Workbench (sección 3) fallará con HTTP 400 al hacer POST. **Alternativas**:
+
+- Usar el camino B (smoke check) para validar el flujo end-to-end con OpenAI mockeado (no requiere API key).
+- Configurar `OPENAI_API_KEY` y reiniciar el backend.
+
+El resto del Workbench (KYC, profile approval, preferences manual, universe filter, portfolio proposal, override, selection, report, audit, AI logs) funciona sin OPENAI_API_KEY.
+
+---
+
+## Camino B — Smoke check backend
+
+Validar el flujo case-scoped completo sin frontend, sin OpenAI, sin uvicorn corriendo:
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+python scripts/run_case_workflow_smoke_check.py
+```
+
+Corre 14 pasos sobre una DB SQLite temporal: migrate → seed entities → KYC → AI analysis (mockeado) → approval → preferences → filter → proposal → override → selection → report → summary → audit verify. Exit 0 = PASS. Detalle de cada paso en sección "Case-scoped backend workflow smoke check (Fase 2)" más abajo.
+
+Útil como "candado" de Fase 2 antes de cualquier release o como verificación rápida cuando algo del frontend no responde.
+
+---
+
+## Camino C — Cards legacy / seed-only
+
+### Solo cards legacy (Fase 0/1)
+
+Si solo querés mostrar las cards `/ai/profile-demo`, `/live/portfolio-demo`, `/ai/filtered-portfolio-demo`, etc., el bootstrap del camino A es opcional. Alcanza con backend + frontend:
+
+```powershell
+# Terminal 1
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+
+# Terminal 2
+python -m http.server 5500 -d frontend
+```
+
+### Solo seed (sin chequeos del entorno)
+
+Si ya corriste el bootstrap antes y solo querés re-asegurar las entidades demo:
+
+```powershell
+python scripts/seed_demo_data.py
+```
+
+Idempotente: las 4 entidades se reusan si ya existen.
+
+### Verificación offline del MVP legacy
+
+El smoke check legacy (anterior a Fase 2) valida el pipeline de portfolios sin frontend ni OpenAI ni internet:
 
 ```powershell
 python scripts/run_mvp_smoke_check.py
 ```
 
-Output esperado:
-
-```
-PASS — MVP smoke check completed successfully
-```
+Output esperado: `PASS — MVP smoke check completed successfully`.
 
 ---
 

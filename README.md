@@ -8,11 +8,11 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 
 ## Estado actual
 
-- **3016 tests, todos verdes** (unit + integration)
+- **3072 tests, todos verdes** (unit + integration)
 - **Fase 0 cerrada:** `/ai/filtered-portfolio-demo` devuelve `report_markdown` auditable y persiste el resultado completo (payload + reporte) en SQLite.
 - **Fase 1 cerrada — advisor pilot scaffold:** scaffold Bearer-token de auth + 3 endpoints legacy del asesor (`/advisor/profile-approval`, `/advisor/override-approval`, `/advisor/portfolio-selection`) client_id-scoped sobre `records`.
 - **Fase 2 cerrada — workflow case-scoped backend ✅:** flujo completo end-to-end de un `AdvisoryCase`, con 9 migrations, ~20 endpoints case-scoped nuevos, AuditEvent hash chain por case, AIRequestLog con redacción de PII, RBAC por rol (admin / advisor / compliance / viewer), y smoke check ejecutable (`python scripts/run_case_workflow_smoke_check.py`). Esto NO incluye frontend nuevo para el flujo case-scoped — el legacy sigue mostrando solo los endpoints de Fase 0/1.
-- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). **Bootstrap local en un comando**: `python scripts/bootstrap_local_demo.py` (migrate + seed + checks + instrucciones; `--check-only` para CI; `--run-smoke` para verificar end-to-end). PDF export y compliance ZIP package siguen pendientes.
+- **En curso: Fase 3 — plug-and-play local + Case Workbench frontend.** Ya disponible en el frontend estático: card **"Case Dashboard — Phase 2"** (listar/crear firms/advisors/clients/cases + cargar summary) y card **"Case Workbench — Phase 2 Workflow"** que cubre los 15 paneles del flujo case-scoped end-to-end: KYC → AI Profile Analysis → Profile Approval → Investment Preferences → Universe Filter → Portfolio Proposal → Override Approval → Portfolio Selection → Report Generation → Final Summary → **Audit Trail + Audit Verification + AI Request Logs + Compliance Snapshot**. Auto-refresh del summary después de cada POST. Audit/logs panels son load manual. Frontend ya separado en `css/base.css` + `js/common.js` + `js/legacy-demo.js` + `js/case-dashboard.js` + `js/case-workbench.js` (sin build step). Seed demo data idempotente vía `python scripts/seed_demo_data.py` (crea firm/advisor/client/case con IDs estables `*_demo_local`). **Bootstrap local en un comando**: `python scripts/bootstrap_local_demo.py` (migrate + seed + checks + instrucciones; `--check-only` para CI; `--run-smoke` para verificar end-to-end). Plug-and-play docs (sección "Local plug-and-play demo" más abajo) cubren el setup completo desde cero. Pendientes: market data provider productivo, manual universe upload, PDF export del report, compliance ZIP package (todos van a Fase 4).
 - **OpenAI** requerido solo para los endpoints `/ai/*` legacy; el flujo case-scoped soporta `POST /cases/{id}/ai/profile-analysis` también, pero los tests y el smoke check usan mocks determinísticos.
 - **yfinance** requerido para `/live/portfolio-demo` (legacy).
 - **Universo CSV** (`tests/fixtures/universe/sample_instrument_universe.csv`, 20 instrumentos) para todos los flujos demo, incluyendo `POST /cases/{id}/universe-filter`.
@@ -20,6 +20,115 @@ El workflow es risk-first: suitability, governance, ESG, data quality y portfoli
 - Sin PostgreSQL (SQLite local).
 - **Auth development-only:** Bearer token con mapa configurable vía YAML (`config/advisor_tokens.yaml` o `ADVISOR_TOKENS_FILE` env var). Sin JWT, sin IdP, sin rotación, sin firm-level access control. Exclusivamente desarrollo local — ver sección "Auth scaffold".
 - **Esto NO es production-ready.** No es asesoramiento financiero. No reemplaza al asesor humano. Ver `docs/COMPLIANCE_NOTES.md` para límites detallados.
+
+---
+
+## Local plug-and-play demo
+
+Camino recomendado para levantar la demo en local desde cero (Windows PowerShell). Total: ~3 minutos en una máquina típica.
+
+### 1. Activar venv + instalar dependencias (primera vez)
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
+```
+
+Si el venv ya existe:
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+```
+
+### 2. Bootstrap local — un solo comando
+
+```powershell
+python scripts/bootstrap_local_demo.py
+```
+
+Aplica migrations, corre `seed_demo_data`, valida archivos del frontend, detecta configuración (tokens YAML, `OPENAI_API_KEY`) e imprime los comandos exactos de los pasos 3–4. **NO levanta servidores** — solo deja el entorno listo. Idempotente: correr múltiples veces es seguro. No requiere `OPENAI_API_KEY`.
+
+Output esperado al final:
+
+```
+PASS — local demo environment is ready
+```
+
+### 3. Terminal 1 — backend
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+```
+
+Opcional, solo si vas a usar los endpoints `/ai/*` reales desde el frontend (la card AI Profile Demo Phase 0/1, o el panel "AI Profile Analysis" del Workbench contra OpenAI real):
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+
+El backend queda en `http://127.0.0.1:8000` con Swagger en `/docs`. El smoke check (`python scripts/run_case_workflow_smoke_check.py`) usa mock determinístico y NO necesita la API key.
+
+### 4. Terminal 2 — frontend
+
+```powershell
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+python -m http.server 5500 -d frontend
+```
+
+### 5. Abrir en navegador
+
+| URL | Para qué |
+|---|---|
+| `http://127.0.0.1:5500` | Frontend dev UI (Case Dashboard + Case Workbench + cards legacy) |
+| `http://127.0.0.1:8000/docs` | Swagger UI del backend FastAPI |
+
+### 6. Tokens (input "Bearer token" del Case Dashboard)
+
+Si no escribiste un `config/advisor_tokens.yaml` propio, el backend usa el fallback dev-only con **solo dos tokens**:
+
+| Token | Rol | Para qué |
+|---|---|---|
+| `dev-advisor-token` | `advisor` | Workflow completo del Case Workbench (KYC, AI analysis, profile approval, preferences, filter, proposal, override, selection, report) |
+| `dev-compliance-token` | `compliance` | Audit verify + AI logs panels (sección 13 y 14 del Workbench) |
+
+No hay `dev-admin-token` ni `dev-viewer-token` en el fallback dev — para operaciones admin (crear firms / advisors desde el Dashboard) hay que escribir un `config/advisor_tokens.yaml` con tokens propios y rol `admin`. El **seed demo data** del paso 2 ya creó las entidades base (firm/advisor/client/case) sin necesidad de eso, vía un YAML temporal interno.
+
+### 7. Abrir `case_demo_local` en Dashboard / Workbench
+
+1. En la card **"Case Dashboard — Phase 2"** escribir `case_demo_local` en el campo "Selected case_id" (sección 7 del card) y clic en **"Load Summary"**. Debe devolver `status=DRAFT`, `next_recommended_action=submit_kyc`, todos los flags `has_*=false`.
+2. En la card **"Case Workbench — Phase 2 Workflow"** escribir `case_demo_local` en el campo "case_id" (sección 1) y clic en **"Load Summary"** o **"Use selected case from Dashboard"**.
+3. Recorrer los pasos 2–10 del Workbench (KYC → AI analysis → approval → preferences → universe filter → portfolio proposal → override approval si aplica → portfolio selection → report). Cada POST exitoso auto-refresca el summary del Workbench.
+4. Para audit + AI logs (secciones 12–14): cambiar al token `dev-compliance-token` en el input del Dashboard antes de presionar los botones de "Verify Audit Chain" y "Load AI Logs".
+
+### 8. Validar end-to-end sin frontend (opcional)
+
+```powershell
+python scripts/run_case_workflow_smoke_check.py
+```
+
+Corre el flujo completo `firm → … → report → summary → audit verify` en una DB SQLite temporal, con OpenAI mockeado. Útil para confirmar que el backend funciona sin tocar la demo DB. Exit 0 = PASS.
+
+### Límites — leer antes de mostrar la demo a alguien
+
+- **NO production-ready.** Esta demo es para desarrollo y pilot interno. No usarla con datos reales sensibles de clientes.
+- **SQLite local.** Sin replicación, sin backup automático, sin cifrado at-rest. `data/demo_api.db` vive en plano en filesystem.
+- **Auth dev-only.** Tokens son strings opacos en YAML. Sin JWT, sin IdP, sin firm-level isolation completa. Cualquier token con rol válido ve cualquier case (sin filtrado por firma).
+- **Market data CSV.** El universe-filter usa `tests/fixtures/universe/sample_instrument_universe.csv` (20 instrumentos). No es un provider live productivo — los retornos esperados son proxy derivados de `ytm`/`coupon_rate`.
+- **PDF / branding del report pendientes.** El report es markdown plano sin logo/colores de la firma.
+- **Hash chain ≠ blockchain.** El audit chain del case detecta mutaciones puntuales en la DB, pero un admin con acceso directo puede reescribir coherentemente toda la cadena. No hay WORM external storage ni anclaje a timestamping authority. Ver `docs/COMPLIANCE_NOTES.md` sección 0.
+- **IA es propuesta, no decisión.** La IA propone perfil + extrae preferencias; el asesor humano aprueba/modifica/rechaza vía endpoints case-scoped explícitos.
+
+Si algo del setup falla, correr el bootstrap con `--debug` para ver tracebacks:
+
+```powershell
+python scripts/bootstrap_local_demo.py --debug
+```
 
 ---
 
@@ -601,7 +710,7 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
-Suite completa (unit + integration): ~3 minutos, **3016 tests** (todos verdes).
+Suite completa (unit + integration): ~3 minutos, **3072 tests** (todos verdes).
 
 ```powershell
 # Solo tests de API

@@ -50,33 +50,42 @@ Documentación interactiva del backend:
 
 ## Cómo abrir el frontend
 
-### Opción A — Directo desde el navegador (puede fallar por CORS)
-
-Abrir el archivo directamente:
-
-```
-frontend/index.html
-```
-
-O hacer doble clic en el explorador de archivos.
-
-**Limitación:** algunos navegadores bloquean requests `fetch()` cuando la página se sirve desde `file://` (política CORS de origen cruzado entre `file://` y `http://`). Si las requests fallan con error de CORS, usar la Opción B.
-
-### Opción B — Servidor HTTP local (recomendado)
-
-Servir el frontend con Python desde el directorio raíz del proyecto:
+### Flujo recomendado (5 pasos)
 
 ```powershell
+# 1. Activar venv
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
+
+# 2. Bootstrap local (migrate + seed + checks)
+python scripts/bootstrap_local_demo.py
+
+# 3. Backend (Terminal 1)
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+
+# 4. Frontend (Terminal 2)
+cd C:\Users\maria\risk-first-advisory
+.\.venv\Scripts\Activate.ps1
 python -m http.server 5500 -d frontend
 ```
 
-Luego abrir en el navegador:
-
 ```
+# 5. Abrir en navegador
 http://127.0.0.1:5500
 ```
 
-Esta opción evita los problemas de CORS porque la página se sirve desde `http://` y hace requests a `http://`, sin cruce de esquemas.
+Una vez abierto el frontend:
+
+- **Case Dashboard — Phase 2**: escribir `case_demo_local` en "Selected case_id" (sección 7) + clic en "Load Summary".
+- **Case Workbench — Phase 2 Workflow**: escribir el mismo `case_demo_local` en el campo "case_id" (sección 1) + clic en "Load Summary" o "Use selected case from Dashboard". Recorrer las secciones 2–14 para ver el flujo end-to-end.
+
+Para el setup completo desde cero (venv, deps, tokens, límites), ver la sección **"Local plug-and-play demo"** del `README.md` raíz.
+
+### Opciones de servir el frontend
+
+**Opción A — Directo desde el navegador (puede fallar por CORS).** Doble clic en `frontend/index.html`. Algunos navegadores bloquean `fetch()` cuando la página se sirve desde `file://` (política CORS); si pasa, usar Opción B.
+
+**Opción B — Servidor HTTP local (recomendado).** Es el paso 4 del flujo de arriba. Sirve desde `http://` y evita CORS.
 
 ---
 
@@ -236,7 +245,19 @@ Cada panel renderiza mensajes específicos por status:
 
 ### Token
 
-Reusa el mismo input `Bearer token` del Case Dashboard (no hay un segundo campo). Cambios al token en el Dashboard afectan automáticamente al Workbench. Para verify + AI logs cambiar a `dev-admin-token` o `dev-compliance-token`.
+Reusa el mismo input `Bearer token` del Case Dashboard (no hay un segundo campo). Cambios al token en el Dashboard afectan automáticamente al Workbench.
+
+**Atajo de roles para los paneles**:
+
+| Panel | Token requerido (fallback dev) |
+|---|---|
+| KYC / AI analysis / approval / preferences / filter / proposal / override / selection / report (POST) | `dev-advisor-token` |
+| Audit Trail (sección 12, GET) | cualquier rol válido (`dev-advisor-token` o `dev-compliance-token`) |
+| Audit Verification (sección 13, GET) | `dev-compliance-token` |
+| AI Request Logs (sección 14, GET) | `dev-compliance-token` |
+| Compliance Snapshot (sección 15, 3 GETs combinados) | `dev-compliance-token` (sin él, los sub-requests verify+ai-logs aparecen como pills "skipped (HTTP 403)" pero summary igual carga) |
+
+El fallback dev-only NO incluye `dev-admin-token` ni `dev-viewer-token`. Operaciones admin (crear firms / advisors desde el Dashboard) requieren un `config/advisor_tokens.yaml` propio con rol `admin`. El seed demo data del bootstrap usa un YAML temporal interno y NO requiere admin externo.
 
 ### Lo que NO incluye este Workbench
 
