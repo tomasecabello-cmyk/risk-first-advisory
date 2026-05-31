@@ -2,11 +2,12 @@
 
 Guía de recorrido de demo de 5–7 minutos para mostrar el producto a un asesor financiero o potencial usuario.
 
-**Demo visual local lista (Fase 3 cerrada como plug-and-play).** Hay **tres caminos** según el escenario:
+**Demo visual local lista (Fase 3 cerrada como plug-and-play).** Hay **cuatro caminos** según el escenario:
 
-- **Camino A — Demo visual completa (recomendada).** Bootstrap local + backend + frontend + Case Dashboard + Case Workbench (15 paneles del flujo case-scoped). Es el camino que el dev / asesor / mentor debería ver primero. Ver sección "Camino A — Demo visual completa" abajo.
-- **Camino B — Smoke check backend end-to-end.** Ejecutable de consola que valida `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn corriendo. Útil como "candado" en CI o como alternativa cuando `OPENAI_API_KEY` no está disponible (el smoke check usa **mock determinístico** de OpenAI). Ver "Camino B — Smoke check backend".
-- **Camino C — Seed-only / cards legacy / manual.** Para demos rápidas de las cards Fase 0/1 (`/ai/profile-demo`, `/live/portfolio-demo`, etc.), o cuando solo se necesitan las entidades demo sin levantar el frontend, o para ejercitar a mano vía Swagger. Ver "Camino C — Cards legacy / seed-only".
+- **Camino A — Demo de perfil inversor (recomendado para profesor / asesor no técnico).** Bootstrap local + backend + frontend + un solo card al frente: "Demo de perfil inversor". Formulario en español + botón **"▶ Ejecutar demo guiada (8 pasos)"** que corre todo el flujo automáticamente sin exponer firms / advisors / clients / case_id ni tokens. **Esta es la entrada principal para presentar el producto.** Ver sección "Camino A — Demo de perfil inversor" abajo.
+- **Camino B — Workbench paso a paso (técnico).** Mismo flujo case-scoped pero expuesto en 15 paneles con formularios crudos, endpoints visibles y JSON. Útil para devs / mentores que quieran ver cada POST. Ver sección "Camino B — Workbench paso a paso".
+- **Camino C — Smoke check backend end-to-end.** Ejecutable de consola que valida `firm → … → report → summary → audit verify`. Sin frontend, sin OpenAI real, sin uvicorn corriendo. Útil como "candado" en CI o como alternativa cuando `OPENAI_API_KEY` no está disponible (el smoke check usa **mock determinístico** de OpenAI). Ver "Camino C — Smoke check backend".
+- **Camino D — Seed-only / cards legacy / manual.** Para demos rápidas de las cards Fase 0/1 (`/ai/profile-demo`, `/live/portfolio-demo`, etc.), o cuando solo se necesitan las entidades demo sin levantar el frontend, o para ejercitar a mano vía Swagger. Ver "Camino D — Cards legacy / seed-only".
 
 > **OPENAI_API_KEY**: NO es obligatoria para los tres caminos. **Excepción**: en el Camino A, el panel "AI Profile Analysis" del Workbench (sección 3) llama OpenAI real y devolverá HTTP 400 sin la key — el resto del Workbench (KYC, profile approval, preferences manual, universe filter, portfolio proposal, override, selection, report, audit, AI logs) funciona sin ella. El Camino B usa mock determinístico, no requiere la key. Las cards AI legacy del Camino C (Fase 0/1) sí la requieren.
 
@@ -21,6 +22,61 @@ Mostrar cómo el sistema transforma KYC estructurado y preferencias en lenguaje 
 El eje central:
 
 > **La IA propone. El asesor decide. El sistema controla suitability y riesgo. Cada decisión queda auditada.**
+
+---
+
+## Camino A — Demo de perfil inversor (visual, ~3 minutos)
+
+Para mostrarle el producto a un profesor de finanzas o un asesor no técnico en Argentina sin que el visitante tenga que entender firms, advisors, tokens, IDs o endpoints.
+
+### Pre-step
+
+Hacer el bootstrap local (Camino A más abajo del DEMO_SCRIPT original — los pasos del entorno son los mismos):
+
+```powershell
+python scripts/bootstrap_local_demo.py
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+python -m http.server 5500 -d frontend
+```
+
+Abrir `http://127.0.0.1:5500`.
+
+### En el navegador
+
+1. **Hacé clic en el CTA del hero "▶ Empezar la demo de perfil inversor"** — hace scroll directo al card principal.
+2. **Cargá el perfil del inversor demo** (ya viene pre-poblado con valores razonables: edad 42, horizonte 10 años, tolerancia al riesgo 6, objetivo balanceado, USD, hard dollar). Editalo si querés probar otro perfil.
+3. **Hacé clic en "▶ Ejecutar demo guiada (8 pasos)"** — corre en cadena:
+   - Preparar caso demo (crea caso nuevo reusando el client demo del seed).
+   - Enviar perfil / KYC.
+   - Analizar perfil con IA (si no hay `OPENAI_API_KEY`, el paso se reporta como "saltado" y la demo continúa con perfil sugerido razonable).
+   - Aprobar perfil como asesor.
+   - Generar propuesta de cartera (interno: preferencias → filtro de universo → propuesta).
+   - Seleccionar cartera sugerida (auto-elige la variante "dentro del presupuesto"; si solo hay variantes que requieren override, firma el override demo y selecciona).
+   - Generar reporte.
+   - Verificar auditoría (usa internamente el token de compliance).
+4. **Mostrá los resultados** que aparecen abajo:
+   - **Variantes propuestas**: tabla comparativa + card por variante con holdings (instrumento + tipo + moneda + peso + motivo + barra visual).
+   - **Cartera seleccionada**: la variante final con sus instrumentos y pesos.
+   - **Reporte para el cliente**: vista previa Markdown con secciones "Composición de la cartera seleccionada" + "Comparación de variantes generadas".
+   - **Auditoría**: pill verde "cadena intacta" sobre N eventos.
+5. **(Opcional)** Bajá al "Workbench paso a paso" (Modo avanzado) para mostrar los detalles técnicos: 15 paneles con cada POST, JSON, hash chain, etc.
+
+### Si OpenAI no está configurado
+
+El paso "Analizar perfil con IA" aparece como pill amber "saltado" y el flujo sigue. No rompe la demo. Mensaje amigable que aclara: *"La demo local no tiene OPENAI_API_KEY configurada. Podés seguir con la demo o configurar la clave para probar análisis real."*
+
+---
+
+## Camino B — Workbench paso a paso (técnico)
+
+Igual que la Camino A pero exponiendo cada paso individualmente. Útil cuando el visitante es dev/técnico y quiere ver:
+
+- Cada POST con su payload y response.
+- El JSON crudo plegado en `<details>` por panel.
+- Los hash chains de la cadena de auditoría.
+- Los AI request logs con PII redactada.
+
+Ver sección "Camino A — Demo visual completa" más abajo en este mismo documento (renombrada — la versión técnica detallada del recorrido sigue intacta).
 
 ---
 

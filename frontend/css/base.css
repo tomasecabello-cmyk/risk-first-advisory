@@ -1054,6 +1054,116 @@ td.mono { font-size: 12px; color: var(--rf-text); }
 .legacy-group .card { box-shadow: var(--rf-shadow-sm); }
 .legacy-group .card-header h2 { font-size: 14px; }
 
+/* ── investor-facing demo (Fase 3.6) ───────────────────────────────────── */
+/* Grid de 8 botones-paso debajo del CTA "Ejecutar demo guiada". */
+.idemo-step-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+@media (max-width: 980px) {
+  .idemo-step-buttons { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .idemo-step-buttons { grid-template-columns: 1fr; }
+}
+.idemo-step-btn {
+  background: var(--rf-card);
+  color: var(--rf-navy-900);
+  border: 1px solid var(--rf-border-strong);
+  border-radius: var(--rf-radius);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background .15s, border-color .15s, transform .05s, box-shadow .15s;
+  box-shadow: var(--rf-shadow-sm);
+}
+.idemo-step-btn:hover {
+  background: var(--rf-bg-soft);
+  border-color: var(--rf-navy-600);
+  box-shadow: var(--rf-shadow);
+}
+.idemo-step-btn:active { transform: translateY(1px); }
+.idemo-step-btn .idemo-step-num {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--rf-navy-900);
+  color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.idemo-step-btn .idemo-step-label {
+  font-size: 12.5px; font-weight: 600; line-height: 1.3;
+}
+
+/* Progress checklist (8 filas verticales). */
+.idemo-progress {
+  display: flex; flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-radius-lg);
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #fafbfd 0%, #f4f6fb 100%);
+}
+.idemo-step-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--rf-radius);
+  transition: background .15s;
+}
+.idemo-step-row[data-state="active"] {
+  background: rgba(29,78,216,.06);
+}
+.idemo-step-row[data-state="done"] {
+  background: rgba(5,150,105,.05);
+}
+.idemo-step-row[data-state="error"] {
+  background: rgba(220,38,38,.05);
+}
+.idemo-step-row[data-state="skipped"] {
+  background: rgba(217,119,6,.05);
+}
+.idemo-step-row .idemo-step-circle {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--rf-border-strong);
+  color: var(--rf-text-muted);
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all .2s;
+}
+.idemo-step-row[data-state="done"]    .idemo-step-circle {
+  background: var(--rf-emerald-600); border-color: var(--rf-emerald-600); color: #fff;
+}
+.idemo-step-row[data-state="done"]    .idemo-step-circle::after { content: "✓"; position: absolute; }
+.idemo-step-row[data-state="done"]    .idemo-step-circle > * { display: none; }
+.idemo-step-row[data-state="active"]  .idemo-step-circle {
+  background: var(--rf-navy-600); border-color: var(--rf-navy-600); color: #fff;
+  box-shadow: 0 0 0 3px rgba(29,78,216,.18);
+}
+.idemo-step-row[data-state="error"]   .idemo-step-circle {
+  background: var(--rf-rose-100); border-color: var(--rf-rose-600); color: var(--rf-rose-700);
+}
+.idemo-step-row[data-state="skipped"] .idemo-step-circle {
+  background: var(--rf-amber-100); border-color: var(--rf-amber-600); color: var(--rf-amber-700);
+}
+.idemo-step-row .idemo-step-text {
+  flex: 1;
+  font-size: 13px; font-weight: 500;
+  color: var(--rf-text);
+}
+.idemo-step-row[data-state="active"] .idemo-step-text { font-weight: 700; color: var(--rf-navy-900); }
+.idemo-step-row[data-state="done"]   .idemo-step-text { color: var(--rf-text-body); }
+.idemo-step-row .idemo-step-pill { flex-shrink: 0; }
+
 /* ── tiny utility classes ──────────────────────────────────────────────── */
 .text-muted { color: var(--rf-text-muted); }
 .text-mono  { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }

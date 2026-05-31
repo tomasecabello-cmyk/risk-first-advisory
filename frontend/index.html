@@ -29,10 +29,12 @@
         reporte revisable, no una recomendación automática.
       </p>
       <div class="hero-cta">
-        <button class="btn-primary btn-lg" onclick="heroOpenDemoCase()">
-          Abrir <code style="background:rgba(255,255,255,.14);padding:1px 6px;border-radius:4px;font-size:13px;">case_demo_local</code> en el Workbench →
+        <a href="#investor-anchor" class="btn-primary btn-lg" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+          ▶ Empezar la demo de perfil inversor
+        </a>
+        <button class="btn-ghost" onclick="heroOpenDemoCase()">
+          Abrir <code style="background:rgba(255,255,255,.14);padding:1px 6px;border-radius:4px;font-size:13px;">case_demo_local</code> en el Workbench
         </button>
-        <a href="#case-workbench" class="btn-ghost">Ir directo al flujo</a>
       </div>
     </div>
     <div class="hero-stats">
@@ -68,11 +70,11 @@
 <nav class="top-nav">
   <div class="top-nav-inner">
     <span class="nav-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</span>
-    <a href="#case-workbench" class="nav-item nav-item-primary">Workbench del caso</a>
-    <a href="#dash-anchor" class="nav-item">Dashboard</a>
+    <a href="#investor-anchor" class="nav-item nav-item-primary">Demo inversor</a>
+    <a href="#case-workbench" class="nav-item">Workbench técnico</a>
+    <a href="#dash-anchor" class="nav-item nav-item-muted">Modo avanzado</a>
     <a href="#audit-anchor" class="nav-item">Auditoría &amp; Logs IA</a>
     <a href="#legacy" class="nav-item nav-item-muted">Demos previos</a>
-    <a href="#utilities" class="nav-item nav-item-muted">Utilidades</a>
     <span class="nav-spacer"></span>
     <span class="nav-tag">Fase 3 · lista</span>
   </div>
@@ -213,16 +215,250 @@
   </section>
 
   <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <!-- 01 · CASE DASHBOARD                                                    -->
+  <!-- 01 · DEMO DE PERFIL INVERSOR — entrada principal advisor-friendly     -->
   <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <div class="section-band" id="dash-anchor">
+  <div class="section-band" id="investor-anchor">
     <span class="num">01</span>
     <div>
-      <h2>Dashboard del caso</h2>
+      <h2>Demo de perfil inversor
+        <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:var(--rf-emerald-100);color:var(--rf-emerald-700);border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Inicio recomendado</span>
+      </h2>
       <div class="sub">
-        La sala de control de firms, asesores, clientes y casos. Empezá con el
-        botón <strong>"Crear firm + asesor + cliente + caso demo"</strong> — eso
-        siembra <code class="inline-code">case_demo_local</code> para el Workbench de abajo.
+        Cargá un perfil, generá una propuesta y revisá la cartera con instrumentos, reporte y auditoría — sin tocar firms, advisors ni IDs técnicos. Pensado para mostrar la demo a un profesor o asesor no técnico.
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-hero" id="card-investor-demo">
+    <div class="card-header">
+      <h2>Cargá un perfil y generá la cartera</h2>
+      <div class="pill-cluster">
+        <span class="pill pill-violet">8 pasos</span>
+        <span class="pill pill-blue">advisor-friendly</span>
+        <span class="pill pill-green">sin admin · sin CRUD</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+
+      <div class="ai-disclaimer">
+        <strong>Demo local con universo de instrumentos acotado.</strong>
+        No es asesoramiento financiero real. <strong>La IA asiste, el asesor decide.</strong>
+        El reporte es revisable, no una recomendación automática.
+        Si la demo falla con "case_id no encontrado" o "client_id no encontrado",
+        corré primero: <code>python scripts/bootstrap_local_demo.py</code>.
+      </div>
+
+      <!-- ── Form: perfil del inversor ──────────────────────────────── -->
+      <form id="idemo-form" onsubmit="event.preventDefault();" autocomplete="off" spellcheck="false">
+
+        <div class="section-label" style="margin-top:4px;margin-bottom:14px;">Datos básicos del inversor</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>Nombre del inversor demo</label>
+            <input type="text" id="idemo-name" value="María Pérez (demo)" />
+          </div>
+          <div class="field">
+            <label>Edad <span class="hint">18–120</span></label>
+            <input type="number" id="idemo-age" value="42" min="18" max="120" />
+          </div>
+          <div class="field">
+            <label>Jurisdicción</label>
+            <input type="text" id="idemo-jurisdiction" value="AR" />
+          </div>
+          <div class="field">
+            <label>Moneda preferida</label>
+            <select id="idemo-currency">
+              <option value="USD" selected>USD</option>
+              <option value="EUR">EUR</option>
+              <option value="ARS">ARS</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Ingreso anual estimado (USD)</label>
+            <input type="number" id="idemo-income" value="80000" min="0" />
+          </div>
+          <div class="field">
+            <label>Patrimonio líquido estimado (USD)</label>
+            <input type="number" id="idemo-liquid" value="150000" min="0" />
+          </div>
+          <div class="field">
+            <label>Horizonte de inversión (años) <span class="hint">&gt; 0</span></label>
+            <input type="number" id="idemo-horizon" value="10" min="1" />
+          </div>
+          <div class="field">
+            <label>Tolerancia al riesgo <span class="hint">1 = mínima · 10 = máxima</span></label>
+            <input type="number" id="idemo-risk" value="6" min="1" max="10" />
+          </div>
+          <div class="field">
+            <label>Objetivo principal</label>
+            <select id="idemo-objective">
+              <option value="capital_preservation">Preservación de capital</option>
+              <option value="income">Ingresos</option>
+              <option value="balanced" selected>Balanceado</option>
+              <option value="growth">Crecimiento</option>
+              <option value="aggressive_growth">Crecimiento agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Necesidad de liquidez</label>
+            <select id="idemo-liquidity">
+              <option value="baja">Baja</option>
+              <option value="media" selected>Media</option>
+              <option value="alta">Alta</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Experiencia invirtiendo</label>
+            <select id="idemo-experience">
+              <option value="ninguna">Ninguna</option>
+              <option value="basica">Básica</option>
+              <option value="moderada" selected>Moderada</option>
+              <option value="avanzada">Avanzada</option>
+              <option value="experto">Experto</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preguntas abiertas</div>
+        <div class="form-grid cols-2">
+          <div class="field full-span">
+            <label>¿Cuál es tu objetivo principal de inversión?</label>
+            <textarea id="idemo-open-goal" rows="2">Ahorro de largo plazo con horizonte 10 años, objetivo jubilación.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>¿Cómo reaccionarías ante una caída del 15%?</label>
+            <textarea id="idemo-open-reaction" rows="2">Mantengo posiciones si la caída es de mercado; revisaría si hay un evento de crédito específico al emisor.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>¿Qué experiencia tenés invirtiendo?</label>
+            <textarea id="idemo-open-experience" rows="2">Inversiones previas en ETFs USD y bonos soberanos AR hard dollar.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>¿Qué preocupaciones o restricciones tenés?</label>
+            <textarea id="idemo-open-concerns" rows="2">Volatilidad cambiaria; riesgo de duración en renta fija; preferencia por hard dollar.</textarea>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preferencias de inversión</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>Solo instrumentos hard dollar</label>
+            <select id="idemo-pref-hard">
+              <option value="true" selected>Sí (USD hard dollar)</option>
+              <option value="false">No (cualquier moneda)</option>
+            </select>
+          </div>
+          <div class="field full-span">
+            <label>Tipos de instrumentos permitidos <span class="hint">universo demo acotado</span></label>
+            <input type="text" id="idemo-pref-types" value="CORPORATE_BOND, SOVEREIGN_BOND, ETF, STOCK, CEDEAR, MUTUAL_FUND, MONEY_MARKET" />
+          </div>
+        </div>
+
+      </form>
+
+      <!-- ── Acciones: demo guiada + pasos manuales ─────────────────── -->
+      <div class="actions" style="margin-top:24px;">
+        <button class="btn-primary btn-lg" id="idemo-btn-guided" onclick="idemoRunGuidedDemo()">
+          ▶ Ejecutar demo guiada (8 pasos)
+        </button>
+        <button class="btn-secondary" onclick="idemoReset()">Reiniciar estado</button>
+      </div>
+
+      <div class="fine-print" style="margin-top:8px;">
+        La demo guiada corre los 8 pasos en cadena, reusa <code>firm_demo_local</code> + <code>advisor_demo_local</code> + <code>client_demo_local</code> del seed, y crea un caso nuevo por intento. Si OpenAI no está configurado, el paso "Analizar perfil" se reporta como saltado y la demo continúa con un perfil sugerido razonable.
+      </div>
+
+      <!-- ── Pasos manuales ────────────────────────────────────────── -->
+      <div class="section-label" style="margin-top:24px;margin-bottom:12px;">O ejecutá paso por paso</div>
+      <div class="idemo-step-buttons">
+        <button class="idemo-step-btn" onclick="idemoPrepareCase()">
+          <span class="idemo-step-num">1</span>
+          <span class="idemo-step-label">Preparar caso demo</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoSubmitKyc()">
+          <span class="idemo-step-num">2</span>
+          <span class="idemo-step-label">Enviar perfil / KYC</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoRunAiProfile()">
+          <span class="idemo-step-num">3</span>
+          <span class="idemo-step-label">Analizar perfil con IA</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoApproveProfile()">
+          <span class="idemo-step-num">4</span>
+          <span class="idemo-step-label">Aprobar perfil como asesor</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoGenerateProposal()">
+          <span class="idemo-step-num">5</span>
+          <span class="idemo-step-label">Generar propuesta de cartera</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoSelectPortfolio()">
+          <span class="idemo-step-num">6</span>
+          <span class="idemo-step-label">Seleccionar cartera sugerida</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoGenerateReport()">
+          <span class="idemo-step-num">7</span>
+          <span class="idemo-step-label">Generar reporte</span>
+        </button>
+        <button class="idemo-step-btn" onclick="idemoVerifyAudit()">
+          <span class="idemo-step-num">8</span>
+          <span class="idemo-step-label">Ver auditoría</span>
+        </button>
+      </div>
+
+      <!-- ── Progress checklist ─────────────────────────────────────── -->
+      <div class="section-label" style="margin-top:28px;margin-bottom:12px;">Estado del flujo</div>
+      <div id="idemo-progress" class="idemo-progress">
+        <!-- Renderizado por idemoRenderProgress() al cargar la página -->
+      </div>
+
+      <!-- ── Result panels ──────────────────────────────────────────── -->
+      <div id="idemo-status" style="margin-top:18px;"></div>
+
+      <div id="idemo-portfolio-block" style="margin-top:18px;display:none;">
+        <div class="section-label" style="margin-bottom:12px;">Variantes propuestas — instrumentos y pesos</div>
+        <div id="idemo-portfolio-result"></div>
+      </div>
+
+      <div id="idemo-selection-block" style="margin-top:18px;display:none;">
+        <div class="section-label" style="margin-bottom:12px;">Cartera seleccionada</div>
+        <div id="idemo-selection-result"></div>
+      </div>
+
+      <div id="idemo-report-block" style="margin-top:18px;display:none;">
+        <div class="section-label" style="margin-bottom:12px;">Reporte para el cliente</div>
+        <div id="idemo-report-result"></div>
+      </div>
+
+      <div id="idemo-audit-block" style="margin-top:18px;display:none;">
+        <div class="section-label" style="margin-bottom:12px;">Auditoría</div>
+        <div id="idemo-audit-result"></div>
+      </div>
+
+      <div class="fine-print" style="margin-top:24px;">
+        ¿Querés ver detalles técnicos? Abrí el
+        <a href="#case-workbench"><strong>Workbench paso a paso</strong></a>
+        o el
+        <a href="#dash-anchor"><strong>Dashboard técnico (Modo avanzado)</strong></a>
+        más abajo. Los <a href="#legacy">demos previos</a> (Fase 0/1) también siguen disponibles.
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- 02 · CASE DASHBOARD — Modo avanzado (CRUD técnico)                    -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div class="section-band" id="dash-anchor">
+    <span class="num">02</span>
+    <div>
+      <h2>Dashboard del caso
+        <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:#f1f5f9;color:#475569;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Modo avanzado</span>
+      </h2>
+      <div class="sub">
+        Control técnico de firms, asesores, clientes y casos. Solo necesario si querés
+        crear entidades manualmente o usar IDs propios. La <strong>demo principal</strong> de arriba
+        ya hace todo esto detrás de escena.
       </div>
     </div>
   </div>
@@ -457,13 +693,15 @@
   <!-- 02 · CASE WORKBENCH (primary)                                          -->
   <!-- ═════════════════════════════════════════════════════════════════════ -->
   <div class="section-band" id="case-workbench">
-    <span class="num">02</span>
+    <span class="num">03</span>
     <div>
-      <h2>Workbench del caso <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:var(--rf-emerald-100);color:var(--rf-emerald-700);border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Flujo principal</span></h2>
+      <h2>Workbench del caso paso a paso
+        <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:#f1f5f9;color:#475569;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Modo avanzado</span>
+      </h2>
       <div class="sub">
-        El flujo case-scoped end-to-end. Cada paso tiene una acción clara, escribe a la cadena
-        de auditoría SHA-256 y refresca el resumen del caso. Cargá
-        <code class="inline-code">case_demo_local</code> en la sección 1 para seguir el demo.
+        El mismo flujo que corre la <a href="#investor-anchor">demo de perfil inversor</a> de arriba, pero expuesto paso por paso para uso técnico:
+        15 paneles, formularios crudos, JSON y endpoints visibles. Cargá
+        <code class="inline-code">case_demo_local</code> en la sección 1 para seguir el demo manual.
       </div>
     </div>
   </div>
@@ -1768,6 +2006,7 @@
 <script src="js/legacy-demo.js"></script>
 <script src="js/case-dashboard.js"></script>
 <script src="js/case-workbench.js"></script>
+<script src="js/investor-demo.js"></script>
 
 <!-- Inline glue for the hero CTA + step-indicator state sync -->
 <script>
