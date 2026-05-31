@@ -20,7 +20,65 @@ Mostrar cómo el sistema transforma KYC estructurado y preferencias en lenguaje 
 
 El eje central:
 
-> **La IA interpreta. El motor filtra. El optimizador calcula. El asesor decide.**
+> **La IA propone. El asesor decide. El sistema controla suitability y riesgo. Cada decisión queda auditada.**
+
+---
+
+## Guion advisor-facing — 5 minutos
+
+Guion para mostrar el producto a un **profesor de finanzas o asesor no técnico** sin entrar en detalles de implementación. Cubre los 6 mensajes core sin tocar Swagger, ni JSON, ni endpoints.
+
+> **Pre-requisito:** levantar el entorno (Camino A más abajo). El frontend tiene un panel <em>"Recommended demo path"</em> y <em>"Demo presenter notes"</em> arriba que reproducen este guion sin que tengas que abrir este doc.
+
+> **Aviso para el visitante:** "Esto es una demo local de desarrollo. No es producto comercial, no es asesoramiento financiero, y no se usa con datos reales de clientes."
+
+### Paso 1 · Carta de presentación (30 s)
+
+> "Este es un backend de asesoría de inversiones. Convierte el KYC y las preferencias del cliente en una cartera **aprobada por el asesor**, con trazabilidad completa. La IA propone, el asesor decide, y cada paso queda auditado."
+
+Mostrar el hero y la story-strip de 4 cards (**What the AI does / What the advisor does / What the system enforces / What stays auditable**).
+
+### Paso 2 · La IA no decide (45 s)
+
+Hacer clic en el CTA **"Open case_demo_local in Workbench"**. El navegador hace scroll al Workbench y carga el case.
+
+Bajar al Step 3 ("AI Profile Analysis") y comentar:
+
+> "La IA analiza el KYC y propone un perfil de riesgo preliminar. Detecta contradicciones — por ejemplo, alguien que pide retornos altos pero declara intolerancia a drawdowns. **Nunca aprueba un perfil, nunca firma una decisión, nunca elige una cartera.**"
+
+(Si OPENAI_API_KEY no está configurada, decir: "para esta demo el backend usa un mock determinístico — en producción real es OpenAI con prompt versionado").
+
+### Paso 3 · El asesor firma cada decisión (60 s)
+
+Bajar al Step 4 ("Profile Approval"). Mostrar las opciones: **approve / modify / reject** + el campo `rationale`.
+
+> "Acá el asesor revisa la propuesta de la IA y la aprueba, la modifica o la rechaza. La decisión queda registrada con justificación. **El advisor es siempre el actor vinculante** — y este mismo patrón se repite en el override del riesgo (Step 8) y la selección final de la cartera (Step 9)."
+
+### Paso 4 · El sistema enforce suitability y riesgo (60 s)
+
+Saltar al Step 7 ("Portfolio Proposal") → Step 8 ("Override Approval"). Comentar:
+
+> "El sistema genera 3 variantes — DEFENSIVE, BALANCED, GROWTH. Si la variante GROWTH excede el risk budget aprobado, queda **bloqueada hasta que el asesor firme un override explícito**. Suitability, ESG y data quality se chequean automáticamente en cada paso. El asesor no puede 'saltarse' un control con un click."
+
+### Paso 5 · El output es un reporte revisable (45 s)
+
+Bajar al Step 10 ("Report Generation"). Mostrar el botón **Generate Report**.
+
+> "El output final es un reporte en Markdown que el asesor revisa antes de compartirlo con el cliente. **No hay un botón de 'enviar al cliente automáticamente'**. Esto no es un robo-advisor que decide por vos — es un copilot que prepara el material para que vos decidas."
+
+### Paso 6 · Cada decisión queda auditada (60 s)
+
+En el input de token del Dashboard, cambiar a `dev-compliance-token`. Bajar al Step 12 ("Audit Trail") y clickear **Load Audit Events**.
+
+> "Cada decisión genera un evento encadenado con SHA-256. Esto es el equivalente a un libro de actas inmutable: si alguien cambia un payload retroactivamente, la cadena se rompe y `Verify Audit Chain` (Step 13) lo detecta. La AI request logs (Step 14) guarda cada llamada a OpenAI con la PII redactada. Step 15 te da un snapshot único para handoff a compliance."
+
+Cerrar con clic en **Verify Audit Chain** → pill verde **INTACT**.
+
+### Cierre (30 s)
+
+> "En resumen: **AI propone, advisor decide, sistema controla, todo queda auditado.** Esto es local-only y no es production-ready, pero la arquitectura está pensada para escalar a un piloto con un asesor real."
+
+**Total:** ~5 minutos hablados + ~1 minuto de buffer para preguntas durante el recorrido.
 
 ---
 

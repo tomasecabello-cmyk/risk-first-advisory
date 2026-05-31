@@ -21,9 +21,12 @@
         Every step <span class="hero-em-2">audited.</span>
       </h1>
       <p class="hero-sub">
-        A wealth-advisory backend that turns structured KYC and free-text preferences
-        into vetted portfolio candidates — with a hash-chain audit trail and PII-redacted
-        AI request logs built in. End-to-end from a single local machine.
+        From client KYC to advisor-approved portfolio in one guided workflow.
+        The <strong style="color:#bfdbfe;">AI proposes</strong>, the
+        <strong style="color:#bfdbfe;">system enforces</strong> suitability and risk limits,
+        the <strong style="color:#bfdbfe;">advisor signs off</strong> — and every decision is
+        permanently <strong style="color:#bfdbfe;">auditable</strong>. The output is a
+        reviewable report, not an automated recommendation.
       </p>
       <div class="hero-cta">
         <button class="btn-primary btn-lg" onclick="heroOpenDemoCase()">
@@ -91,31 +94,114 @@
   <section class="story-strip">
     <div class="story-card">
       <div class="story-eyebrow">What the AI does</div>
-      <div class="story-title">Reads KYC, flags contradictions</div>
+      <div class="story-title">Proposes — never decides</div>
       <div class="story-body">
-        Proposes a preliminary risk profile and surfaces tensions between scores,
-        horizon and free-text answers. The AI never decides — it never approves
-        a profile, never picks a portfolio, never signs anything.
+        Reads structured KYC and free-text answers. Proposes a preliminary risk
+        profile and flags contradictions. <strong>It never approves a portfolio,
+        never signs anything, never makes a recommendation final.</strong>
       </div>
     </div>
     <div class="story-card is-advisor">
       <div class="story-eyebrow">What the advisor does</div>
-      <div class="story-title">Approves, modifies or rejects</div>
+      <div class="story-title">Signs off, every step</div>
       <div class="story-body">
-        Reviews the AI proposal, lands the approved profile, signs off any
-        risk-budget overrides and selects the final portfolio variant the
-        client will see. The advisor is always the binding actor.
+        Reviews the AI proposal, approves / modifies / rejects the profile,
+        signs off any risk-budget override, and selects the final portfolio
+        variant. <strong>The advisor is always the binding actor.</strong>
+      </div>
+    </div>
+    <div class="story-card is-system">
+      <div class="story-eyebrow">What the system enforces</div>
+      <div class="story-title">Suitability and risk limits</div>
+      <div class="story-body">
+        Governance, ESG, data quality and risk-budget checks run on every step.
+        Variants that exceed the approved budget are <strong>blocked until the
+        advisor explicitly overrides</strong> them, in writing.
       </div>
     </div>
     <div class="story-card is-audit">
       <div class="story-eyebrow">What stays auditable</div>
-      <div class="story-title">Hash-chained, PII-redacted</div>
+      <div class="story-title">Every decision, hash-chained</div>
       <div class="story-body">
-        Every meaningful step is appended to a SHA-256 chain per case. AI calls
-        are stored with PII redacted by the backend. Compliance gets a single
-        snapshot of <code>summary + audit + AI logs</code> in one click.
+        Each meaningful step is appended to a SHA-256 chain per case. AI calls
+        are stored with PII redacted by the backend. <strong>Compliance gets a
+        single snapshot</strong> of summary + audit + AI logs in one click.
       </div>
     </div>
+  </section>
+
+  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <!-- ADVISOR-FACING DEMO HELPERS (presenter notes + recommended demo path) -->
+  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <section class="demo-helpers">
+
+    <!-- Recommended demo path — the click-by-click for a non-tech viewer -->
+    <aside class="demo-path">
+      <div class="demo-path-header">
+        <span class="demo-path-eyebrow">Recommended demo path</span>
+        <div class="demo-path-title">Nine clicks, advisor-friendly</div>
+        <div class="demo-path-sub">If you've never seen this demo before, follow these steps in order.</div>
+      </div>
+      <ol class="demo-path-steps">
+        <li><span class="step-num">1</span> <strong>Click the hero CTA</strong> <em>"Open case_demo_local in Workbench"</em> — pre-fills the demo case and jumps you to the workflow.</li>
+        <li><span class="step-num">2</span> <strong>Review the case summary</strong> that auto-loads (status, completion ratio, recommended next action).</li>
+        <li><span class="step-num">3</span> <strong>Submit KYC</strong> (Step 2) — defaults already make sense for a moderate-risk client; just click <em>Submit KYC</em>.</li>
+        <li><span class="step-num">4</span> <strong>Run AI Profile Analysis</strong> (Step 3). Requires <code>OPENAI_API_KEY</code>; if it's not set, skip ahead and explain that the backend smoke check covers this with a mock.</li>
+        <li><span class="step-num">5</span> <strong>Approve the profile</strong> (Step 4) — the advisor's first formal decision. Try the <em>modify</em> option too: it shows the system records the change.</li>
+        <li><span class="step-num">6</span> <strong>Submit preferences + run universe filter</strong> (Steps 5–6) — translates client wishes into an eligible instrument list.</li>
+        <li><span class="step-num">7</span> <strong>Generate the portfolio proposal</strong> (Step 7) — DEFENSIVE / BALANCED / GROWTH variants appear; GROWTH typically requires an override.</li>
+        <li><span class="step-num">8</span> <strong>Sign off the override + select the final variant + generate the report</strong> (Steps 8–10) — the advisor's binding decisions, plus the reviewable Markdown report.</li>
+        <li><span class="step-num">9</span> <strong>Switch the Dashboard token to <code>dev-compliance-token</code></strong>, then click <em>Verify Audit Chain</em> (Step 13) — closes the demo on a compliance high note.</li>
+      </ol>
+    </aside>
+
+    <!-- Demo presenter notes — collapsed by default, for the human running the demo -->
+    <details class="presenter-notes">
+      <summary>
+        <span class="presenter-icon">▸</span>
+        <span class="presenter-title">Demo presenter notes</span>
+        <span class="presenter-sub">90-second talk track for a finance professor or non-technical advisor</span>
+      </summary>
+      <ol class="presenter-script">
+        <li>
+          <strong>"This is a wealth-advisory backend."</strong>
+          KYC and client preferences become a vetted, advisor-approved portfolio with
+          a full audit trail. Click the hero CTA to load the demo case.
+        </li>
+        <li>
+          <strong>"The AI never decides."</strong>
+          Show Step 3 (AI Profile Analysis). It proposes a risk profile and flags
+          contradictions in the client's answers. Nothing is binding.
+        </li>
+        <li>
+          <strong>"The advisor signs off, every step."</strong>
+          Show Step 4 (Profile Approval): approve, modify, or reject. Same pattern
+          for the override (Step 8) and the final portfolio selection (Step 9).
+        </li>
+        <li>
+          <strong>"The system enforces suitability and risk."</strong>
+          When GROWTH exceeds the approved risk budget (Step 7), the variant is
+          flagged and <em>cannot be selected</em> without an explicit advisor
+          override (Step 8). Suitability / ESG / data quality run automatically.
+        </li>
+        <li>
+          <strong>"The output is reviewable, not automated advice."</strong>
+          Step 10 produces a Markdown report the advisor reviews and the firm can
+          ship to the client. There is no "click and send to client" button.
+        </li>
+        <li>
+          <strong>"Every decision is auditable."</strong>
+          End on Step 12 (Audit Trail) + Step 13 (Verify Audit Chain): SHA-256
+          hash chain per case, integrity check in one call. Step 15 bundles
+          summary + audit + AI logs into a compliance snapshot.
+        </li>
+      </ol>
+      <p class="presenter-disclaimer">
+        <strong>Not production-ready.</strong> Local dev demo only — not financial advice,
+        no real client PII, no productive auth or firm-level isolation.
+      </p>
+    </details>
+
   </section>
 
   <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -417,10 +503,10 @@
       <!-- ─── BAND: Case selector ─────────────────────────── -->
       <div class="wb-group-band">
         <div>
-          <div class="wb-group-eyebrow">Section 1 · Case selector</div>
-          <div class="wb-group-title">Pick the case you want to work</div>
+          <div class="wb-group-eyebrow">Step 1 · Open the case</div>
+          <div class="wb-group-title">Load the client's case file</div>
         </div>
-        <div class="wb-group-help">Use <code>case_demo_local</code> from the Dashboard seed, or any other case_id you already have.</div>
+        <div class="wb-group-help">Use <code>case_demo_local</code> from the Dashboard seed, or any case_id you already have.</div>
       </div>
 
       <!-- ── Section 1: Workbench case_id + summary ───────── -->
@@ -443,10 +529,10 @@
       <!-- ─── BAND: Profile steps ─────────────────────────── -->
       <div class="wb-group-band">
         <div>
-          <div class="wb-group-eyebrow">Sections 2–4 · Profile</div>
-          <div class="wb-group-title">From client data to an approved risk profile</div>
+          <div class="wb-group-eyebrow">Steps 2–4 · Client profile &amp; risk approval</div>
+          <div class="wb-group-title">From the client's answers to an advisor-approved profile</div>
         </div>
-        <div class="wb-group-help">The AI proposes; the advisor decides. The approved profile is the input to everything downstream.</div>
+        <div class="wb-group-help">The AI proposes a preliminary profile; the advisor approves, modifies or rejects it. The approved profile drives everything downstream.</div>
       </div>
 
       <!-- ── Section 2: KYC submission ────────────────────── -->
@@ -647,10 +733,10 @@
       <!-- ─── BAND: Portfolio inputs ──────────────────────── -->
       <div class="wb-group-band is-portfolio">
         <div>
-          <div class="wb-group-eyebrow">Sections 5–6 · Portfolio inputs</div>
-          <div class="wb-group-title">Preferences + universe filter</div>
+          <div class="wb-group-eyebrow">Steps 5–6 · Investment universe</div>
+          <div class="wb-group-title">Capture preferences, filter the eligible instruments</div>
         </div>
-        <div class="wb-group-help">Translate client preferences (manual JSON or NLP) into an eligible instrument universe.</div>
+        <div class="wb-group-help">Translate the client's preferences into the eligible instrument universe the optimizer will work with.</div>
       </div>
 
       <!-- ── Section 5: Investment Preferences ─────────────── -->
@@ -716,10 +802,10 @@
       <!-- ─── BAND: Portfolio decisions ───────────────────── -->
       <div class="wb-group-band is-portfolio">
         <div>
-          <div class="wb-group-eyebrow">Sections 7–9 · Portfolio decisions</div>
-          <div class="wb-group-title">Proposal · override · final selection</div>
+          <div class="wb-group-eyebrow">Steps 7–9 · Advisor decisions</div>
+          <div class="wb-group-title">Proposal, override sign-off, final selection</div>
         </div>
-        <div class="wb-group-help">Generate candidates, sign off any risk-budget override, and pick the final variant the client will see.</div>
+        <div class="wb-group-help">If a candidate variant exceeds the approved risk budget, the advisor must sign off an override <strong>in writing</strong> before it can be selected.</div>
       </div>
 
       <!-- ── Section 7: Portfolio Proposal ─────────────────── -->
@@ -845,10 +931,10 @@
       <!-- ─── BAND: Outputs ───────────────────────────────── -->
       <div class="wb-group-band is-output">
         <div>
-          <div class="wb-group-eyebrow">Sections 10–11 · Outputs</div>
-          <div class="wb-group-title">Client-facing report + final state</div>
+          <div class="wb-group-eyebrow">Steps 10–11 · Client-ready output</div>
+          <div class="wb-group-title">A reviewable report — not an automated recommendation</div>
         </div>
-        <div class="wb-group-help">Generate the deterministic Markdown report and refresh the consolidated summary.</div>
+        <div class="wb-group-help">The report is deterministic Markdown the advisor reviews before sharing with the client. There is no "send to client" button.</div>
       </div>
 
       <!-- ── Section 10: Report Generation ─────────────────── -->
@@ -900,10 +986,10 @@
       <!-- ─── BAND: Audit & Compliance ───────────────────── -->
       <div class="wb-group-band is-audit" id="audit-anchor">
         <div>
-          <div class="wb-group-eyebrow">Sections 12–15 · Audit &amp; Compliance</div>
-          <div class="wb-group-title">Hash-chain · verification · AI logs · snapshot</div>
+          <div class="wb-group-eyebrow">Steps 12–15 · Compliance evidence</div>
+          <div class="wb-group-title">Audit trail, integrity check, AI logs, one-click snapshot</div>
         </div>
-        <div class="wb-group-help">Verification + AI logs require <code>dev-compliance-token</code> (or any token with <code>admin</code> / <code>compliance</code>).</div>
+        <div class="wb-group-help">Switch the Dashboard token to <code>dev-compliance-token</code> (or any <code>admin</code>/<code>compliance</code> role) before clicking <em>Verify Audit Chain</em> or <em>Load AI Logs</em>.</div>
       </div>
 
       <!-- ── Section 12: Audit Trail ──────────────────────── -->

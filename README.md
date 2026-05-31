@@ -32,7 +32,8 @@ Fase 3 quedó cerrada como **demo local plug-and-play operable desde navegador**
 
 Tras un `pip install -e .` y un `python scripts/bootstrap_local_demo.py`:
 
-- Ver una UI con **estética institutional-fintech** (hero claro, nav sticky con anchors a Workbench / Dashboard / Audit / Legacy, story-strip "AI propone · advisor decide · audit chain", KPI strip, paleta navy + cyan + emerald + amber, sin frameworks ni CDN — sigue siendo HTML/CSS/JS estáticos sin build step).
+- Ver una UI con **estética institutional-fintech** (hero claro, nav sticky con anchors a Workbench / Dashboard / Audit / Legacy, story-strip de 4 cards "AI propone · Advisor decide · Sistema enforce suitability/riesgo · Todo queda auditado", KPI strip, paleta navy + cyan + emerald + amber, sin frameworks ni CDN — sigue siendo HTML/CSS/JS estáticos sin build step).
+- Mostrar la demo a un profesor/asesor no técnico siguiendo el panel **"Recommended demo path"** (checklist visible de 9 clicks) o el **"Demo presenter notes"** colapsable (talk-track de 6 frases ~90 s). Versión extendida en `docs/DEMO_SCRIPT.md` → "Guion advisor-facing — 5 minutos".
 - Correr `bootstrap_local_demo` (idempotente; aplica migrations + crea entidades demo + valida frontend + detecta config + imprime los comandos siguientes).
 - Levantar el backend FastAPI local (`python -m uvicorn risk_first_advisory.api_layer.main:app --reload`) en `http://127.0.0.1:8000` con Swagger UI en `/docs`.
 - Levantar el frontend estático (`python -m http.server 5500 -d frontend`) en `http://127.0.0.1:5500`.

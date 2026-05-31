@@ -6,7 +6,8 @@ Página HTML estática para probar visualmente el backend sin usar terminal ni c
 
 **Fase 3 cerrada como UI local/dev plug-and-play ✅, con rediseño visual showable.** Hoy entregado:
 
-- **Hero + sticky nav + story-strip** que explica en 5 segundos qué hace la IA, qué decide el advisor y qué queda auditado. CTA "Open case_demo_local in Workbench" salta directo al flujo principal.
+- **Hero + sticky nav + story-strip de 4 cards** ("AI propone · Advisor decide · Sistema enforce suitability/riesgo · Todo queda auditado") que explica el modelo mental en 10 segundos a un visitante no técnico. CTA "Open case_demo_local in Workbench" salta directo al flujo principal.
+- **Recommended demo path + Demo presenter notes** justo arriba del Dashboard: un checklist de 9 clicks (advisor-friendly) y un guion plegable de 6 frases con el talk-track para presentar el producto a un profesor / asesor no técnico en ~90 segundos. Ver `docs/DEMO_SCRIPT.md` → "Guion advisor-facing — 5 minutos" para la versión expandida.
 - **Case Dashboard** disponible (CRUD de firms / advisors / clients / cases + carga `GET /cases/{id}/summary`), con KPI strip y disclaimer compacto.
 - **Case Workbench end-to-end** disponible (15 paneles agrupados en 5 bandas: Profile · Portfolio inputs · Portfolio decisions · Outputs · Audit & Compliance), con un **step indicator visual de 11 pasos** que se autocolorea según el summary cargado (pending / ready / completed).
 - **Resultados JSON colapsables**: cada panel del Workbench renderiza un summary ejecutivo arriba y mete el JSON crudo dentro de `<details>` (folded por default), para que la pantalla no se llene de payload.
