@@ -357,91 +357,208 @@
 
       </form>
 
-      <!-- ── Acciones: demo guiada + pasos manuales ─────────────────── -->
-      <div class="actions" style="margin-top:24px;">
-        <button class="btn-primary btn-lg" id="idemo-btn-guided" onclick="idemoRunGuidedDemo()">
-          ▶ Ejecutar demo guiada (8 pasos)
-        </button>
-        <button class="btn-secondary" onclick="idemoReset()">Reiniciar estado</button>
+      <!-- ── Mini toolbar arriba del walkthrough ────────────────────── -->
+      <div class="idemo-walkthrough-intro">
+        <div>
+          <div class="idemo-walkthrough-eyebrow">Recorrido didáctico · 8 pasos</div>
+          <div class="idemo-walkthrough-title">Hacé clic en cada paso, leé qué pasa, mirá el resultado</div>
+          <div class="idemo-walkthrough-sub">El resultado de cada paso aparece debajo del botón. Pensado para presentar a un profesor o asesor no técnico sin que tenga que leer JSON ni endpoints.</div>
+        </div>
+        <button class="btn-secondary" onclick="idemoReset()">Reiniciar walkthrough</button>
       </div>
 
-      <div class="fine-print" style="margin-top:8px;">
-        La demo guiada corre los 8 pasos en cadena, reusa <code>firm_demo_local</code> + <code>advisor_demo_local</code> + <code>client_demo_local</code> del seed, y crea un caso nuevo por intento. Si OpenAI no está configurado, el paso "Analizar perfil" se reporta como saltado y la demo continúa con un perfil sugerido razonable.
-      </div>
+      <!-- ── WALKTHROUGH: 8 step cards didácticas ───────────────────── -->
+      <div class="idemo-walkthrough">
 
-      <!-- ── Pasos manuales ────────────────────────────────────────── -->
-      <div class="section-label" style="margin-top:24px;margin-bottom:12px;">O ejecutá paso por paso</div>
-      <div class="idemo-step-buttons">
-        <button class="idemo-step-btn" onclick="idemoPrepareCase()">
-          <span class="idemo-step-num">1</span>
-          <span class="idemo-step-label">Preparar caso demo</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoSubmitKyc()">
-          <span class="idemo-step-num">2</span>
-          <span class="idemo-step-label">Enviar perfil / KYC</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoRunAiProfile()">
-          <span class="idemo-step-num">3</span>
-          <span class="idemo-step-label">Analizar perfil con IA</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoApproveProfile()">
-          <span class="idemo-step-num">4</span>
-          <span class="idemo-step-label">Aprobar perfil como asesor</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoGenerateProposal()">
-          <span class="idemo-step-num">5</span>
-          <span class="idemo-step-label">Generar propuesta de cartera</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoSelectPortfolio()">
-          <span class="idemo-step-num">6</span>
-          <span class="idemo-step-label">Seleccionar cartera sugerida</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoGenerateReport()">
-          <span class="idemo-step-num">7</span>
-          <span class="idemo-step-label">Generar reporte</span>
-        </button>
-        <button class="idemo-step-btn" onclick="idemoVerifyAudit()">
-          <span class="idemo-step-num">8</span>
-          <span class="idemo-step-label">Ver auditoría</span>
-        </button>
-      </div>
+        <!-- STEP 1 — Preparar caso -->
+        <article class="idemo-walkthrough-step" id="idemo-step-prepare" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">1</div>
+            <div class="idemo-step-card-title">Preparar el caso del inversor</div>
+            <div class="idemo-step-card-pill" id="idemo-step-prepare-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> crea internamente un <em>caso de asesoría</em> nuevo para este inversor. Reusa la firm y el cliente del seed local.</p>
+              <p><strong>Por qué importa:</strong> el caso es el contenedor donde van a vivir TODAS las decisiones siguientes (KYC, aprobación, override, selección, reporte). Es lo que después se audita.</p>
+              <p><strong>Qué mirar:</strong> el ID interno del caso y el título derivado del nombre del inversor que cargaste arriba.</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoPrepareCase()">Preparar caso</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-prepare-result"></div>
+          </div>
+        </article>
 
-      <!-- ── Progress checklist ─────────────────────────────────────── -->
-      <div class="section-label" style="margin-top:28px;margin-bottom:12px;">Estado del flujo</div>
-      <div id="idemo-progress" class="idemo-progress">
-        <!-- Renderizado por idemoRenderProgress() al cargar la página -->
-      </div>
+        <!-- STEP 2 — KYC -->
+        <article class="idemo-walkthrough-step" id="idemo-step-kyc" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">2</div>
+            <div class="idemo-step-card-title">Enviar perfil / KYC del inversor</div>
+            <div class="idemo-step-card-pill" id="idemo-step-kyc-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> arma el KYC estructurado a partir del formulario de arriba (edad, scores de tolerancia y capacidad de riesgo, horizonte, objetivo, financials, preguntas abiertas) y lo guarda como un <em>submission</em> versionado del caso.</p>
+              <p><strong>Por qué importa:</strong> es el insumo que la IA va a leer en el paso 3. Cada nuevo envío de KYC incrementa la versión y queda en el audit trail — no se pisa el anterior.</p>
+              <p><strong>Qué mirar:</strong> el número de versión que devuelve el backend (1 en el primer envío).</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoSubmitKyc()">Enviar perfil / KYC</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-kyc-result"></div>
+          </div>
+        </article>
 
-      <!-- ── Result panels ──────────────────────────────────────────── -->
-      <div id="idemo-status" style="margin-top:18px;"></div>
+        <!-- STEP 3 — AI -->
+        <article class="idemo-walkthrough-step" id="idemo-step-ai" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">3</div>
+            <div class="idemo-step-card-title">La IA analiza el perfil</div>
+            <div class="idemo-step-card-pill" id="idemo-step-ai-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> la IA (OpenAI) lee el KYC estructurado y las respuestas en texto libre, <em>propone</em> un perfil de riesgo preliminar y detecta contradicciones (por ejemplo, tolerancia baja con expectativa de retorno alta).</p>
+              <p><strong>Por qué importa:</strong> <strong>la IA propone, no decide.</strong> Nunca aprueba el perfil, nunca firma una recomendación, nunca elige una cartera. Solo asiste al asesor con un análisis estructurado.</p>
+              <p><strong>Qué mirar:</strong> el perfil sugerido y la cantidad de contradicciones / preguntas de seguimiento. <em>Si la demo local no tiene <code>OPENAI_API_KEY</code> configurada, este paso se reporta como saltado y se sigue con "moderado" como perfil sugerido.</em></p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoRunAiProfile()">Analizar perfil con IA</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-ai-result"></div>
+          </div>
+        </article>
 
-      <div id="idemo-portfolio-block" style="margin-top:18px;display:none;">
-        <div class="section-label" style="margin-bottom:12px;">Variantes propuestas — instrumentos y pesos</div>
-        <div id="idemo-portfolio-result"></div>
-      </div>
+        <!-- STEP 4 — Approval -->
+        <article class="idemo-walkthrough-step" id="idemo-step-approve" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">4</div>
+            <div class="idemo-step-card-title">El asesor aprueba el perfil</div>
+            <div class="idemo-step-card-pill" id="idemo-step-approve-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> el asesor humano revisa la propuesta de la IA y la <em>aprueba</em>, la <em>modifica</em> o la <em>rechaza</em>, con un texto de justificación. En la demo guiada, simulamos la aprobación.</p>
+              <p><strong>Por qué importa:</strong> <strong>el asesor es siempre el actor vinculante.</strong> El perfil aprobado es lo que después conduce la generación de la cartera. Nada se hace sin esta firma.</p>
+              <p><strong>Qué mirar:</strong> el perfil aprobado final (puede coincidir con el propuesto o ser distinto) y la decisión registrada.</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoApproveProfile()">Aprobar perfil como asesor</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-approve-result"></div>
+          </div>
+        </article>
 
-      <div id="idemo-selection-block" style="margin-top:18px;display:none;">
-        <div class="section-label" style="margin-bottom:12px;">Cartera seleccionada</div>
-        <div id="idemo-selection-result"></div>
-      </div>
+        <!-- STEP 5 — Proposal -->
+        <article class="idemo-walkthrough-step" id="idemo-step-propose" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">5</div>
+            <div class="idemo-step-card-title">Generar la propuesta de cartera</div>
+            <div class="idemo-step-card-pill" id="idemo-step-propose-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> internamente corre tres pasos en cadena: registra las preferencias del inversor (tipos de instrumentos, hard dollar), filtra el universo de instrumentos elegibles, y genera hasta tres variantes de cartera: <strong>DEFENSIVE</strong>, <strong>BALANCED</strong> y <strong>GROWTH</strong>.</p>
+              <p><strong>Por qué importa:</strong> el <strong>universo de instrumentos es acotado / demo</strong> (~20 instrumentos del fixture); no es market data productivo. Cada variante muestra <strong>instrumentos concretos con pesos</strong> — no un score abstracto.</p>
+              <p><strong>Qué mirar:</strong> la tabla comparativa de las 3 variantes (retorno esperado, volatilidad, # instrumentos, si requiere override) y, dentro de cada card, los instrumentos con sus pesos y motivo de inclusión.</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoGenerateProposal()">Generar propuesta</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-propose-result"></div>
+          </div>
+        </article>
 
-      <div id="idemo-report-block" style="margin-top:18px;display:none;">
-        <div class="section-label" style="margin-bottom:12px;">Reporte para el cliente</div>
-        <div id="idemo-report-result"></div>
-      </div>
+        <!-- STEP 6 — Selection -->
+        <article class="idemo-walkthrough-step" id="idemo-step-select" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">6</div>
+            <div class="idemo-step-card-title">El asesor selecciona la cartera final</div>
+            <div class="idemo-step-card-pill" id="idemo-step-select-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> el asesor elige una de las variantes generadas como recomendación final para el cliente. En la demo elegimos automáticamente la primera variante "dentro del presupuesto de riesgo" (típicamente BALANCED).</p>
+              <p><strong>Por qué importa:</strong> si la variante elegida <strong>excede el presupuesto de riesgo aprobado</strong> (típicamente GROWTH), el sistema <strong>exige un override firmado</strong> por escrito antes de permitir la selección. En la demo lo firmamos automáticamente con un rationale demo, pero el principio es: <em>nada se salta el control</em>.</p>
+              <p><strong>Qué mirar:</strong> la variante seleccionada y la composición completa con instrumentos y pesos. Si la selección requirió override, aparece el pill ámbar "firmado con override".</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoSelectPortfolio()">Seleccionar cartera</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-select-result"></div>
+          </div>
+        </article>
 
-      <div id="idemo-audit-block" style="margin-top:18px;display:none;">
-        <div class="section-label" style="margin-bottom:12px;">Auditoría</div>
-        <div id="idemo-audit-result"></div>
+        <!-- STEP 7 — Report -->
+        <article class="idemo-walkthrough-step" id="idemo-step-report" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">7</div>
+            <div class="idemo-step-card-title">Generar el reporte para el cliente</div>
+            <div class="idemo-step-card-pill" id="idemo-step-report-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> genera un reporte Markdown determinístico que consolida la cartera seleccionada — con tabla de composición ("Instrumento · Tipo · Moneda · Peso · Motivo") y comparación de variantes generadas.</p>
+              <p><strong>Por qué importa:</strong> <strong>el reporte es revisable, no una recomendación automática.</strong> El asesor lo revisa antes de compartirlo con el cliente. <strong>No hay botón de "enviar al cliente"</strong> — la entrega es responsabilidad del asesor humano.</p>
+              <p><strong>Qué mirar:</strong> la vista previa del Markdown con las secciones "Composición de la cartera seleccionada" y "Comparación de variantes generadas" presentes.</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoGenerateReport()">Generar reporte</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-report-result"></div>
+          </div>
+        </article>
+
+        <!-- STEP 8 — Audit -->
+        <article class="idemo-walkthrough-step" id="idemo-step-audit" data-state="pending">
+          <header class="idemo-step-card-header">
+            <div class="idemo-step-card-num">8</div>
+            <div class="idemo-step-card-title">Verificar la trazabilidad (auditoría)</div>
+            <div class="idemo-step-card-pill" id="idemo-step-audit-pill"><span class="pill pill-grey">pendiente</span></div>
+          </header>
+          <div class="idemo-step-card-body">
+            <div class="idemo-step-card-explain">
+              <p><strong>Qué hace:</strong> recomputa la cadena de hashes SHA-256 del caso y verifica que <strong>ninguna decisión fue alterada</strong>. Cada paso del walkthrough (caso creado, KYC enviado, IA analizó, asesor aprobó, override firmado, cartera seleccionada, reporte generado) dejó un evento encadenado.</p>
+              <p><strong>Por qué importa:</strong> la <strong>auditoría verifica trazabilidad</strong>. Si un actor con acceso a la DB tocara un payload retroactivamente, la cadena se rompe y esta verificación lo detecta. Es el "libro de actas inmutable" del caso.</p>
+              <p><strong>Qué mirar:</strong> pill verde "cadena intacta" sobre el total de eventos registrados. Si por algún motivo apareciera "cadena rota", el número de evento dañado sale en el resultado.</p>
+            </div>
+            <div class="idemo-step-card-actions">
+              <button class="btn-primary" onclick="idemoVerifyAudit()">Verificar auditoría</button>
+            </div>
+            <div class="idemo-step-card-result" id="idemo-step-audit-result"></div>
+          </div>
+        </article>
+
       </div>
 
       <div class="fine-print" style="margin-top:24px;">
-        ¿Querés ver detalles técnicos? Abrí el
+        ¿Querés ver detalles técnicos crudos (JSON, endpoints, hash chain completo)? Abrí el
         <a href="#case-workbench"><strong>Workbench paso a paso</strong></a>
         o el
         <a href="#dash-anchor"><strong>Dashboard técnico (Modo avanzado)</strong></a>
         más abajo. Los <a href="#legacy">demos previos</a> (Fase 0/1) también siguen disponibles.
       </div>
+
+      <!-- ── Modo rápido técnico (demoted, colapsado por default) ───── -->
+      <details class="idemo-fast-mode">
+        <summary>
+          <span class="idemo-fast-icon">⚡</span>
+          <span class="idemo-fast-title">Modo rápido técnico (opcional · no recomendado para presentación)</span>
+        </summary>
+        <div class="idemo-fast-body">
+          <p>
+            Esto NO es el camino recomendado para mostrar la demo a un profesor o asesor.
+            Se saltea las explicaciones de cada paso y corre los 8 endpoints en cadena en ~3 segundos.
+            Útil solo para devs que quieren verificar que el flujo end-to-end funciona sin clickear los 8 botones.
+          </p>
+          <div class="actions">
+            <button class="btn-secondary" id="idemo-btn-guided" onclick="idemoRunGuidedDemo()">
+              Ejecutar los 8 pasos automáticamente
+            </button>
+          </div>
+        </div>
+      </details>
 
     </div>
   </div>

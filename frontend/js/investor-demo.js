@@ -71,23 +71,18 @@ function idemoReset() {
     selectionId: null, selectedVariant: null, selectedCandidate: null,
     reportId: null, reportMarkdown: null,
     auditIntact: null, auditTotalEvents: null,
+    overrideApprovalId: null,
     stepStatus: {},
   });
-  // Limpiar paneles
-  const ids = [
-    "idemo-status", "idemo-portfolio-result", "idemo-selection-result",
-    "idemo-report-result", "idemo-audit-result",
-  ];
-  for (const id of ids) {
-    const node = document.getElementById(id);
-    if (node) node.innerHTML = "";
+  // Limpiar inline result panels y resetear pill+data-state de cada step card.
+  for (const s of IDEMO_STEPS) {
+    const result = document.getElementById(`idemo-step-${s.key}-result`);
+    if (result) result.innerHTML = "";
+    const pill = document.getElementById(`idemo-step-${s.key}-pill`);
+    if (pill) pill.innerHTML = '<span class="pill pill-grey">pendiente</span>';
+    const card = document.getElementById(`idemo-step-${s.key}`);
+    if (card) card.setAttribute("data-state", "pending");
   }
-  for (const id of ["idemo-portfolio-block", "idemo-selection-block", "idemo-report-block", "idemo-audit-block"]) {
-    const node = document.getElementById(id);
-    if (node) node.style.display = "none";
-  }
-  idemoRenderProgress();
-  idemoStatus("ok", "Estado limpio. Listo para empezar.");
 }
 
 // ── Helpers de HTTP ───────────────────────────────────────────────────
@@ -185,46 +180,67 @@ function idemoBuildPrefsPayload() {
   return { source: "manual", structured_preferences: structured };
 }
 
-// ── Progress checklist + status ───────────────────────────────────────
+// ── Per-step state + inline rendering ─────────────────────────────────
+// Cada step tiene su propia card con id="idemo-step-{key}", su pill
+// id="idemo-step-{key}-pill" y su panel inline id="idemo-step-{key}-result".
+// El estado vive en data-state del wrapper para que CSS lo coloree solo.
 
 function idemoStepState(key) {
   return window.idemoState.stepStatus[key] || "pending";
 }
+
 function idemoSetStep(key, status) {
   window.idemoState.stepStatus[key] = status;
-  idemoRenderProgress();
+  // Pintar el wrapper (color del borde left vía data-state)
+  const card = document.getElementById(`idemo-step-${key}`);
+  if (card) card.setAttribute("data-state", status);
+  // Pintar la pill
+  const pill = document.getElementById(`idemo-step-${key}-pill`);
+  if (pill) {
+    let html;
+    if (status === "done")         html = '<span class="pill pill-green">listo</span>';
+    else if (status === "active")  html = '<span class="pill pill-blue">en curso…</span>';
+    else if (status === "error")   html = '<span class="pill pill-red">error</span>';
+    else if (status === "skipped") html = '<span class="pill pill-orange">saltado</span>';
+    else                           html = '<span class="pill pill-grey">pendiente</span>';
+    pill.innerHTML = html;
+  }
+  // Auto-scroll suave a la step que se acaba de poner activa, para que el
+  // visitante vea el spinner sin tener que scrollear manualmente.
+  if (status === "active" && card) {
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 }
 
-function idemoRenderProgress() {
-  const target = document.getElementById("idemo-progress");
-  if (!target) return;
-  const rows = IDEMO_STEPS.map((s, idx) => {
-    const st = idemoStepState(s.key);
-    let pill;
-    if (st === "done") pill = '<span class="pill pill-green">listo</span>';
-    else if (st === "active") pill = '<span class="pill pill-blue">en curso…</span>';
-    else if (st === "error") pill = '<span class="pill pill-red">error</span>';
-    else if (st === "skipped") pill = '<span class="pill pill-orange">saltado</span>';
-    else pill = '<span class="pill pill-grey">pendiente</span>';
-    return `<div class="idemo-step-row" data-state="${st}">
-      <div class="idemo-step-circle">${idx + 1}</div>
-      <div class="idemo-step-text">${escapeHTML(s.label)}</div>
-      <div class="idemo-step-pill">${pill}</div>
-    </div>`;
-  }).join("");
-  target.innerHTML = rows;
-}
-
-function idemoStatus(kind, html) {
-  // kind: ok | info | warn | error
-  const target = document.getElementById("idemo-status");
+// Render inline en el panel de resultado de un paso.
+// kind: ok | info | warn | error
+function idemoStepResult(key, kind, html) {
+  const target = document.getElementById(`idemo-step-${key}-result`);
   if (!target) return;
   const cls = kind === "ok" ? "msg-success"
-    : kind === "warn" ? "msg-error"   // amber-ish: reuse error styling (border) + custom inline
+    : kind === "warn"  ? "msg-info"   // info-tinted, no rojo
     : kind === "error" ? "msg-error"
     : "msg-info";
   target.innerHTML = `<div class="msg ${cls}">${html}</div>`;
 }
+
+// Mismo que idemoStepResult pero permite agregar HTML extra (tablas, cards)
+// debajo del banner. Reutilizado por proposal/selection/report/audit.
+function idemoStepResultRich(key, kind, bannerHtml, extraHtml) {
+  const target = document.getElementById(`idemo-step-${key}-result`);
+  if (!target) return;
+  const cls = kind === "ok" ? "msg-success"
+    : kind === "warn"  ? "msg-info"
+    : kind === "error" ? "msg-error"
+    : "msg-info";
+  target.innerHTML = `<div class="msg ${cls}">${bannerHtml}</div>${extraHtml || ""}`;
+}
+
+// Compat shim: investor-demo.js previo usaba idemoStatus/idemoRenderProgress.
+// Los dejamos como no-ops para no romper si quedó alguna referencia colgada
+// (el modo guiado, por ejemplo, llamaba a idemoStatus al inicio).
+function idemoRenderProgress() { /* no-op: las pills viven por step ahora */ }
+function idemoStatus(/* kind, html */) { /* no-op: cada step renderea inline */ }
 
 function idemoExtractTimestamp() {
   // ISO-ish short timestamp para nombrar el case sin colisionar.
@@ -247,25 +263,25 @@ async function idemoPrepareCase() {
   if (!res.ok) {
     idemoSetStep("prepare", "error");
     if (res.status === 422 && /not found/i.test(res.detail || "")) {
-      idemoStatus("error",
-        `<strong>Falta el seed demo.</strong> Corré <code>python scripts/bootstrap_local_demo.py</code> en la terminal y volvé a intentar. ` +
+      idemoStepResult("prepare", "error",
+        `<strong>Falta el seed demo.</strong> Corré <code>python scripts/bootstrap_local_demo.py</code> en la terminal y volvé a intentar.` +
         `<br><span style="font-size:11px;opacity:.8;">Detalle: ${escapeHTML(res.detail)}</span>`);
     } else if (res.networkError) {
-      idemoStatus("error",
+      idemoStepResult("prepare", "error",
         `<strong>El backend no responde.</strong> Levantá uvicorn: <code>python -m uvicorn risk_first_advisory.api_layer.main:app --reload</code>`);
     } else {
-      idemoStatus("error",
-        `<strong>No se pudo crear el caso.</strong> ${escapeHTML(res.detail || "")} ` +
+      idemoStepResult("prepare", "error",
+        `<strong>No se pudo crear el caso.</strong> ${escapeHTML(res.detail || "")}` +
         `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     }
     return false;
   }
   window.idemoState.caseId = res.json.case_id;
   idemoSetStep("prepare", "done");
-  idemoStatus("ok",
-    `<strong>Caso demo listo</strong> · "${escapeHTML(title)}" creado para ` +
-    `el cliente <code>${escapeHTML(IDEMO_CLIENT_ID)}</code>. Internamente: ` +
-    `<code>${escapeHTML(res.json.case_id)}</code>.`);
+  idemoStepResult("prepare", "ok",
+    `<strong>Caso creado.</strong> Título: "${escapeHTML(title)}" · cliente del seed <code>${escapeHTML(IDEMO_CLIENT_ID)}</code>. ` +
+    `ID interno del caso: <code>${escapeHTML(res.json.case_id)}</code>. ` +
+    `Cualquier decisión que el asesor tome a partir de acá queda atada a este caso.`);
   return true;
 }
 
@@ -273,7 +289,7 @@ async function idemoPrepareCase() {
 
 async function idemoSubmitKyc() {
   if (!window.idemoState.caseId) {
-    idemoStatus("warn", "Primero hacé clic en <strong>1. Preparar caso demo</strong>.");
+    idemoStepResult("kyc", "warn", "Primero hacé clic en <strong>1. Preparar caso del inversor</strong>.");
     return false;
   }
   idemoSetStep("kyc", "active");
@@ -281,28 +297,25 @@ async function idemoSubmitKyc() {
   const res = await idemoApi("POST", `/cases/${encodeURIComponent(window.idemoState.caseId)}/kyc`, payload);
   if (!res.ok) {
     idemoSetStep("kyc", "error");
-    idemoStatus("error",
-      `<strong>No se pudo enviar el KYC.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("kyc", "error",
+      `<strong>No se pudo enviar el KYC.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
   window.idemoState.kycSubmissionId = res.json.kyc_submission_id;
   idemoSetStep("kyc", "done");
-  idemoStatus("ok",
-    `<strong>KYC enviado</strong> · perfil del inversor cargado en el caso. ` +
-    `Versión <strong>${res.json.version}</strong>.`);
+  idemoStepResult("kyc", "ok",
+    `<strong>KYC enviado.</strong> Perfil del inversor guardado en el caso como <em>submission</em> versión ` +
+    `<strong>${res.json.version}</strong>. ` +
+    `Cada nuevo envío incrementaría esta versión y quedaría en el audit trail (no se pisa el anterior).`);
   return true;
 }
 
 // ── STEP 3 — análisis de perfil con IA ────────────────────────────────
 
 async function idemoRunAiProfile() {
-  if (!window.idemoState.caseId) {
-    idemoStatus("warn", "Primero preparar caso + KYC.");
-    return false;
-  }
-  if (!window.idemoState.kycSubmissionId) {
-    idemoStatus("warn", "Primero hacé clic en <strong>2. Enviar perfil / KYC</strong>.");
+  if (!window.idemoState.caseId || !window.idemoState.kycSubmissionId) {
+    idemoStepResult("ai", "warn", "Primero ejecutá los pasos 1 (preparar caso) y 2 (enviar KYC).");
     return false;
   }
   idemoSetStep("ai", "active");
@@ -318,17 +331,17 @@ async function idemoRunAiProfile() {
       window.idemoState.aiSkipped = true;
       window.idemoState.aiProposedProfile = "moderado";  // default razonable
       idemoSetStep("ai", "skipped");
-      idemoStatus("info",
+      idemoStepResult("ai", "warn",
         `<strong>Paso saltado — OpenAI no configurado.</strong> ` +
         `La demo local no tiene <code>OPENAI_API_KEY</code>. ` +
-        `Podés seguir con la demo (se usará "moderado" como perfil sugerido), ` +
+        `Podés seguir con la demo (vamos a usar "moderado" como perfil sugerido para el paso 4), ` +
         `o configurar la clave y reiniciar el backend para probar el análisis real. ` +
         `Alternativa: el smoke check (<code>python scripts/run_case_workflow_smoke_check.py</code>) usa un mock determinístico de OpenAI.`);
-      return true;  // No bloqueamos el flujo guiado.
+      return true;  // No bloqueamos el flujo.
     }
     idemoSetStep("ai", "error");
-    idemoStatus("error",
-      `<strong>El análisis IA falló.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("ai", "error",
+      `<strong>El análisis de la IA falló.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
@@ -337,8 +350,8 @@ async function idemoRunAiProfile() {
   idemoSetStep("ai", "done");
   const contraN = Array.isArray(res.json.contradictions) ? res.json.contradictions.length : 0;
   const fuN = Array.isArray(res.json.follow_up_questions) ? res.json.follow_up_questions.length : 0;
-  idemoStatus("ok",
-    `<strong>Análisis IA listo.</strong> Perfil preliminar sugerido por la IA: ` +
+  idemoStepResult("ai", "ok",
+    `<strong>Análisis listo.</strong> Perfil preliminar sugerido por la IA: ` +
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code> · ` +
     `${contraN} contradicción(es) detectada(s) · ${fuN} pregunta(s) de seguimiento. ` +
     `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>`);
@@ -349,7 +362,7 @@ async function idemoRunAiProfile() {
 
 async function idemoApproveProfile() {
   if (!window.idemoState.caseId || !window.idemoState.kycSubmissionId) {
-    idemoStatus("warn", "Primero preparar caso + KYC.");
+    idemoStepResult("approve", "warn", "Primero ejecutá los pasos 1 (preparar caso) y 2 (KYC).");
     return false;
   }
   idemoSetStep("approve", "active");
@@ -369,19 +382,19 @@ async function idemoApproveProfile() {
   const res = await idemoApi("POST", `/cases/${encodeURIComponent(window.idemoState.caseId)}/profile-approval`, body);
   if (!res.ok) {
     idemoSetStep("approve", "error");
-    idemoStatus("error",
-      `<strong>No se pudo aprobar el perfil.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("approve", "error",
+      `<strong>No se pudo aprobar el perfil.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
   window.idemoState.approvalId = res.json.approval_id;
   window.idemoState.approvedProfile = res.json.approved_profile;
   idemoSetStep("approve", "done");
-  idemoStatus("ok",
+  idemoStepResult("approve", "ok",
     `<strong>Perfil aprobado por el asesor.</strong> ` +
-    `Perfil aprobado: <code>${escapeHTML(res.json.approved_profile || "—")}</code>. ` +
-    `Decisión: <code>${escapeHTML(res.json.decision)}</code>. ` +
-    `Esta decisión queda en la cadena de auditoría.`);
+    `Perfil aprobado: <code>${escapeHTML(res.json.approved_profile || "—")}</code> · ` +
+    `decisión <code>${escapeHTML(res.json.decision)}</code>. ` +
+    `Esta firma queda registrada en la cadena de auditoría y conduce todo lo de abajo.`);
   return true;
 }
 
@@ -390,7 +403,7 @@ async function idemoApproveProfile() {
 
 async function idemoGenerateProposal() {
   if (!window.idemoState.caseId || !window.idemoState.approvalId) {
-    idemoStatus("warn", "Primero ejecutar pasos 1–4 (caso + KYC + perfil aprobado).");
+    idemoStepResult("propose", "warn", "Primero ejecutá los pasos 1–4 (caso, KYC, análisis IA y aprobación del perfil).");
     return false;
   }
   idemoSetStep("propose", "active");
@@ -402,8 +415,8 @@ async function idemoGenerateProposal() {
     prefsBody);
   if (!r1.ok) {
     idemoSetStep("propose", "error");
-    idemoStatus("error",
-      `<strong>No se pudo registrar las preferencias.</strong> ${escapeHTML(r1.detail || "")} ` +
+    idemoStepResult("propose", "error",
+      `<strong>No se pudo registrar las preferencias.</strong> ${escapeHTML(r1.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${r1.status}</span>`);
     return false;
   }
@@ -415,8 +428,8 @@ async function idemoGenerateProposal() {
     { source_universe: "sample_instrument_universe.csv" });
   if (!r2.ok) {
     idemoSetStep("propose", "error");
-    idemoStatus("error",
-      `<strong>No se pudo filtrar el universo.</strong> ${escapeHTML(r2.detail || "")} ` +
+    idemoStepResult("propose", "error",
+      `<strong>No se pudo filtrar el universo.</strong> ${escapeHTML(r2.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${r2.status}</span>`);
     return false;
   }
@@ -430,8 +443,8 @@ async function idemoGenerateProposal() {
     { variant_policy: "standard" });
   if (!r3.ok) {
     idemoSetStep("propose", "error");
-    idemoStatus("error",
-      `<strong>No se pudo generar la propuesta.</strong> ${escapeHTML(r3.detail || "")} ` +
+    idemoStepResult("propose", "error",
+      `<strong>No se pudo generar la propuesta.</strong> ${escapeHTML(r3.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${r3.status}</span>`);
     return false;
   }
@@ -440,17 +453,19 @@ async function idemoGenerateProposal() {
 
   if (r3.json.status !== "completed") {
     idemoSetStep("propose", "error");
-    idemoStatus("error",
+    idemoStepResult("propose", "error",
       `<strong>La propuesta no está completa.</strong> Estado: <code>${escapeHTML(r3.json.status)}</code>. ` +
       `Avisos: ${(r3.json.warnings || []).map(escapeHTML).join("; ") || "—"}.`);
     return false;
   }
   idemoSetStep("propose", "done");
-  idemoStatus("ok",
-    `<strong>Propuesta de cartera generada.</strong> ` +
-    `Universo filtrado: <strong>${eligibleN}</strong> instrumentos elegibles (${excludedN} excluidos). ` +
-    `Variantes propuestas: <strong>${window.idemoState.candidates.length}</strong>.`);
-  idemoRenderPortfolioComparison(window.idemoState.candidates);
+
+  // Render inline (banner + tabla comparativa + cards por variante con holdings).
+  const banner = `<strong>Propuesta generada.</strong> Universo filtrado: ` +
+    `<strong>${eligibleN}</strong> instrumentos elegibles (${excludedN} excluidos). ` +
+    `Variantes propuestas: <strong>${window.idemoState.candidates.length}</strong>.`;
+  idemoStepResultRich("propose", "ok", banner,
+    idemoBuildPortfolioComparisonHtml(window.idemoState.candidates));
   return true;
 }
 
@@ -474,11 +489,11 @@ function idemoPickPreferredVariant(candidates) {
 
 async function idemoSelectPortfolio() {
   if (!window.idemoState.proposalId) {
-    idemoStatus("warn", "Primero generá la propuesta (paso 5).");
+    idemoStepResult("select", "warn", "Primero generá la propuesta (paso 5).");
     return false;
   }
   if (!window.idemoState.candidates.length) {
-    idemoStatus("error", "No hay variantes para seleccionar.");
+    idemoStepResult("select", "error", "No hay variantes para seleccionar.");
     return false;
   }
   idemoSetStep("select", "active");
@@ -506,8 +521,8 @@ async function idemoSelectPortfolio() {
       ovrBody);
     if (!rO.ok) {
       idemoSetStep("select", "error");
-      idemoStatus("error",
-        `<strong>No se pudo firmar el override.</strong> ${escapeHTML(rO.detail || "")} ` +
+      idemoStepResult("select", "error",
+        `<strong>No se pudo firmar el override.</strong> ${escapeHTML(rO.detail || "")}` +
         `<br><span style="font-size:11px;opacity:.8;">HTTP ${rO.status}</span>`);
       return false;
     }
@@ -527,8 +542,8 @@ async function idemoSelectPortfolio() {
     selBody);
   if (!res.ok) {
     idemoSetStep("select", "error");
-    idemoStatus("error",
-      `<strong>No se pudo seleccionar la cartera.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("select", "error",
+      `<strong>No se pudo seleccionar la cartera.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
@@ -536,11 +551,12 @@ async function idemoSelectPortfolio() {
   window.idemoState.selectedVariant = res.json.selected_variant;
   window.idemoState.selectedCandidate = res.json.selected_candidate;
   idemoSetStep("select", "done");
-  idemoStatus("ok",
-    `<strong>Cartera seleccionada por el asesor.</strong> ` +
+  const banner = `<strong>Cartera seleccionada por el asesor.</strong> ` +
     `Variante final: <code>${escapeHTML(variant)}</code>` +
-    (requiresOverride ? ` <span class="pill pill-orange">con firma de override</span>` : "") + ".");
-  idemoRenderSelectedPortfolio(res.json);
+    (requiresOverride
+      ? ` <span class="pill pill-orange">con firma de override</span> — el sistema exigió la firma porque la variante excede el presupuesto aprobado`
+      : ` <span class="pill pill-green">dentro del presupuesto de riesgo</span>`) + ".";
+  idemoStepResultRich("select", "ok", banner, idemoBuildSelectedPortfolioHtml(res.json));
   return true;
 }
 
@@ -548,7 +564,7 @@ async function idemoSelectPortfolio() {
 
 async function idemoGenerateReport() {
   if (!window.idemoState.selectionId) {
-    idemoStatus("warn", "Primero seleccioná la cartera (paso 6).");
+    idemoStepResult("report", "warn", "Primero seleccioná la cartera (paso 6).");
     return false;
   }
   idemoSetStep("report", "active");
@@ -557,20 +573,19 @@ async function idemoGenerateReport() {
     { report_type: "portfolio_recommendation", status: "draft" });
   if (!res.ok) {
     idemoSetStep("report", "error");
-    idemoStatus("error",
-      `<strong>No se pudo generar el reporte.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("report", "error",
+      `<strong>No se pudo generar el reporte.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
   window.idemoState.reportId = res.json.report_id;
   window.idemoState.reportMarkdown = res.json.markdown || "";
   idemoSetStep("report", "done");
-  idemoStatus("ok",
-    `<strong>Reporte generado.</strong> ` +
+  const banner = `<strong>Reporte listo para revisión del asesor.</strong> ` +
     `<code>${escapeHTML(res.json.report_id)}</code> · ` +
     `versión <strong>${res.json.version}</strong> · estado <code>${escapeHTML(res.json.status)}</code>. ` +
-    `El reporte incluye la composición exacta de la cartera y la tabla comparativa de variantes.`);
-  idemoRenderReportPreview(res.json);
+    `Incluye la composición exacta de la cartera y la tabla comparativa de variantes.`;
+  idemoStepResultRich("report", "ok", banner, idemoBuildReportPreviewHtml(res.json));
   return true;
 }
 
@@ -578,7 +593,7 @@ async function idemoGenerateReport() {
 
 async function idemoVerifyAudit() {
   if (!window.idemoState.caseId) {
-    idemoStatus("warn", "Primero preparar el caso (paso 1).");
+    idemoStepResult("audit", "warn", "Primero preparar el caso (paso 1).");
     return false;
   }
   idemoSetStep("audit", "active");
@@ -590,20 +605,21 @@ async function idemoVerifyAudit() {
   );
   if (!res.ok) {
     idemoSetStep("audit", "error");
-    idemoStatus("error",
-      `<strong>No se pudo verificar la auditoría.</strong> ${escapeHTML(res.detail || "")} ` +
+    idemoStepResult("audit", "error",
+      `<strong>No se pudo verificar la auditoría.</strong> ${escapeHTML(res.detail || "")}` +
       `<br><span style="font-size:11px;opacity:.8;">HTTP ${res.status}</span>`);
     return false;
   }
   window.idemoState.auditIntact = !!res.json.is_intact;
   window.idemoState.auditTotalEvents = res.json.total_events;
-  idemoSetStep("audit", "done");
-  idemoStatus("ok",
-    `<strong>Auditoría verificada.</strong> ` +
-    (res.json.is_intact
-      ? `Cadena <strong>intacta</strong> sobre ${res.json.total_events} evento(s).`
-      : `Cadena <strong>rota</strong> en el evento ${res.json.first_broken_sequence}.`));
-  idemoRenderAudit(res.json);
+  idemoSetStep("audit", res.json.is_intact ? "done" : "error");
+  const intactPill = res.json.is_intact
+    ? '<span class="pill pill-green">cadena intacta</span>'
+    : '<span class="pill pill-red">cadena rota</span>';
+  const banner = res.json.is_intact
+    ? `${intactPill} · Las <strong>${res.json.total_events || 0}</strong> decisiones del caso quedaron registradas y la cadena SHA-256 verifica correctamente. Compliance puede pedir el snapshot completo desde el Workbench (paso 15).`
+    : `${intactPill} · La cadena se rompió en el evento ${res.json.first_broken_sequence}. Mensaje: ${escapeHTML(res.json.message || "—")}.`;
+  idemoStepResultRich("audit", res.json.is_intact ? "ok" : "error", banner, idemoBuildAuditExtraHtml(res.json));
   return true;
 }
 
@@ -647,19 +663,12 @@ async function idemoRunGuidedDemo() {
   }
 }
 
-// ── Renderers ─────────────────────────────────────────────────────────
+// ── Builders: cada uno devuelve HTML para inyectar inline en el step ──
 
-function idemoRenderPortfolioComparison(candidates) {
-  const block = document.getElementById("idemo-portfolio-block");
-  const target = document.getElementById("idemo-portfolio-result");
-  if (!block || !target) return;
-  block.style.display = "block";
-
+function idemoBuildPortfolioComparisonHtml(candidates) {
   if (!candidates.length) {
-    target.innerHTML = `<div class="msg msg-info">Sin variantes generadas.</div>`;
-    return;
+    return `<div class="msg msg-info" style="margin-top:10px;">Sin variantes generadas.</div>`;
   }
-
   // Tabla compacta de comparación
   const rows = candidates.map(c => {
     const meta = c.metadata || {};
@@ -678,7 +687,8 @@ function idemoRenderPortfolioComparison(candidates) {
     </tr>`;
   }).join("");
   const compareTable = `
-    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:14px;">
+    <div style="margin-top:12px;font-size:12px;color:var(--rf-text-muted);font-weight:600;">Tabla comparativa</div>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-top:6px;margin-bottom:14px;">
       <thead><tr style="background:#f4f6fa;">
         <th style="padding:10px 12px;font-size:11px;text-align:left;">Variante</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Retorno esperado</th>
@@ -690,6 +700,7 @@ function idemoRenderPortfolioComparison(candidates) {
     </table>`;
 
   // Cards detalladas por variante (reusa cwRenderCandidateCard del Workbench)
+  const cardsHeader = `<div style="font-size:12px;color:var(--rf-text-muted);font-weight:600;margin-bottom:6px;">Composición por variante (instrumentos + pesos)</div>`;
   const cards = candidates.map(c => {
     if (typeof cwRenderCandidateCard === "function") {
       return cwRenderCandidateCard(c);
@@ -703,15 +714,10 @@ function idemoRenderPortfolioComparison(candidates) {
     return `<div class="portfolio-card"><div class="portfolio-card-header"><span class="variant-name">${escapeHTML(c.variant || "?")}</span></div><div class="portfolio-card-body">${table}</div></div>`;
   }).join("");
 
-  target.innerHTML = compareTable + cards;
+  return compareTable + cardsHeader + cards;
 }
 
-function idemoRenderSelectedPortfolio(selectionResp) {
-  const block = document.getElementById("idemo-selection-block");
-  const target = document.getElementById("idemo-selection-result");
-  if (!block || !target) return;
-  block.style.display = "block";
-
+function idemoBuildSelectedPortfolioHtml(selectionResp) {
   const cand = selectionResp.selected_candidate || {};
   const meta = cand.metadata || {};
   const ovr = meta.requires_advisor_override
@@ -727,8 +733,8 @@ function idemoRenderSelectedPortfolio(selectionResp) {
   const vol = (cand.volatility_annual !== undefined)
     ? (cand.volatility_annual * 100).toFixed(2) + "%" : "—";
 
-  target.innerHTML = `
-    <div class="portfolio-card">
+  return `
+    <div class="portfolio-card" style="margin-top:12px;">
       <div class="portfolio-card-header">
         <span class="variant-name">${escapeHTML(selectionResp.selected_variant || "?")}</span>
         ${ovr}
@@ -742,12 +748,7 @@ function idemoRenderSelectedPortfolio(selectionResp) {
     </div>`;
 }
 
-function idemoRenderReportPreview(reportResp) {
-  const block = document.getElementById("idemo-report-block");
-  const target = document.getElementById("idemo-report-result");
-  if (!block || !target) return;
-  block.style.display = "block";
-
+function idemoBuildReportPreviewHtml(reportResp) {
   const md = reportResp.markdown || "";
   const hasComp = md.includes("Composición de la cartera seleccionada");
   const hasVar = md.includes("Comparación de variantes generadas");
@@ -757,11 +758,9 @@ function idemoRenderReportPreview(reportResp) {
     hasVar ? '<span class="pill pill-violet">incluye comparación de variantes</span>' : "",
   ].filter(Boolean).join(" ");
 
-  target.innerHTML = `
-    <div class="msg msg-success" style="margin-bottom:10px;">
-      <strong>Reporte listo para revisión del asesor.</strong> ${pills}
-    </div>
-    <details open>
+  return `
+    <div style="margin-top:10px;font-size:12px;color:var(--rf-text-muted);">${pills}</div>
+    <details open style="margin-top:10px;">
       <summary style="cursor:pointer;font-size:12px;color:var(--rf-navy-700);font-weight:600;">
         Vista previa del reporte (Markdown)
       </summary>
@@ -771,28 +770,10 @@ function idemoRenderReportPreview(reportResp) {
   `;
 }
 
-function idemoRenderAudit(verifyResp) {
-  const block = document.getElementById("idemo-audit-block");
-  const target = document.getElementById("idemo-audit-result");
-  if (!block || !target) return;
-  block.style.display = "block";
-
-  const intact = !!verifyResp.is_intact;
-  const pill = intact
-    ? '<span class="pill pill-green">cadena intacta</span>'
-    : '<span class="pill pill-red">cadena rota</span>';
-  const detail = intact
-    ? `Las <strong>${verifyResp.total_events || 0}</strong> decisiones del caso quedaron registradas y la cadena SHA-256 verifica correctamente. ` +
-      `Compliance puede pedir la <a href="#audit-anchor">snapshot completa de auditoría</a> en el Workbench.`
-    : `<strong>Atención:</strong> la cadena se rompió en el evento ${verifyResp.first_broken_sequence}. ` +
-      `Mensaje: ${escapeHTML(verifyResp.message || "—")}.`;
-
-  target.innerHTML = `
-    <div class="msg ${intact ? 'msg-success' : 'msg-error'}">
-      ${pill} · ${detail}
-    </div>
-    ${(typeof rfaJsonDetails === "function") ? rfaJsonDetails(verifyResp, "Detalles técnicos · respuesta de la verificación") : ""}
-  `;
+function idemoBuildAuditExtraHtml(verifyResp) {
+  return (typeof rfaJsonDetails === "function")
+    ? rfaJsonDetails(verifyResp, "Detalles técnicos · respuesta de la verificación")
+    : "";
 }
 
 // ── Init: render checklist al cargar ──────────────────────────────────

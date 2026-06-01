@@ -1164,6 +1164,157 @@ td.mono { font-size: 12px; color: var(--rf-text); }
 .idemo-step-row[data-state="done"]   .idemo-step-text { color: var(--rf-text-body); }
 .idemo-step-row .idemo-step-pill { flex-shrink: 0; }
 
+/* ── investor walkthrough (Fase 3.6 polish): step-by-step didáctico ──── */
+
+/* Mini toolbar arriba del walkthrough: título + reset */
+.idemo-walkthrough-intro {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin: 26px 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rf-border);
+}
+.idemo-walkthrough-intro > div:first-child { flex: 1; }
+.idemo-walkthrough-eyebrow {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--rf-navy-600); margin-bottom: 4px;
+}
+.idemo-walkthrough-title {
+  font-size: 18px; font-weight: 700; letter-spacing: -.01em;
+  color: var(--rf-navy-900);
+}
+.idemo-walkthrough-sub {
+  font-size: 13px; color: var(--rf-text-muted);
+  margin-top: 3px; max-width: 70ch;
+}
+
+/* Contenedor que apila las 8 step cards */
+.idemo-walkthrough {
+  display: flex; flex-direction: column;
+  gap: 14px;
+}
+
+/* Cada step card */
+.idemo-walkthrough-step {
+  background: var(--rf-card);
+  border: 1px solid var(--rf-border);
+  border-left: 4px solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-lg);
+  box-shadow: var(--rf-shadow-sm);
+  transition: border-left-color .2s, box-shadow .2s, transform .05s;
+  overflow: hidden;
+}
+.idemo-walkthrough-step:hover { box-shadow: var(--rf-shadow); }
+
+/* States por data-state */
+.idemo-walkthrough-step[data-state="pending"]  { border-left-color: var(--rf-border-strong); }
+.idemo-walkthrough-step[data-state="active"]   {
+  border-left-color: var(--rf-navy-600);
+  box-shadow: 0 0 0 3px rgba(29,78,216,.10), var(--rf-shadow);
+}
+.idemo-walkthrough-step[data-state="done"]     { border-left-color: var(--rf-emerald-600); }
+.idemo-walkthrough-step[data-state="error"]    { border-left-color: var(--rf-rose-600); }
+.idemo-walkthrough-step[data-state="skipped"]  { border-left-color: var(--rf-amber-600); }
+
+/* Header del step card */
+.idemo-step-card-header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 22px;
+  background: linear-gradient(180deg, #fafbfd 0%, #f5f7fb 100%);
+  border-bottom: 1px solid var(--rf-border-soft);
+}
+.idemo-step-card-num {
+  flex-shrink: 0;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--rf-navy-900);
+  color: #fff;
+  font-size: 14px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: -.01em;
+}
+.idemo-walkthrough-step[data-state="done"]    .idemo-step-card-num {
+  background: var(--rf-emerald-600);
+}
+.idemo-walkthrough-step[data-state="active"]  .idemo-step-card-num {
+  background: var(--rf-navy-600);
+  box-shadow: 0 0 0 4px rgba(29,78,216,.18);
+}
+.idemo-walkthrough-step[data-state="error"]   .idemo-step-card-num { background: var(--rf-rose-600); }
+.idemo-walkthrough-step[data-state="skipped"] .idemo-step-card-num { background: var(--rf-amber-600); }
+.idemo-step-card-title {
+  flex: 1;
+  font-size: 16px; font-weight: 700; letter-spacing: -.01em;
+  color: var(--rf-navy-900);
+}
+.idemo-step-card-pill { flex-shrink: 0; }
+
+/* Body del step card */
+.idemo-step-card-body {
+  padding: 18px 22px 20px;
+}
+.idemo-step-card-explain {
+  font-size: 13.5px; line-height: 1.65;
+  color: var(--rf-text-body);
+}
+.idemo-step-card-explain p {
+  margin: 0 0 8px;
+}
+.idemo-step-card-explain p:last-of-type { margin-bottom: 0; }
+.idemo-step-card-explain strong { color: var(--rf-navy-900); }
+.idemo-step-card-explain em { font-style: italic; color: var(--rf-text-muted); }
+.idemo-step-card-explain code {
+  background: var(--rf-bg-soft);
+  padding: 1px 6px; border-radius: 4px;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--rf-navy-700);
+}
+.idemo-step-card-actions {
+  margin-top: 14px;
+  display: flex; gap: 10px; align-items: center;
+}
+.idemo-step-card-result {
+  margin-top: 14px;
+}
+.idemo-step-card-result:empty { display: none; }
+
+/* "Modo rápido técnico" — details colapsado, demoted */
+.idemo-fast-mode {
+  margin-top: 28px;
+  background: linear-gradient(180deg, #fafbfd 0%, #f4f6fb 100%);
+  border: 1px dashed var(--rf-border-strong);
+  border-radius: var(--rf-radius-lg);
+  overflow: hidden;
+}
+.idemo-fast-mode > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 20px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--rf-text-muted); font-weight: 600;
+  user-select: none;
+  transition: background .15s;
+}
+.idemo-fast-mode > summary::-webkit-details-marker { display: none; }
+.idemo-fast-mode > summary::before { content: ""; }   /* override del global details ▶ */
+.idemo-fast-mode > summary:hover { background: #eef1f7; color: var(--rf-text); }
+.idemo-fast-icon { font-size: 14px; }
+.idemo-fast-title { flex: 1; }
+.idemo-fast-mode[open] > summary {
+  border-bottom: 1px solid var(--rf-border);
+  background: #eef1f7;
+  color: var(--rf-navy-900);
+}
+.idemo-fast-body {
+  padding: 16px 20px 18px;
+  background: var(--rf-card);
+}
+.idemo-fast-body p {
+  font-size: 12.5px; color: var(--rf-text-muted); line-height: 1.55;
+  margin: 0 0 12px;
+}
+
 /* ── tiny utility classes ──────────────────────────────────────────────── */
 .text-muted { color: var(--rf-text-muted); }
 .text-mono  { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }
