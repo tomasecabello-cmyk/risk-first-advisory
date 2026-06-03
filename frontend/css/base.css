@@ -469,7 +469,7 @@ input[type="number"]:focus,
 select:focus,
 textarea:focus {
   outline: none; border-color: var(--rf-navy-600);
-  box-shadow: 0 0 0 3px rgba(29,78,216,.14);
+  box-shadow: 0 0 0 3px rgba(29,78,216,.40);
 }
 textarea { resize: vertical; min-height: 68px; line-height: 1.5; }
 
