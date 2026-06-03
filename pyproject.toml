@@ -28,6 +28,7 @@ dev = [
     "pytest>=7.4",
     "ruff>=0.1",
     "mypy>=1.7",
+    "python-pptx>=1.0",  # scripts/build_*_pitch_deck.py
 ]
 
 [tool.setuptools.packages.find]
