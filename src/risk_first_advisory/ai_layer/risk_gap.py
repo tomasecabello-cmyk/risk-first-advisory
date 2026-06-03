@@ -99,6 +99,9 @@ def derive_risk_gap(
             s for c in contradictions
             if (s := str(c.get("explanation") or c.get("description") or "").strip())
         )
+        # Evita el doble punto si la última contradicción ya termina en "." — el card
+        # es la pieza protagonista, un ".." se nota.
+        detail = detail.rstrip(". ")
         gap_explanation = (
             f"El perfil declarado ({declared}) presenta inconsistencias con otras "
             f"respuestas del cliente"
