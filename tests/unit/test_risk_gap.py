@@ -97,6 +97,22 @@ def test_follow_up_questions_used_and_capped_at_two():
     assert gap["confirmation_questions"] == ["Q1", "Q2"]
 
 
+def test_no_double_period_when_contradiction_ends_in_period():
+    # Regression: ISSUE-QA-001 — gap_explanation mostraba ".." cuando la
+    # explicación de la contradicción ya terminaba en ".".
+    # Found by /qa on 2026-06-03
+    # Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-06-03.md
+    result = {
+        "preliminary_profile": "moderado",
+        "contradictions": [
+            {"field": "x", "severity": "medium",
+             "explanation": "El cliente indica que vendería todo."},
+        ],
+    }
+    gap = derive_risk_gap(result)
+    assert ".." not in gap["gap_explanation"]
+
+
 def test_deterministic_same_input_same_output():
     result = {
         "preliminary_profile": "moderado",
