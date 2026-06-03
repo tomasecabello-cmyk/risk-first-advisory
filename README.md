@@ -114,6 +114,17 @@ $env:OPENAI_API_KEY="sk-..."
 
 El backend queda en `http://127.0.0.1:8000` con Swagger en `/docs`. El smoke check (`python scripts/run_case_workflow_smoke_check.py`) usa mock determinístico y NO necesita la API key.
 
+#### Risk Gap sin OPENAI_API_KEY (demo determinística)
+
+Para ver el paso **Risk Gap** (flag de inconsistencia entre el perfil declarado y la respuesta a estrés) en la demo guiada **sin** clave de OpenAI, arrancá el backend con `RFA_DEMO_MODE`:
+
+```powershell
+$env:RFA_DEMO_MODE="1"
+python -m uvicorn risk_first_advisory.api_layer.main:app --reload
+```
+
+Esto activa un cliente de perfil determinístico (sin LLM): si el KYC del cliente expresa pánico ante una caída, el Risk Gap marca `gap_level: medium` y propone preguntas para que el asesor confirme. Es un **flag de inconsistencia, NO una medición del perfil conductual** — ver `docs/METHODOLOGY_NOTES.md`. Sin `RFA_DEMO_MODE` y sin `OPENAI_API_KEY`, el endpoint sigue exigiendo la clave (no hay fallback silencioso en producción).
+
 ### 4. Terminal 2 — frontend
 
 ```powershell

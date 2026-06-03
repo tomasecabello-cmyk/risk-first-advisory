@@ -47,6 +47,7 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileAnalysisResponse,
     AIRequestLogCreateRequest,
     AIRequestLogListResponse,
+    RiskGap,
     AIRequestLogResponse,
     AuditEventCreateRequest,
     AuditEventListResponse,
@@ -1017,17 +1018,75 @@ def _run_live_portfolio_demo(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class _DemoProfileClient:
+    """
+    Cliente de perfil determinístico para la demo M-Demo (sin OPENAI_API_KEY).
+
+    Se activa SOLO con la env var RFA_DEMO_MODE (no es un fallback silencioso
+    en producción: sin la var, el endpoint sigue exigiendo OPENAI_API_KEY).
+
+    Deriva una contradicción de la señal de estrés del KYC (`open_risk_reaction`):
+    si el cliente expresa pánico/venta ante una caída, marca una contradicción
+    media → el Risk Gap muestra gap_level "medium". Si no, queda alineado (low).
+    Determinístico: misma KYC → misma respuesta.
+    """
+
+    _PANIC_HINTS = ("vend", "pánico", "panico", "todo", "salir", "miedo")
+
+    def analyze_kyc(self, payload: dict) -> dict:
+        reaction = str((payload or {}).get("open_risk_reaction") or "").lower()
+        panics = any(h in reaction for h in self._PANIC_HINTS)
+        if panics:
+            return {
+                "preliminary_profile": "moderado",
+                "confidence": 0.7,
+                "contradictions": [
+                    {
+                        "field": "open_risk_reaction",
+                        "severity": "medium",
+                        "explanation": (
+                            "El perfil declarado es moderado, pero ante una caída "
+                            "del 30% el cliente indica que vendería todo."
+                        ),
+                    }
+                ],
+                "follow_up_questions": [
+                    "¿Cuánto tiempo podés mantener esta inversión sin tocar ese dinero?",
+                    "Si tuvieras una pérdida importante, ¿afectaría tus gastos del día a día?",
+                ],
+                "advisor_notes": [
+                    "Demo determinística (RFA_DEMO_MODE). Revisar tolerancia real con el cliente.",
+                ],
+            }
+        return {
+            "preliminary_profile": "moderado",
+            "confidence": 0.82,
+            "contradictions": [],
+            "follow_up_questions": [],
+            "advisor_notes": ["Demo determinística (RFA_DEMO_MODE). Perfil consistente."],
+        }
+
+
 def _get_openai_profile_client():
     """
-    Crea y devuelve un OpenAIProfileClient real.
+    Crea y devuelve un cliente de perfil.
+
+    - Si RFA_DEMO_MODE está seteada y NO hay OPENAI_API_KEY, devuelve un
+      _DemoProfileClient determinístico (para la demo local sin clave).
+    - Si no, devuelve un OpenAIProfileClient real.
 
     Separada del endpoint para permitir monkeypatch en tests sin llamar
     a OpenAI ni requerir OPENAI_API_KEY en el entorno de CI.
 
     Raises:
-        ValueError: si OPENAI_API_KEY no está configurada.
+        ValueError: si OPENAI_API_KEY no está configurada (y no hay demo mode).
         ImportError: si el paquete openai no está instalado.
     """
+    import os
+
+    if os.environ.get("RFA_DEMO_MODE") and not os.environ.get("OPENAI_API_KEY", "").strip():
+        return _DemoProfileClient()
+
     from risk_first_advisory.ai_layer.openai_profile_client import OpenAIProfileClient
 
     return OpenAIProfileClient()
@@ -3577,7 +3636,22 @@ def create_case_profile_analysis(
                 ),
             ) from exc
 
-    return AIProfileAnalysisResponse(**analysis_data)
+    # ── 5. Derivar Risk Gap (campo derivado, no persistido) ─────────────────
+    # Flag de inconsistencia declarado-vs-respuestas, derivado del result que
+    # analyze_kyc ya produce. Determinístico. Ver ai_layer/risk_gap.py.
+    from risk_first_advisory.ai_layer.risk_gap import derive_risk_gap
+
+    risk_gap_dict = (
+        derive_risk_gap(ai_result, kyc_payload)
+        if isinstance(ai_result, dict)
+        else None
+    )
+    risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
+
+    return AIProfileAnalysisResponse(
+        **analysis_data,
+        risk_gap=risk_gap_obj,
+    )
 
 
 @app.get(
@@ -5484,6 +5558,12 @@ def create_case_report(
         if adv_repo.get(advisor.advisor_id) is not None:
             generated_by_advisor_id = advisor.advisor_id
 
+        # latest analysis para derivar el Risk Gap (campo derivado del result).
+        latest_analysis_data: dict[str, Any] | None = None
+        _analyses = SQLiteAIProfileAnalysisRepository(store).list_by_case(case_id)
+        if _analyses:
+            latest_analysis_data = _analyses[-1]
+
         # ── 5. generar markdown ───────────────────────────────────────────
         try:
             markdown, metadata = CaseMarkdownReportGenerator().generate(
@@ -5492,6 +5572,7 @@ def create_case_report(
                 proposal_data=proposal_data,
                 approval_data=approval_data,
                 override_data=override_data,
+                analysis_data=latest_analysis_data,
             )
         except Exception as exc:
             raise HTTPException(

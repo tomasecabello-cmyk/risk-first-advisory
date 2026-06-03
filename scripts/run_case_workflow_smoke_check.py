@@ -406,6 +406,12 @@ def run_case_workflow_smoke_check(
         _expect(failures, analysis.get("preliminary_profile") == "moderado",
                 "analysis preliminary_profile=moderado",
                 expected="moderado", actual=analysis.get("preliminary_profile"))
+        # Risk Gap derivado (M-Demo): presente en la respuesta del POST.
+        # Mock sin contradicciones → gap_level "low" (estado alineado).
+        risk_gap = analysis.get("risk_gap") or {}
+        _expect(failures, risk_gap.get("gap_level") in {"low", "medium", "high"},
+                "analysis risk_gap.gap_level present",
+                expected="low|medium|high", actual=risk_gap.get("gap_level"))
 
         # ── Profile approval ────────────────────────────────────────────────
         _section("Step 6 / 14: advisor profile approval (approve)")

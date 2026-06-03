@@ -7,9 +7,9 @@ Política: exponer solo primitivos. Los objetos de dominio internos
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared
@@ -1355,6 +1355,27 @@ class AIProfileAnalysisCreateRequest(BaseModel):
         return v
 
 
+class RiskGap(BaseModel):
+    """
+    Risk Gap — flag de inconsistencia entre perfil declarado y respuestas.
+
+    NO es una medición de perfil conductual. Es una señal que marca una
+    inconsistencia y entrega preguntas para que el asesor la confirme.
+    Ver docs/METHODOLOGY_NOTES.md y ai_layer/risk_gap.py.
+
+    `extra="forbid"`: rechaza claves no declaradas (ej. un `confidence`
+    numérico inventado), para que el contrato sea defendible.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    declared_profile:       str
+    stress_signal:          str = ""
+    gap_level:              Literal["low", "medium", "high"]
+    gap_explanation:        str
+    confirmation_questions: list[str]
+
+
 class AIProfileAnalysisResponse(BaseModel):
     analysis_id:         str
     case_id:             str
@@ -1365,6 +1386,10 @@ class AIProfileAnalysisResponse(BaseModel):
     confidence:          float | None
     result:              dict[str, Any]
     created_at_utc:      str
+    # Campo derivado (no persistido como columna): se computa desde `result`
+    # vía ai_layer.risk_gap.derive_risk_gap. None en lecturas que no lo derivan
+    # (GET/list en M-Demo); el POST lo incluye.
+    risk_gap:            RiskGap | None = None
 
 
 class AIProfileAnalysisListResponse(BaseModel):

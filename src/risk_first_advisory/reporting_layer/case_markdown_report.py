@@ -309,6 +309,48 @@ def _section_override(
     return "\n".join(lines)
 
 
+def _section_risk_gap(analysis_data: dict[str, Any] | None) -> str:
+    """
+    Sección Risk Gap — flag de inconsistencia declarado-vs-respuestas.
+
+    Se deriva del `result` del último análisis IA (las contradicciones que
+    analyze_kyc ya produce). Condicional: si no hay analysis_data o no hay
+    perfil declarado, devuelve "" y el reporte no la incluye (backward-compat).
+
+    NO es una medición del perfil conductual. Ver docs/METHODOLOGY_NOTES.md.
+    """
+    if not analysis_data:
+        return ""
+    # Import local para no acoplar la reporting layer al ai_layer en import-time.
+    from risk_first_advisory.ai_layer.risk_gap import derive_risk_gap
+
+    result = analysis_data.get("result")
+    if not isinstance(result, dict):
+        return ""
+    gap = derive_risk_gap(result)
+    if gap is None:
+        return ""
+
+    lines = ["## Risk Gap — perfil declarado vs respuestas del cliente", ""]
+    lines.append(
+        "_La IA marca una inconsistencia. El asesor confirma el perfil con el "
+        "cliente. Esto NO es una medición del perfil conductual._"
+    )
+    lines.append("")
+    lines.append(f"- **Perfil declarado**: `{_safe_str(gap.get('declared_profile'))}`")
+    lines.append(f"- **Nivel de inconsistencia (gap)**: `{_safe_str(gap.get('gap_level'))}`")
+    stress = _safe_str(gap.get("stress_signal"), default="")
+    if stress:
+        lines.append(f"- **Señal del cliente**: {stress}")
+    lines.append(f"- **Lectura**: {_safe_str(gap.get('gap_explanation'))}")
+    questions = gap.get("confirmation_questions") or []
+    if questions:
+        lines.append("- **Preguntas para confirmar con el cliente**:")
+        for q in questions:
+            lines.append(f"  - {_safe_str(q)}")
+    return "\n".join(lines)
+
+
 def _section_disclaimers() -> str:
     lines = ["## Disclaimers", ""]
     for d in _DISCLAIMERS:
@@ -349,6 +391,7 @@ class CaseMarkdownReportGenerator:
         proposal_data: dict[str, Any] | None = None,
         approval_data: dict[str, Any] | None = None,
         override_data: dict[str, Any] | None = None,
+        analysis_data: dict[str, Any] | None = None,
         generated_at_utc: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -371,13 +414,18 @@ class CaseMarkdownReportGenerator:
             "",
             _section_approved_profile(approval_data),
             "",
+        ]
+        risk_gap_section = _section_risk_gap(analysis_data)
+        if risk_gap_section:
+            sections.extend([risk_gap_section, ""])
+        sections.extend([
             _section_selection(selection_data, candidate),
             "",
             _section_metrics(candidate),
             "",
             _section_holdings(candidate),
             "",
-        ]
+        ])
         if variants_section:
             sections.extend([variants_section, ""])
         sections.extend([

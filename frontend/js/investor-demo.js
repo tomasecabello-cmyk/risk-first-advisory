@@ -313,6 +313,41 @@ async function idemoSubmitKyc() {
 
 // ── STEP 3 — análisis de perfil con IA ────────────────────────────────
 
+// Card Risk Gap: flag de inconsistencia declarado-vs-respuestas.
+// Guard: si no hay risk_gap (respuesta vieja / null), devuelve "" y no se renderiza.
+// Jerarquía: comparación primero, honesty line como caption, preguntas como cierre.
+// Tono: el escenario aporta info; no se culpa al cliente. Sin rojo ni ⚠.
+function idemoRiskGapCardHTML(rg) {
+  if (!rg || !rg.gap_level) return "";
+  const levelLabel = { low: "Bajo", medium: "Medio", high: "Alto" }[rg.gap_level] || rg.gap_level;
+  // Semántica de color: neutral/ámbar, nunca rojo (no es un error del asesor).
+  const levelColor = { low: "#3a7", medium: "#c90", high: "#c60" }[rg.gap_level] || "#888";
+  const aligned = rg.gap_level === "low";
+  const stress = rg.stress_signal
+    ? `<div style="margin:6px 0;"><span style="opacity:.7;">Señal del cliente:</span> ${escapeHTML(rg.stress_signal)}</div>`
+    : "";
+  const questions = Array.isArray(rg.confirmation_questions) && rg.confirmation_questions.length
+    ? `<div style="margin-top:10px;"><strong>Tus próximas preguntas para el cliente</strong><ul style="margin:4px 0 0 0;">` +
+      rg.confirmation_questions.map((q) => `<li>${escapeHTML(q)}</li>`).join("") + `</ul></div>`
+    : "";
+  return (
+    `<div class="idemo-riskgap" style="margin-top:12px;border:1px solid #ddd;border-left:4px solid ${levelColor};border-radius:6px;padding:12px;background:#fafafa;">` +
+      `<div style="font-weight:600;">Risk Gap` +
+        ` <span style="font-weight:500;color:${levelColor};">· inconsistencia ${escapeHTML(levelLabel)}</span></div>` +
+      `<div style="font-size:11px;opacity:.75;margin:2px 0 8px 0;">La IA marca una inconsistencia. Vos confirmás el perfil con el cliente. Esto NO es una medición del perfil conductual.</div>` +
+      `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;">` +
+        `<div><span style="opacity:.7;">Declarado:</span> <code>${escapeHTML(rg.declared_profile || "—")}</code></div>` +
+        (aligned
+          ? `<div style="color:#3a7;">Sin inconsistencia que confirmar</div>`
+          : `<div style="color:${levelColor};">Revisar con el cliente</div>`) +
+      `</div>` +
+      stress +
+      `<div style="margin:6px 0;font-size:13px;">${escapeHTML(rg.gap_explanation || "")}</div>` +
+      questions +
+    `</div>`
+  );
+}
+
 async function idemoRunAiProfile() {
   if (!window.idemoState.caseId || !window.idemoState.kycSubmissionId) {
     idemoStepResult("ai", "warn", "Primero ejecutá los pasos 1 (preparar caso) y 2 (enviar KYC).");
@@ -336,7 +371,9 @@ async function idemoRunAiProfile() {
         `La demo local no tiene <code>OPENAI_API_KEY</code>. ` +
         `Podés seguir con la demo (vamos a usar "moderado" como perfil sugerido para el paso 4), ` +
         `o configurar la clave y reiniciar el backend para probar el análisis real. ` +
-        `Alternativa: el smoke check (<code>python scripts/run_case_workflow_smoke_check.py</code>) usa un mock determinístico de OpenAI.`);
+        `Para ver el <strong>Risk Gap</strong> sin clave: arrancá el backend con <code>RFA_DEMO_MODE=1</code> ` +
+        `(cliente determinístico). Alternativa: el smoke check ` +
+        `(<code>python scripts/run_case_workflow_smoke_check.py</code>) usa un mock determinístico de OpenAI.`);
       return true;  // No bloqueamos el flujo.
     }
     idemoSetStep("ai", "error");
@@ -354,7 +391,8 @@ async function idemoRunAiProfile() {
     `<strong>Análisis listo.</strong> Perfil preliminar sugerido por la IA: ` +
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code> · ` +
     `${contraN} contradicción(es) detectada(s) · ${fuN} pregunta(s) de seguimiento. ` +
-    `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>`);
+    `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>` +
+    idemoRiskGapCardHTML(res.json.risk_gap));
   return true;
 }
 
