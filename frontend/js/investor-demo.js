@@ -528,7 +528,7 @@ function idemoPickPreferredVariant(candidates) {
   return { candidate: candidates[0], requiresOverride: true };
 }
 
-async function idemoSelectPortfolio() {
+async function idemoSelectPortfolio(chosenVariant) {
   if (!window.idemoState.proposalId) {
     idemoStepResult("select", "warn", "Primero generá la propuesta (paso 5).");
     return false;
@@ -538,12 +538,38 @@ async function idemoSelectPortfolio() {
     return false;
   }
   idemoSetStep("select", "active");
-  const { candidate, requiresOverride } = idemoPickPreferredVariant(window.idemoState.candidates);
+
+  // La selección es una DECISIÓN del asesor. Si se pasó una variante explícita
+  // (botón "Seleccionar" de la tabla), se usa esa; si no, fallback al auto-pick.
+  let candidate, requiresOverride;
+  if (chosenVariant) {
+    candidate = window.idemoState.candidates.find(c => c.variant === chosenVariant);
+    if (!candidate) {
+      idemoSetStep("select", "error");
+      idemoStepResult("select", "error", `Variante no encontrada: <code>${escapeHTML(chosenVariant)}</code>.`);
+      return false;
+    }
+    requiresOverride = !!(candidate.metadata && candidate.metadata.requires_advisor_override);
+  } else {
+    ({ candidate, requiresOverride } = idemoPickPreferredVariant(window.idemoState.candidates));
+  }
   const variant = candidate.variant;
 
-  // Si requiere override, firmamos primero con un rationale demo.
+  // Override = decisión REAL: si la variante excede el presupuesto aprobado,
+  // exigimos confirmación explícita del asesor. No se firma solo.
   let overrideId = null;
   if (requiresOverride) {
+    const firma = window.confirm(
+      `La variante ${variant} EXCEDE el presupuesto de riesgo aprobado.\n\n` +
+      `Como asesor, ¿firmás el override para seleccionarla igual?\n` +
+      `La firma queda registrada en la cadena de auditoría.`);
+    if (!firma) {
+      idemoSetStep("select", "pending");
+      idemoStepResult("select", "warn",
+        `<strong>Selección cancelada.</strong> No firmaste el override de <code>${escapeHTML(variant)}</code>. ` +
+        `Elegí otra variante (una "dentro del presupuesto") o volvé a tocar Seleccionar y firmá el override.`);
+      return false;
+    }
     const meta = candidate.metadata || {};
     const ovrBody = {
       candidate_variant:    variant,
@@ -598,6 +624,10 @@ async function idemoSelectPortfolio() {
       ? ` <span class="pill pill-orange">con firma de override</span> — el sistema exigió la firma porque la variante excede el presupuesto aprobado`
       : ` <span class="pill pill-green">dentro del presupuesto de riesgo</span>`) + ".";
   idemoStepResultRich("select", "ok", banner, idemoBuildSelectedPortfolioHtml(res.json));
+  // El asesor ya decidió la cartera. El reporte y la auditoría no son decisiones
+  // humanas: se generan automáticamente a partir de lo que el asesor firmó.
+  if (typeof idemoGenerateReport === "function") { await idemoGenerateReport(); }
+  if (typeof idemoVerifyAudit === "function") { await idemoVerifyAudit(); }
   return true;
 }
 
@@ -673,15 +703,16 @@ async function idemoRunGuidedDemo() {
     idemoReset();
     idemoStatus("info", "<strong>Demo guiada en curso…</strong> Cada paso queda registrado en la cadena de auditoría.");
 
+    // La guiada corre hasta la PROPUESTA. La selección de cartera es una decisión
+    // del asesor: se detiene acá y el asesor elige una variante con el botón
+    // "Seleccionar" (y firma el override si la variante excede el presupuesto).
+    // Al elegir, idemoSelectPortfolio encadena reporte + auditoría.
     const seq = [
       idemoPrepareCase,
       idemoSubmitKyc,
       idemoRunAiProfile,    // si falla por OpenAI, queda 'skipped' y devuelve true para continuar
       idemoApproveProfile,
       idemoGenerateProposal,
-      idemoSelectPortfolio,
-      idemoGenerateReport,
-      idemoVerifyAudit,
     ];
 
     for (const step of seq) {
@@ -695,10 +726,14 @@ async function idemoRunGuidedDemo() {
         return;
       }
     }
-    idemoStatus("ok",
-      `<strong>Demo guiada completa.</strong> El caso recorrió los 8 pasos del workflow: ` +
-      `perfil → análisis → aprobación → propuesta → selección → reporte → auditoría. ` +
-      `Para ver los detalles técnicos, abrí el <a href="advanced.html">Modo técnico</a>.`);
+    idemoStatus("info",
+      `<strong>Tu decisión, asesor.</strong> La IA propuso y el sistema controló el riesgo. ` +
+      `Ahora <strong>elegí la cartera</strong> con el botón <em>Seleccionar</em> en la variante que quieras (tabla comparativa, paso 5). ` +
+      `Si elegís una que <strong>excede el presupuesto</strong>, el sistema te va a exigir firmar el override. ` +
+      `Al elegir, se generan el reporte y la auditoría solos.`);
+    // Llevar la vista a la propuesta para que el asesor vea las variantes + botones.
+    var prop = document.getElementById("idemo-step-propose");
+    if (prop) prop.scrollIntoView({ behavior: "smooth", block: "start" });
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = "▶ Ejecutar demo guiada (8 pasos)"; }
   }
@@ -719,12 +754,16 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
     const n = (typeof c.holdings_count === "number") ? c.holdings_count
       : (Array.isArray(c.holdings) ? c.holdings.length
         : (Array.isArray(c.weights) ? c.weights.length : 0));
+    const btnLabel = meta.requires_advisor_override ? "Seleccionar (override)" : "Seleccionar";
     return `<tr>
       <td style="padding:10px 12px;"><strong>${escapeHTML(c.variant || "?")}</strong></td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;">${n}</td>
       <td style="padding:10px 12px;">${ovr}</td>
+      <td style="padding:10px 12px;text-align:right;">
+        <button class="btn-primary" style="padding:6px 12px;font-size:12px;white-space:nowrap;" onclick="idemoSelectPortfolio('${escapeHTML(c.variant || "")}')">${btnLabel}</button>
+      </td>
     </tr>`;
   }).join("");
   const compareTable = `
@@ -736,6 +775,7 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Volatilidad</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;"># Instrumentos</th>
         <th style="padding:10px 12px;font-size:11px;text-align:left;">Presupuesto de riesgo</th>
+        <th style="padding:10px 12px;font-size:11px;text-align:right;">Acción del asesor</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
