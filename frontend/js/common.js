@@ -10,6 +10,16 @@ let lastAIProfileResponse       = null;
 
 // ── utilities ────────────────────────────────────────────────
 
+// Shared HTML-escape. Vive acá (no en legacy-demo.js) porque investor-demo.js,
+// case-workbench.js y case-dashboard.js lo reusan y no siempre cargan legacy.
+// Null-safe: escapeHTML(null) -> "".
+function escapeHTML(str) {
+  return String(str == null ? "" : str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function el(id) { return document.getElementById(id); }
 
 function formatJSON(obj) {
