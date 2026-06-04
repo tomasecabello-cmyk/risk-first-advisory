@@ -385,8 +385,11 @@ async function idemoRunAiProfile() {
   window.idemoState.aiAnalysisId = res.json.analysis_id;
   window.idemoState.aiProposedProfile = res.json.preliminary_profile || "moderado";
   idemoSetStep("ai", "done");
-  const contraN = Array.isArray(res.json.contradictions) ? res.json.contradictions.length : 0;
-  const fuN = Array.isArray(res.json.follow_up_questions) ? res.json.follow_up_questions.length : 0;
+  // Las contradicciones / follow-ups del analisis case-scoped viven en .result,
+  // no top-level (eso es el schema legacy). Leer mal contaba siempre 0.
+  const aiResult = res.json.result || {};
+  const contraN = Array.isArray(aiResult.contradictions) ? aiResult.contradictions.length : 0;
+  const fuN = Array.isArray(aiResult.follow_up_questions) ? aiResult.follow_up_questions.length : 0;
   idemoStepResult("ai", "ok",
     `<strong>Análisis listo.</strong> Perfil preliminar sugerido por la IA: ` +
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code> · ` +
