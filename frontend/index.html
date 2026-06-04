@@ -136,20 +136,16 @@
     <aside class="demo-path">
       <div class="demo-path-header">
         <span class="demo-path-eyebrow">Recorrido recomendado</span>
-        <div class="demo-path-title">Nueve clicks, pensado para asesores</div>
-        <div class="demo-path-sub">Si nunca viste la demo, seguí estos pasos en orden.</div>
+        <div class="demo-path-title">Un click y mirá el flujo completo</div>
+        <div class="demo-path-sub">Pensado para mostrarle la demo a un asesor o profesor en ~90 segundos.</div>
       </div>
       <ol class="demo-path-steps">
-        <li><span class="step-num">1</span> <strong>Hacé clic en el CTA del hero</strong> <em>"Abrir case_demo_local en el Workbench"</em> — pre-completa el caso demo y te lleva directo al flujo.</li>
-        <li><span class="step-num">2</span> <strong>Mirá el resumen del caso</strong> que se carga solo (estado, porcentaje de avance, próxima acción sugerida).</li>
-        <li><span class="step-num">3</span> <strong>Enviá el KYC</strong> (Paso 2) — los valores por defecto ya son razonables para un cliente de riesgo moderado; solo hacé clic en <em>Enviar KYC</em>.</li>
-        <li><span class="step-num">4</span> <strong>Corré el análisis de IA del perfil</strong> (Paso 3). Requiere <code>OPENAI_API_KEY</code>; si no está configurada, saltá este paso y explicá que el smoke check del backend lo cubre con un mock determinístico.</li>
-        <li><span class="step-num">5</span> <strong>Aprobá el perfil</strong> (Paso 4) — la primera decisión formal del asesor. Probá también la opción <em>modify</em>: muestra que el sistema registra el cambio.</li>
-        <li><span class="step-num">6</span> <strong>Enviá las preferencias + corré el filtro de universo</strong> (Pasos 5–6) — traduce las preferencias del cliente en una lista de instrumentos elegibles.</li>
-        <li><span class="step-num">7</span> <strong>Generá la propuesta de cartera</strong> (Paso 7) — aparecen las variantes DEFENSIVE / BALANCED / GROWTH; GROWTH típicamente requiere override.</li>
-        <li><span class="step-num">8</span> <strong>Firmá el override + seleccioná la variante final + generá el reporte</strong> (Pasos 8–10) — las decisiones vinculantes del asesor, más el reporte Markdown revisable.</li>
-        <li><span class="step-num">9</span> <strong>Cambiá el token del Dashboard a <code>dev-compliance-token</code></strong>, después hacé clic en <em>Verificar cadena de auditoría</em> (Paso 13) — cierra la demo con foco en compliance.</li>
+        <li><span class="step-num">1</span> <strong>Cargá un perfil de inversor</strong> — o dejá los valores por defecto, ya son razonables para un cliente de riesgo moderado.</li>
+        <li><span class="step-num">2</span> <strong>Hacé clic en <em>"Ejecutar demo guiada"</em></strong> — corre los 8 pasos solos: KYC → análisis de IA → aprobación del asesor → propuesta de cartera → override → selección → reporte → auditoría.</li>
+        <li><span class="step-num">3</span> <strong>Detené la mirada en el Risk Gap</strong> — la IA marca si el perfil declarado es inconsistente con cómo reaccionaría el cliente ante una caída, y propone las preguntas para confirmarlo. La IA señala; el asesor decide.</li>
+        <li><span class="step-num">4</span> <strong>Cerrá con el reporte y la auditoría</strong> — el reporte Markdown es revisable (no es asesoramiento automático) y la cadena SHA-256 verifica que cada decisión quedó registrada.</li>
       </ol>
+      <div class="demo-path-sub" style="margin-top:10px;">Sin <code>OPENAI_API_KEY</code>: levantá el backend con <code>RFA_DEMO_MODE=1</code> y la demo corre con un análisis determinístico.</div>
     </aside>
 
     <!-- Demo presenter notes — collapsed by default, for the human running the demo -->
@@ -163,40 +159,38 @@
         <li>
           <strong>"Esto es un backend de asesoría de inversiones."</strong>
           El KYC y las preferencias del cliente se transforman en una cartera
-          aprobada por el asesor, con auditoría completa. Hacé clic en el CTA
-          del hero para cargar el caso demo.
+          aprobada por el asesor, con auditoría completa. Hacé clic en
+          <em>"Ejecutar demo guiada"</em> y dejá que corra.
         </li>
         <li>
           <strong>"La IA nunca decide."</strong>
-          Mostrá el Paso 3 (Análisis de perfil con IA). Propone un perfil de
-          riesgo y detecta contradicciones en las respuestas del cliente.
-          Nada es vinculante.
+          En el paso de análisis, la IA propone un perfil de riesgo y detecta
+          contradicciones en las respuestas del cliente. Nada es vinculante.
         </li>
         <li>
           <strong>"El asesor firma cada paso."</strong>
-          Mostrá el Paso 4 (Aprobación del perfil): approve, modify o reject.
-          El mismo patrón se repite en el override (Paso 8) y en la selección
-          final de la cartera (Paso 9).
+          La aprobación del perfil (approve / modify / reject) es la primera
+          decisión formal del asesor. El mismo patrón se repite en el override
+          y en la selección final de la cartera.
         </li>
         <li>
           <strong>"El sistema controla suitability y riesgo."</strong>
-          Cuando GROWTH excede el presupuesto de riesgo aprobado (Paso 7), la
-          variante queda marcada y <em>no se puede seleccionar</em> sin un
-          override explícito del asesor (Paso 8). Suitability / ESG / data
-          quality corren automáticamente.
+          Cuando una variante excede el presupuesto de riesgo aprobado, queda
+          marcada y <em>no se puede seleccionar</em> sin un override explícito
+          del asesor. Suitability / ESG / data quality corren automáticamente.
         </li>
         <li>
-          <strong>"El resultado es revisable, no es asesoramiento automático."</strong>
-          El Paso 10 produce un reporte Markdown que el asesor revisa antes de
-          que la firma se lo entregue al cliente. No hay un botón de
-          "enviar al cliente con un click".
+          <strong>"El Risk Gap es el corazón."</strong>
+          La IA marca cuando lo que el cliente declara no coincide con cómo
+          reaccionaría ante una caída, y entrega las preguntas para confirmarlo.
+          No mide la conducta: señala una inconsistencia para que el asesor la
+          investigue.
         </li>
         <li>
-          <strong>"Cada decisión queda auditada."</strong>
-          Cerrá en el Paso 12 (Audit Trail) + Paso 13 (Verificar cadena de
-          auditoría): cadena hash SHA-256 por caso, chequeo de integridad en
-          una sola llamada. El Paso 15 empaqueta resumen + auditoría + logs
-          de IA en un snapshot único para compliance.
+          <strong>"Revisable y auditado, no automático."</strong>
+          El reporte Markdown final lo revisa el asesor antes de entregarlo — no
+          hay botón de "enviar al cliente con un click" — y la cadena SHA-256
+          verifica que cada decisión del caso quedó registrada.
         </li>
       </ol>
       <p class="presenter-disclaimer">
@@ -527,11 +521,9 @@
       </div>
 
       <div class="fine-print" style="margin-top:24px;">
-        ¿Querés ver detalles técnicos crudos (JSON, endpoints, hash chain completo)? Abrí el
-        <a href="#case-workbench"><strong>Workbench paso a paso</strong></a>
-        o el
-        <a href="#dash-anchor"><strong>Dashboard técnico (Modo avanzado)</strong></a>
-        más abajo. Los <a href="#legacy">demos previos</a> (Fase 0/1) también siguen disponibles.
+        ¿Querés ver los detalles técnicos crudos (JSON, endpoints, hash chain completo,
+        Dashboard y Workbench paso a paso, demos previos de Fase 0/1)? Está todo en
+        <a href="advanced.html"><strong>Modo técnico</strong></a>.
       </div>
 
       <!-- ── Modo rápido técnico (demoted, colapsado por default) ───── -->

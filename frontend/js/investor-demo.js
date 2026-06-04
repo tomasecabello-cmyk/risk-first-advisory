@@ -655,7 +655,7 @@ async function idemoVerifyAudit() {
     ? '<span class="pill pill-green">cadena intacta</span>'
     : '<span class="pill pill-red">cadena rota</span>';
   const banner = res.json.is_intact
-    ? `${intactPill} · Las <strong>${res.json.total_events || 0}</strong> decisiones del caso quedaron registradas y la cadena SHA-256 verifica correctamente. Compliance puede pedir el snapshot completo desde el Workbench (paso 15).`
+    ? `${intactPill} · Las <strong>${res.json.total_events || 0}</strong> decisiones del caso quedaron registradas y la cadena SHA-256 verifica correctamente. Compliance puede pedir el snapshot completo en Modo técnico.`
     : `${intactPill} · La cadena se rompió en el evento ${res.json.first_broken_sequence}. Mensaje: ${escapeHTML(res.json.message || "—")}.`;
   idemoStepResultRich("audit", res.json.is_intact ? "ok" : "error", banner, idemoBuildAuditExtraHtml(res.json));
   return true;
@@ -695,7 +695,7 @@ async function idemoRunGuidedDemo() {
     idemoStatus("ok",
       `<strong>Demo guiada completa.</strong> El caso recorrió los 8 pasos del workflow: ` +
       `perfil → análisis → aprobación → propuesta → selección → reporte → auditoría. ` +
-      `Para ver detalles técnicos, abrí el <a href="#case-workbench">Workbench paso a paso</a>.`);
+      `Para ver los detalles técnicos, abrí el <a href="advanced.html">Modo técnico</a>.`);
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = "▶ Ejecutar demo guiada (8 pasos)"; }
   }
