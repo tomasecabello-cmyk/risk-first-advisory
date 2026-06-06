@@ -326,10 +326,30 @@ function idemoRiskGapCardHTML(rg) {
   const stress = rg.stress_signal
     ? `<div style="margin:6px 0;"><span style="opacity:.7;">Señal del cliente:</span> ${escapeHTML(rg.stress_signal)}</div>`
     : "";
-  const questions = Array.isArray(rg.confirmation_questions) && rg.confirmation_questions.length
-    ? `<div style="margin-top:10px;"><strong>Tus próximas preguntas para el cliente</strong><ul style="margin:4px 0 0 0;">` +
-      rg.confirmation_questions.map((q) => `<li>${escapeHTML(q)}</li>`).join("") + `</ul></div>`
-    : "";
+  const hasQuestions = Array.isArray(rg.confirmation_questions) && rg.confirmation_questions.length;
+  let questions = "";
+  if (hasQuestions && aligned) {
+    // Alineado: las preguntas son informativas (no hay inconsistencia que cerrar).
+    questions =
+      `<div style="margin-top:10px;"><strong>Tus próximas preguntas para el cliente</strong><ul style="margin:4px 0 0 0;">` +
+      rg.confirmation_questions.map((q) => `<li>${escapeHTML(q)}</li>`).join("") + `</ul></div>`;
+  } else if (hasQuestions) {
+    // Inconsistencia: el asesor confirma con el cliente y re-analiza (segunda ronda).
+    window.idemoState.followUpQuestions = rg.confirmation_questions.slice();
+    const rows = rg.confirmation_questions.map((q, i) =>
+      `<div style="margin-top:8px;">` +
+        `<label style="display:block;font-size:12px;margin-bottom:3px;">${escapeHTML(q)}</label>` +
+        `<textarea id="idemo-fu-ans-${i}" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Respuesta del cliente…"></textarea>` +
+      `</div>`
+    ).join("");
+    questions =
+      `<div style="margin-top:10px;"><strong>Confirmá con el cliente y re-analizá</strong>` +
+      `<div style="font-size:11px;opacity:.75;margin:2px 0 4px 0;">Cargá lo que responde el cliente; la IA recalcula el perfil (queda auditado como segunda ronda).</div>` +
+      rows +
+      `<button type="button" class="btn-secondary" style="margin-top:8px;" onclick="idemoSubmitFollowUp()">Re-analizar con las respuestas</button>` +
+      `<div id="idemo-fu-status" style="font-size:12px;margin-top:6px;"></div>` +
+      `</div>`;
+  }
   return (
     `<div class="idemo-riskgap" style="margin-top:12px;border:1px solid #ddd;border-left:4px solid ${levelColor};border-radius:6px;padding:12px;background:#fafafa;">` +
       `<div style="font-weight:600;">Risk Gap` +
@@ -397,6 +417,50 @@ async function idemoRunAiProfile() {
     `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>` +
     idemoRiskGapCardHTML(res.json.risk_gap));
   return true;
+}
+
+// ── Risk Gap · segunda ronda: el asesor responde y la IA re-analiza ────
+// Llama a POST /cases/{id}/ai/profile-follow-up (persistido + auditado).
+// El nuevo análisis pasa a ser el que el asesor aprueba en el paso 4.
+async function idemoSubmitFollowUp() {
+  const caseId = window.idemoState.caseId;
+  if (!caseId) return;
+  const qs = window.idemoState.followUpQuestions || [];
+  const answers = [];
+  qs.forEach((q, i) => {
+    const el = document.getElementById(`idemo-fu-ans-${i}`);
+    const a = el && el.value ? el.value.trim() : "";
+    if (a) answers.push({ question: q, answer: a });
+  });
+  const statusEl = document.getElementById("idemo-fu-status");
+  if (!answers.length) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:#c60;">Respondé al menos una pregunta antes de re-analizar.</span>`;
+    return;
+  }
+  if (statusEl) statusEl.textContent = "Re-analizando con la IA…";
+  const res = await idemoApi(
+    "POST",
+    `/cases/${encodeURIComponent(caseId)}/ai/profile-follow-up`,
+    { follow_up_answers: answers },
+  );
+  if (!res.ok) {
+    if (statusEl) {
+      statusEl.innerHTML =
+        `<span style="color:#c60;">No se pudo re-analizar. ${escapeHTML(res.detail || "")} ` +
+        `(HTTP ${res.status})</span>`;
+    }
+    return;
+  }
+  // El follow-up es un nuevo análisis (append-only): pasa a ser el de la aprobación.
+  window.idemoState.aiAnalysisId = res.json.analysis_id;
+  window.idemoState.aiProposedProfile = res.json.preliminary_profile || window.idemoState.aiProposedProfile;
+  const reason = (res.json.result && res.json.result.profile_change_reason) || "";
+  idemoStepResult("ai", "ok",
+    `<strong>Re-análisis listo (segunda ronda).</strong> Perfil revisado por la IA: ` +
+    `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code>. ` +
+    (reason ? `<div style="font-size:12px;margin:4px 0;">${escapeHTML(reason)}</div>` : "") +
+    `<em>La IA propone; el asesor aprueba en el paso 4.</em>` +
+    idemoRiskGapCardHTML(res.json.risk_gap));
 }
 
 // ── STEP 4 — aprobar perfil como asesor ───────────────────────────────

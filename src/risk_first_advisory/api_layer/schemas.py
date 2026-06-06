@@ -1321,9 +1321,13 @@ class KYCSubmissionListResponse(BaseModel):
 # AIProfileAnalysis — Fase 2 Commit 9 (case-scoped AI profile analysis)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Restringido a "initial" en este commit. "follow_up" queda reservado pero NO
-# implementado todavía: requiere previous_analysis + follow_up_answers (otra
-# llamada a OpenAIProfileClient.analyze_follow_up).
+# Este validator gobierna SOLO el endpoint de análisis inicial
+# (POST /cases/{id}/ai/profile-analysis), que corre analyze_kyc. El follow-up
+# NO se hace por acá: tiene su propio endpoint
+# (POST /cases/{id}/ai/profile-follow-up, schema CaseProfileFollowUpRequest),
+# que persiste el análisis con analysis_type="follow_up" directamente. Por eso
+# acá "follow_up" sigue rechazado: evita que alguien dispare un follow-up sin
+# respuestas por el endpoint equivocado.
 _ALLOWED_PROFILE_ANALYSIS_TYPES: frozenset[str] = frozenset({"initial", "follow_up"})
 _IMPLEMENTED_PROFILE_ANALYSIS_TYPES: frozenset[str] = frozenset({"initial"})
 
@@ -1352,6 +1356,26 @@ class AIProfileAnalysisCreateRequest(BaseModel):
                 f"analysis_type={v!r} aún no está implementado. "
                 f"Implementados: {sorted(_IMPLEMENTED_PROFILE_ANALYSIS_TYPES)}."
             )
+        return v
+
+
+class CaseProfileFollowUpRequest(BaseModel):
+    """
+    Segunda ronda de análisis case-scoped: el asesor envía las respuestas del
+    cliente a las preguntas de confirmación del Risk Gap. Persiste un nuevo
+    AIProfileAnalysis (analysis_type="follow_up") y lo audita (append-only).
+    """
+    follow_up_answers: list[AIFollowUpAnswerRequest] = Field(min_length=1)
+    # Análisis previo sobre el que se hace el follow-up. Si None, se usa el último.
+    analysis_id:       str | None = None
+    # KYC a usar. Si None, se hereda del análisis previo / current del case.
+    kyc_submission_id: str | None = None
+
+    @field_validator("analysis_id", "kyc_submission_id", mode="before")
+    @classmethod
+    def _not_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("el id no puede ser cadena vacía.")
         return v
 
 

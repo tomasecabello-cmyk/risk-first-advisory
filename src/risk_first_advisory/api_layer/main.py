@@ -96,6 +96,7 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileRequest,
     AIProfileResponse,
     AIUniverseFilterResponse,
+    CaseProfileFollowUpRequest,
     ClientCreateRequest,
     ClientListResponse,
     ClientResponse,
@@ -783,6 +784,7 @@ _AI_LOG_PROMPT_INVESTMENT_PREFS:    str = "investment_preferences_v1"
 _AI_LOG_PROMPT_FILTER_UNIVERSE:     str = "ai_universe_filter_v1"
 _AI_LOG_PROMPT_FILTERED_PORTFOLIO:  str = "ai_filtered_portfolio_v1"
 _AI_LOG_PROMPT_CASE_PROFILE_ANALYSIS: str = "case_profile_analysis_v1"
+_AI_LOG_PROMPT_CASE_PROFILE_FOLLOWUP: str = "case_profile_follow_up_v1"
 _AI_LOG_PROMPT_CASE_INVESTMENT_PREFS: str = "case_investment_preferences_v1"
 
 
@@ -1064,6 +1066,47 @@ class _DemoProfileClient:
             "contradictions": [],
             "follow_up_questions": [],
             "advisor_notes": ["Demo determinística (RFA_DEMO_MODE). Perfil consistente."],
+        }
+
+    def analyze_follow_up(self, payload: dict) -> dict:
+        """
+        Segunda ronda determinística. Tras confirmar con el cliente:
+          - si el análisis previo tenía contradicciones (la tolerancia revelada
+            era menor que la declarada), ajusta el perfil UN escalón más
+            conservador y marca las contradicciones como resueltas;
+          - si no, confirma el perfil declarado sin cambios.
+        Misma entrada → misma salida. NO aprueba: el asesor decide.
+        """
+        from risk_first_advisory.ai_layer.risk_scoring import PROFILES
+
+        prev = (payload or {}).get("previous_analysis") or {}
+        prev_profile = str(prev.get("preliminary_profile") or "moderado")
+        had_contradictions = bool(prev.get("contradictions"))
+
+        if had_contradictions:
+            try:
+                idx = PROFILES.index(prev_profile)
+            except ValueError:
+                idx = 2  # moderado
+            revised = PROFILES[max(0, idx - 1)]
+            reason = (
+                f"Tras confirmar con el cliente, la tolerancia real resulta menor que "
+                f"la declarada ({prev_profile}); se ajusta a un perfil más conservador "
+                f"({revised})."
+            )
+        else:
+            revised = prev_profile
+            reason = "Las respuestas del cliente confirman el perfil declarado; sin cambios."
+
+        return {
+            "revised_profile": revised,
+            "confidence": 0.85,
+            "remaining_contradictions": [],
+            "profile_change_reason": reason,
+            "advisor_notes": [
+                "Demo determinística (RFA_DEMO_MODE). Perfil revisado con las "
+                "respuestas del cliente.",
+            ],
         }
 
 
@@ -3676,6 +3719,258 @@ def list_case_profile_analyses(
         analyses=[AIProfileAnalysisResponse(**d) for d in data],
         count=len(data),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /cases/{case_id}/ai/profile-follow-up  → advisor, admin
+#
+# Segunda ronda case-scoped: el asesor envía las respuestas del cliente a las
+# preguntas de confirmación del Risk Gap. Llama a ai_client.analyze_follow_up,
+# persiste un nuevo AIProfileAnalysis (analysis_type="follow_up", append-only)
+# con AIRequestLog + AuditEvent (ai_profile_follow_up), y recomputa el Risk Gap.
+#
+# La IA NO aprueba: el perfil revisado sigue siendo una propuesta; el asesor lo
+# aprueba vía POST /cases/{id}/profile-approval (I-001 / I-016).
+#   - 404 si el case no existe.
+#   - 409 si el case está CLOSED.
+#   - 409 si no hay análisis previo sobre el que hacer follow-up.
+#   - 422 si analysis_id / kyc_submission_id explícitos no pertenecen al case.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/cases/{case_id}/ai/profile-follow-up",
+    response_model=AIProfileAnalysisResponse,
+    status_code=201,
+)
+def create_case_profile_follow_up(
+    case_id: str,
+    req: CaseProfileFollowUpRequest,
+    advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
+) -> AIProfileAnalysisResponse:
+    db_path: Path = DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # ── 1. Validaciones + resolver análisis previo y KYC ────────────────────
+    with SQLiteEntityStore(db_path) as store:
+        case_repo = SQLiteAdvisoryCaseRepository(store)
+        kyc_repo = SQLiteKYCSubmissionRepository(store)
+        adv_repo = SQLiteAdvisorRepository(store)
+        analysis_repo = SQLiteAIProfileAnalysisRepository(store)
+
+        case_data = case_repo.get(case_id)
+        if case_data is None:
+            raise HTTPException(status_code=404, detail=f"Case not found: {case_id!r}")
+        if case_data["status"] == "CLOSED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} is CLOSED; AI profile follow-up is not "
+                    "accepted after case closure."
+                ),
+            )
+
+        analyses = analysis_repo.list_by_case(case_id)  # ASC por created_at
+        if not analyses:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Case {case_id!r} has no prior AI profile analysis. Run "
+                    "POST /cases/{case_id}/ai/profile-analysis first."
+                ),
+            )
+
+        if req.analysis_id is not None:
+            prev = next((a for a in analyses if a["analysis_id"] == req.analysis_id), None)
+            if prev is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"AI profile analysis {req.analysis_id!r} not found in "
+                        f"case {case_id!r}."
+                    ),
+                )
+        else:
+            prev = analyses[-1]  # el último
+
+        # Resolver KYC submission: explícito > el del análisis previo > current.
+        kyc_id = (
+            req.kyc_submission_id
+            or prev.get("kyc_submission_id")
+            or case_data.get("current_kyc_submission_id")
+        )
+        if kyc_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Case {case_id!r} has no KYC submission to follow up on.",
+            )
+        sub_data = kyc_repo.get(kyc_id)
+        if sub_data is None:
+            raise HTTPException(
+                status_code=422, detail=f"KYC submission not found: {kyc_id!r}"
+            )
+        if sub_data["case_id"] != case_id:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"KYC submission {kyc_id!r} belongs to case "
+                    f"{sub_data['case_id']!r}, not {case_id!r}."
+                ),
+            )
+
+        requested_by_advisor_id: str | None = None
+        if adv_repo.get(advisor.advisor_id) is not None:
+            requested_by_advisor_id = advisor.advisor_id
+
+    # ── 2. Construir payload y llamar a la IA (fuera del store) ──────────────
+    try:
+        ai_client = _get_openai_profile_client()
+    except (ValueError, ImportError):
+        raise HTTPException(
+            status_code=400,
+            detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
+        )
+
+    model_name = _resolve_ai_model_name(ai_client)
+    endpoint_str = f"/cases/{case_id}/ai/profile-follow-up"
+
+    kyc_payload: dict[str, Any] = dict(sub_data["payload"])
+    prev_result = prev.get("result") if isinstance(prev.get("result"), dict) else {}
+    previous_analysis = {
+        "preliminary_profile": prev.get("preliminary_profile"),
+        "contradictions": prev_result.get("contradictions", []),
+        "confidence": prev.get("confidence"),
+    }
+    follow_up_answers = [
+        {"question": a.question, "answer": a.answer} for a in req.follow_up_answers
+    ]
+    ai_input_payload: dict[str, Any] = {
+        "client_id": case_id,
+        "case_id": case_id,
+        "kyc_submission_id": kyc_id,
+        "original_kyc": kyc_payload,
+        "previous_analysis": previous_analysis,
+        "follow_up_answers": follow_up_answers,
+    }
+
+    _start = time.perf_counter()
+    try:
+        fu_result = ai_client.analyze_follow_up(ai_input_payload)
+    except Exception as exc:  # ValueError (validación) o error inesperado
+        _persist_ai_request_log(
+            endpoint=endpoint_str,
+            model=model_name,
+            prompt_version=_AI_LOG_PROMPT_CASE_PROFILE_FOLLOWUP,
+            input_payload=ai_input_payload,
+            validation_status="api_error",
+            db_path=db_path,
+            case_id=case_id,
+            requested_by_advisor_id=requested_by_advisor_id,
+            latency_ms=int((time.perf_counter() - _start) * 1000),
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="AI profile follow-up failed. The AI returned an invalid response.",
+        )
+
+    latency_ms = int((time.perf_counter() - _start) * 1000)
+
+    # ── 3. Normalizar la respuesta de follow-up al shape de analyze_kyc ──────
+    # Así reusamos combine_risk_gaps y el mismo AIProfileAnalysisResponse.
+    revised_profile = (
+        str(fu_result.get("revised_profile"))
+        if isinstance(fu_result, dict) and fu_result.get("revised_profile") is not None
+        else None
+    )
+    remaining = (
+        [c for c in fu_result.get("remaining_contradictions", []) if isinstance(c, dict)]
+        if isinstance(fu_result, dict) else []
+    )
+    confidence_raw = fu_result.get("confidence") if isinstance(fu_result, dict) else None
+    try:
+        confidence_val: float | None = float(confidence_raw) if confidence_raw is not None else None
+    except (TypeError, ValueError):
+        confidence_val = None
+
+    normalized_result: dict[str, Any] = {
+        "preliminary_profile": revised_profile,
+        "confidence": confidence_val,
+        "contradictions": remaining,
+        "follow_up_questions": [],  # resueltas en esta ronda
+        "advisor_notes": [str(n) for n in (fu_result.get("advisor_notes") or [])],
+        "profile_change_reason": str(fu_result.get("profile_change_reason") or ""),
+        "follow_up_answers": follow_up_answers,
+        "source_analysis_id": prev["analysis_id"],
+    }
+
+    ai_request_log_id = _persist_ai_request_log(
+        endpoint=endpoint_str,
+        model=model_name,
+        prompt_version=_AI_LOG_PROMPT_CASE_PROFILE_FOLLOWUP,
+        input_payload=ai_input_payload,
+        validation_status="parsed_ok",
+        db_path=db_path,
+        case_id=case_id,
+        requested_by_advisor_id=requested_by_advisor_id,
+        raw_response=dict(fu_result) if isinstance(fu_result, dict) else None,
+        latency_ms=latency_ms,
+    )
+
+    # ── 4. Persistir AIProfileAnalysis (follow_up) + AuditEvent ──────────────
+    with SQLiteEntityStore(db_path) as store:
+        analysis_repo = SQLiteAIProfileAnalysisRepository(store)
+        audit_repo = SQLiteAuditEventRepository(store)
+
+        try:
+            analysis_data = analysis_repo.create(
+                case_id=case_id,
+                kyc_submission_id=kyc_id,
+                analysis_type="follow_up",
+                result=normalized_result,
+                preliminary_profile=revised_profile,
+                confidence=confidence_val,
+                ai_request_log_id=ai_request_log_id,
+            )
+        except EntityConflictError as exc:
+            detail = str(exc)
+            status_code = 409 if "UNIQUE constraint" in detail else 422
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+
+        try:
+            audit_repo.append(
+                case_id=case_id,
+                event_type="ai_profile_follow_up",
+                actor_advisor_id=requested_by_advisor_id,
+                actor_role=_pick_actor_role(advisor.roles),
+                payload={
+                    "case_id":             case_id,
+                    "analysis_id":         analysis_data["analysis_id"],
+                    "source_analysis_id":  prev["analysis_id"],
+                    "kyc_submission_id":   kyc_id,
+                    "ai_request_log_id":   ai_request_log_id,
+                    "analysis_type":       "follow_up",
+                    "revised_profile":     revised_profile,
+                    "confidence":          confidence_val,
+                    "answers_count":       len(follow_up_answers),
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"AI profile follow-up {analysis_data['analysis_id']!r} was "
+                    f"persisted but the audit event failed: {exc}"
+                ),
+            ) from exc
+
+    # ── 5. Recomputar Risk Gap (IA + motor determinístico) ──────────────────
+    from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
+
+    risk_gap_dict = combine_risk_gaps(normalized_result, kyc_payload)
+    risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
+
+    return AIProfileAnalysisResponse(**analysis_data, risk_gap=risk_gap_obj)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

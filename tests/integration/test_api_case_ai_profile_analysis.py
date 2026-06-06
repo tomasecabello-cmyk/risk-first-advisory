@@ -859,3 +859,120 @@ class TestNoRegression:
             },
         )
         assert r.status_code != 401
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /cases/{case_id}/ai/profile-follow-up — segunda ronda case-scoped
+# ─────────────────────────────────────────────────────────────────────────────
+
+_VALID_FOLLOWUP_RESPONSE: dict = {
+    "revised_profile": "moderado-defensivo",
+    "confidence": 0.80,
+    "remaining_contradictions": [],
+    "profile_change_reason": "Tras confirmar con el cliente, la tolerancia real es menor.",
+    "advisor_notes": ["Perfil revisado con las respuestas."],
+}
+
+
+def _post_follow_up(c: TestClient, case_id: str, **body: Any) -> Any:
+    if "follow_up_answers" not in body:
+        body["follow_up_answers"] = [
+            {"question": "¿Horizonte real?", "answer": "Más de 10 años."},
+            {"question": "¿Afecta tus gastos?", "answer": "No, es ahorro de largo plazo."},
+        ]
+    return c.post(
+        f"/cases/{case_id}/ai/profile-follow-up",
+        json=body,
+        headers={"Authorization": _ADVISOR},
+    )
+
+
+class TestCaseProfileFollowUp:
+    def test_follow_up_happy_path_persists_and_revises(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_chain_with_kyc(client)
+        case_id = ctx["case"]["case_id"]
+
+        # 1. Análisis inicial con contradicciones.
+        patch_ai_client(_VALID_KYC_RESPONSE)
+        r0 = _post_analysis(client, case_id)
+        assert r0.status_code == 201, r0.text
+
+        # 2. Follow-up: la IA devuelve el shape de revisión.
+        patch_ai_client(_VALID_FOLLOWUP_RESPONSE)
+        r = _post_follow_up(client, case_id)
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["analysis_type"] == "follow_up"
+        assert body["preliminary_profile"] == "moderado-defensivo"
+        assert body["result"]["source_analysis_id"] == r0.json()["analysis_id"]
+        # Risk Gap recomputado y presente.
+        assert body["risk_gap"] is not None
+        assert body["risk_gap"]["gap_level"] in {"low", "medium", "high"}
+
+    def test_follow_up_appends_analysis_and_keeps_audit_intact(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_chain_with_kyc(client)
+        case_id = ctx["case"]["case_id"]
+        patch_ai_client(_VALID_KYC_RESPONSE)
+        _post_analysis(client, case_id)
+        patch_ai_client(_VALID_FOLLOWUP_RESPONSE)
+        _post_follow_up(client, case_id)
+
+        # Append-only: ahora hay 2 análisis (initial + follow_up).
+        lst = client.get(
+            f"/cases/{case_id}/ai/profile-analysis",
+            headers={"Authorization": _ADVISOR},
+        )
+        assert lst.status_code == 200
+        types = [a["analysis_type"] for a in lst.json()["analyses"]]
+        assert types == ["initial", "follow_up"]
+
+        # La cadena de auditoría sigue íntegra tras el follow-up.
+        ver = client.get(
+            f"/cases/{case_id}/audit/verify",
+            headers={"Authorization": _COMPLIANCE},
+        )
+        assert ver.status_code == 200
+        assert ver.json()["is_intact"] is True
+
+    def test_follow_up_without_prior_analysis_returns_409(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        patch_ai_client(_VALID_FOLLOWUP_RESPONSE)
+        ctx = _full_chain_with_kyc(client)
+        r = _post_follow_up(client, ctx["case"]["case_id"])
+        assert r.status_code == 409
+
+    def test_follow_up_missing_case_returns_404(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        patch_ai_client(_VALID_FOLLOWUP_RESPONSE)
+        r = _post_follow_up(client, "case_does_not_exist")
+        assert r.status_code == 404
+
+    def test_follow_up_empty_answers_returns_422(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_chain_with_kyc(client)
+        case_id = ctx["case"]["case_id"]
+        patch_ai_client(_VALID_KYC_RESPONSE)
+        _post_analysis(client, case_id)
+        r = _post_follow_up(client, case_id, follow_up_answers=[])
+        assert r.status_code == 422
+
+    def test_follow_up_viewer_forbidden(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_chain_with_kyc(client)
+        case_id = ctx["case"]["case_id"]
+        patch_ai_client(_VALID_KYC_RESPONSE)
+        _post_analysis(client, case_id)
+        r = client.post(
+            f"/cases/{case_id}/ai/profile-follow-up",
+            json={"follow_up_answers": [{"question": "q", "answer": "a"}]},
+            headers={"Authorization": _VIEWER},
+        )
+        assert r.status_code == 403
