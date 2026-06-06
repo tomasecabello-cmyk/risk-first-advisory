@@ -314,6 +314,25 @@ def test_combine_ai_and_base_differ_takes_more_severe():
     RiskGap(**out)
 
 
+def test_combine_explanation_coherent_when_base_more_severe():
+    # Regresión: el badge mostraba "Medio" (base) pero el texto decía
+    # "consistente" (IA). La explicación DEBE venir de la fuente más severa.
+    # KYC con gran spread willingness-vs-ability -> base medium/high; IA low.
+    result = {"preliminary_profile": "moderado", "contradictions": [], "follow_up_questions": []}
+    kyc = {
+        "risk_tolerance_score": 10, "risk_capacity_score": 1,
+        "investment_horizon_years": 1, "liquidity_need_score": 9,
+        "investment_experience": "ninguna", "investment_objective": "growth",
+        "open_risk_reaction": "Mantengo posiciones, largo plazo",
+    }
+    out = combine_risk_gaps(result, kyc)
+    assert out["gap_level"] in {"medium", "high"}      # base manda
+    assert "difieren" in out["agreement"]
+    # La explicación NO debe afirmar que es consistente (sería incoherente con el badge).
+    assert "es consistente" not in out["gap_explanation"].lower()
+    RiskGap(**out)
+
+
 def test_combine_explanation_mentions_cross_check():
     result = {"preliminary_profile": "moderado", "contradictions": [], "follow_up_questions": []}
     out = combine_risk_gaps(result, _calm_moderate_kyc())

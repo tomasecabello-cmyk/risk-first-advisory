@@ -177,7 +177,11 @@ def combine_risk_gaps(
         else f"difieren (IA: {ai_level} / base: {det_level})"
     )
 
-    explanation = str(ai_gap.get("gap_explanation", "")).strip()
+    # La explicación DEBE ser coherente con el gap_level final (el más severo):
+    # si la base es más severa que la IA, usamos la explicación de la base
+    # (la de la IA diría "consistente" y contradiría el badge).
+    src = ai_gap if _SEVERITY_ORDER.get(ai_level, 0) >= _SEVERITY_ORDER.get(det_level, 0) else det_public
+    explanation = str(src.get("gap_explanation", "")).strip()
     explanation = (explanation + " " if explanation else "") + f"Cruce con la base auditable: {agreement}."
     questions = ai_gap.get("confirmation_questions") or det_public.get("confirmation_questions") or []
 
