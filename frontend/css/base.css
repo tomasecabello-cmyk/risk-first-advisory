@@ -891,6 +891,47 @@ td.mono { font-size: 12px; color: var(--rf-text); }
   font-size: 13px; color: var(--rf-text-body); line-height: 1.55;
 }
 
+/* ── methodology explainer (advisor-friendly, no formulas) ─────────────── */
+.method-strip { margin: 20px 0 28px; }
+.method-card {
+  background: var(--rf-card);
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-radius-lg);
+  padding: 22px 24px;
+  box-shadow: var(--rf-shadow-sm);
+}
+.method-headline {
+  font-size: 19px; font-weight: 700; color: var(--rf-navy-900);
+  letter-spacing: -.01em; margin: 2px 0 8px;
+}
+.method-lede {
+  font-size: 13.5px; color: var(--rf-text-body); line-height: 1.6;
+  margin: 0 0 16px; max-width: 72ch;
+}
+.method-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.method-col {
+  border: 1px solid var(--rf-border); border-radius: var(--rf-radius-md, 10px);
+  padding: 14px 16px; background: var(--rf-bg-subtle, #fafbfc);
+}
+.method-col.is-take  { border-left: 3px solid var(--rf-emerald-600); }
+.method-col.is-avoid { border-left: 3px solid var(--rf-violet-700); }
+.method-col-head {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  margin-bottom: 8px; color: var(--rf-navy-900);
+}
+.method-col ul { margin: 0; padding-left: 18px; }
+.method-col li {
+  font-size: 12.5px; color: var(--rf-text-body); line-height: 1.5; margin-bottom: 6px;
+}
+.method-foot {
+  font-size: 12px; color: var(--rf-text-muted, #6b7280); margin-top: 14px; line-height: 1.5;
+}
+.method-foot a {
+  color: var(--rf-cyan-600, #0891b2); font-weight: 600; text-decoration: none;
+}
+.method-foot a:hover { text-decoration: underline; }
+@media (max-width: 720px) { .method-cols { grid-template-columns: 1fr; } }
+
 /* ── advisor-facing demo helpers (presenter notes + demo path) ─────────── */
 .demo-helpers {
   display: grid;

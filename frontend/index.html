@@ -128,6 +128,45 @@
   </section>
 
   <!-- ───────────────────────────────────────────────────────────────────── -->
+  <!-- METHODOLOGY EXPLAINER (advisor-friendly — no formulas) -->
+  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <section class="method-strip">
+    <div class="method-card">
+      <div class="story-eyebrow">Fundamento metodológico</div>
+      <div class="method-headline">¿En qué se basa el Risk Gap?</div>
+      <p class="method-lede">
+        Mide la brecha entre el riesgo que el cliente <strong>declara</strong> aceptar y el que
+        realmente tolera <strong>bajo estrés</strong> — el problema #1 de una mesa de ventas. Se
+        apoya en finanzas conductuales (Prospect Theory) y en un principio simple: la
+        <strong>capacidad financiera acota la tolerancia</strong> — nadie debería asumir más riesgo
+        del que su situación soporta.
+      </p>
+      <div class="method-cols">
+        <div class="method-col is-take">
+          <div class="method-col-head">Tomamos de la teoría pública</div>
+          <ul>
+            <li>Perfil declarado con una rúbrica transparente (estilo Grable-Lytton), no una caja negra.</li>
+            <li>La capacidad acota la tolerancia: lo que el cliente <em>quiere</em> vs lo que <em>puede</em> soportar.</li>
+            <li>Señal revelada desde el escenario de estrés (aversión a la pérdida).</li>
+          </ul>
+        </div>
+        <div class="method-col is-avoid">
+          <div class="method-col-head">Método propio — distinto del patentado</div>
+          <ul>
+            <li>Escala de 5 perfiles (conservador → agresivo), no el "Risk Number 1–99" de Nitrogen.</li>
+            <li>El gap declarado-vs-revelado es el resultado central, no un puntaje cosmético.</li>
+            <li>Determinístico y auditable: corre en paralelo a la IA y se cruza con ella.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="method-foot">
+        Inspirado en la teoría pública de Nitrogen/Riskalyze, deliberadamente distinto de su método
+        patentado. <a href="advanced.html#fundamento">Ver el detalle técnico (fórmulas) en Modo técnico →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────────────────────────────────────────────── -->
   <!-- ADVISOR-FACING DEMO HELPERS (presenter notes + recommended demo path) -->
   <!-- ───────────────────────────────────────────────────────────────────── -->
   <section class="demo-helpers">
@@ -141,7 +180,7 @@
       </div>
       <ol class="demo-path-steps">
         <li><span class="step-num">1</span> <strong>Cargá un perfil de inversor</strong> — o dejá los valores por defecto, ya son razonables para un cliente de riesgo moderado.</li>
-        <li><span class="step-num">2</span> <strong>Hacé clic en <em>"Ejecutar demo guiada"</em></strong> — corre los 8 pasos solos: KYC → análisis de IA → aprobación del asesor → propuesta de cartera → override → selección → reporte → auditoría.</li>
+        <li><span class="step-num">2</span> <strong>Hacé clic en <em>"Ejecutar demo guiada"</em></strong> — corre hasta la propuesta de cartera (KYC → análisis de IA → aprobación del asesor → propuesta) y <strong>se detiene para que vos elijas la variante</strong>, con override si excede el presupuesto. Recién ahí se generan el reporte y la auditoría.</li>
         <li><span class="step-num">3</span> <strong>Detené la mirada en el Risk Gap</strong> — la IA marca si el perfil declarado es inconsistente con cómo reaccionaría el cliente ante una caída, y propone las preguntas para confirmarlo. La IA señala; el asesor decide.</li>
         <li><span class="step-num">4</span> <strong>Cerrá con el reporte y la auditoría</strong> — el reporte Markdown es revisable (no es asesoramiento automático) y la cadena SHA-256 verifica que cada decisión quedó registrada.</li>
       </ol>

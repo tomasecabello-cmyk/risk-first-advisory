@@ -18,6 +18,88 @@
 <main class="page">
 
   <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- 00 · FUNDAMENTO METODOLÓGICO — fórmulas del motor determinístico       -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div class="section-band" id="fundamento">
+    <span class="num">00</span>
+    <div>
+      <h2>Fundamento metodológico
+        <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:#f1f5f9;color:#475569;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Detalle técnico</span>
+      </h2>
+      <div class="sub">
+        El motor determinístico (<code>ai_layer/risk_scoring.py</code>) calcula el perfil declarado y
+        el Risk Gap sin LLM: misma entrada → misma salida, auditable. Corre en paralelo a la IA y
+        se cruzan (<code>combine_risk_gaps</code>). Teoría completa en <code>docs/RISK_SCORING_THEORY.md</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="card-fundamento">
+    <div class="card-body">
+      <h2>Rúbrica del perfil declarado (willingness vs ability)</h2>
+      <p class="sub" style="margin-bottom:14px;">
+        La <strong>voluntad</strong> de tomar riesgo (lo que el cliente quiere) y la
+        <strong>capacidad</strong> (lo que su situación soporta) se calculan por separado en [0,1].
+        El riesgo <em>efectivo</em> es el mínimo: la capacidad acota la tolerancia.
+      </p>
+
+      <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:12.5px;line-height:1.65;margin:0 0 16px;"><code>willingness = 0.6 · tolerancia      + 0.4 · objetivo
+ability     = 0.4 · capacidad       + 0.3 · horizonte
+            + 0.2 · liquidez_inv    + 0.1 · experiencia
+
+riesgo_efectivo = min(willingness, ability)      # capacidad acota tolerancia
+perfil          = banda_de_20(riesgo_efectivo·100)  # 5 perfiles
+gap_interno     = |banda(willingness) − banda(ability)|   # tensión declarada
+gap_revelado    = caída de perfil bajo estrés (open_risk_reaction)
+gap_level       = bandas(max(gap_revelado, gap_interno))  # 1→low, 2→medium, ≥3→high</code></pre>
+
+      <p class="sub" style="margin-bottom:8px;">
+        Todas las entradas vienen del KYC (scores 1–10, horizonte en años, liquidez 3/5/8,
+        experiencia y objetivo categóricos). La señal revelada se infiere léxicamente de la
+        respuesta abierta al escenario de estrés.
+      </p>
+
+      <h2 style="margin-top:22px;">Qué SÍ y qué NO tomamos de Nitrogen/Riskalyze</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;">
+        <thead>
+          <tr style="text-align:left;border-bottom:2px solid var(--rf-border);">
+            <th style="padding:8px 10px;">Dimensión</th>
+            <th style="padding:8px 10px;">Teoría pública (la usamos)</th>
+            <th style="padding:8px 10px;">Método patentado (lo evitamos)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Escala de salida</td>
+            <td style="padding:8px 10px;">5 perfiles (conservador → agresivo), bandas de 20</td>
+            <td style="padding:8px 10px;">"Risk Number" 1–99 propietario</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Base teórica</td>
+            <td style="padding:8px 10px;">Prospect Theory, Grable-Lytton, capacidad-acota-tolerancia</td>
+            <td style="padding:8px 10px;">Apuesta en dólares + rango 95% a 6 meses</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Output central</td>
+            <td style="padding:8px 10px;">Gap declarado-vs-revelado + tensión interna</td>
+            <td style="padding:8px 10px;">Score único de tolerancia</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;font-weight:600;">Decisión</td>
+            <td style="padding:8px 10px;">Flag para que el asesor confirme (human-in-the-loop)</td>
+            <td style="padding:8px 10px;">Puntaje presentado al cliente</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin-top:14px;">
+        <strong>Patentabilidad:</strong> la reivindicación candidata no es el scoring (matemática
+        conocida) sino el <em>método</em> risk-first + Risk Gap + override auditado con
+        human-in-the-loop. Ver <code>docs/RISK_SCORING_THEORY.md §5</code>.
+      </p>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
   <!-- 02 · CASE DASHBOARD — Modo avanzado (CRUD técnico)                    -->
   <!-- ═════════════════════════════════════════════════════════════════════ -->
   <div class="section-band" id="dash-anchor">
