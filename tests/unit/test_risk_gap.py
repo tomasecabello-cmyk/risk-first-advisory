@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from risk_first_advisory.ai_layer.risk_gap import derive_risk_gap
+from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps, derive_risk_gap
 from risk_first_advisory.api_layer.schemas import RiskGap
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +142,7 @@ def test_riskgap_schema_valid_and_serializes_expected_keys():
         "gap_level",
         "gap_explanation",
         "confirmation_questions",
+        "agreement",
     }
     assert dumped["gap_level"] == "medium"
 
@@ -268,3 +269,58 @@ def test_demo_client_is_deterministic():
 
     payload = {"open_risk_reaction": "saldría de todo por miedo"}
     assert _DemoProfileClient().analyze_kyc(payload) == _DemoProfileClient().analyze_kyc(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# combine_risk_gaps — IA + motor determinístico (M-Engine)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _calm_moderate_kyc():
+    return {
+        "risk_tolerance_score": 5, "risk_capacity_score": 5,
+        "investment_horizon_years": 7, "liquidity_need_score": 5,
+        "investment_experience": "moderada", "investment_objective": "balanced",
+        "open_risk_reaction": "Mantengo posiciones, largo plazo",
+    }
+
+
+def test_combine_no_ai_uses_base():
+    # result sin preliminary_profile -> derive_risk_gap None -> solo base.
+    out = combine_risk_gaps({"contradictions": []}, _calm_moderate_kyc())
+    assert out["agreement"] == "solo-base (sin IA)"
+    RiskGap(**out)  # debe armar un RiskGap valido
+
+
+def test_combine_ai_and_base_agree():
+    result = {"preliminary_profile": "moderado", "contradictions": [], "follow_up_questions": []}
+    out = combine_risk_gaps(result, _calm_moderate_kyc())
+    assert out["agreement"] == "coinciden"
+    assert out["gap_level"] == "low"
+    RiskGap(**out)
+
+
+def test_combine_ai_and_base_differ_takes_more_severe():
+    # IA marca high (contradiccion alta); base de un KYC calmo/consistente da low.
+    result = {
+        "preliminary_profile": "moderado",
+        "contradictions": [{"field": "x", "severity": "high", "explanation": "teme perder"}],
+        "follow_up_questions": ["Q1"],
+    }
+    out = combine_risk_gaps(result, _calm_moderate_kyc())
+    assert out["gap_level"] == "high"            # el mas severo
+    assert "difieren" in out["agreement"]
+    assert "IA: high" in out["agreement"] and "base: low" in out["agreement"]
+    RiskGap(**out)
+
+
+def test_combine_explanation_mentions_cross_check():
+    result = {"preliminary_profile": "moderado", "contradictions": [], "follow_up_questions": []}
+    out = combine_risk_gaps(result, _calm_moderate_kyc())
+    assert "base auditable" in out["gap_explanation"].lower()
+
+
+def test_combine_handles_none_result():
+    out = combine_risk_gaps(None, _calm_moderate_kyc())
+    assert out["agreement"] == "solo-base (sin IA)"
+    RiskGap(**out)

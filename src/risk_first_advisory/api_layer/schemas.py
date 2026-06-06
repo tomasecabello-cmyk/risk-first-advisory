@@ -1374,6 +1374,9 @@ class RiskGap(BaseModel):
     gap_level:              Literal["low", "medium", "high"]
     gap_explanation:        str
     confirmation_questions: list[str]
+    # Cruce IA (capa rica) vs motor determinístico (base auditable):
+    # "coinciden" / "difieren (IA: X / base: Y)" / "solo-base (sin IA)".
+    agreement:              str | None = None
 
 
 class AIProfileAnalysisResponse(BaseModel):

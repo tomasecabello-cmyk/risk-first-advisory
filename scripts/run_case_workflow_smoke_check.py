@@ -412,6 +412,10 @@ def run_case_workflow_smoke_check(
         _expect(failures, risk_gap.get("gap_level") in {"low", "medium", "high"},
                 "analysis risk_gap.gap_level present",
                 expected="low|medium|high", actual=risk_gap.get("gap_level"))
+        # M-Engine: cruce IA vs base determinística presente.
+        _expect(failures, bool(risk_gap.get("agreement")),
+                "analysis risk_gap.agreement present (IA vs base)",
+                actual=risk_gap.get("agreement"))
 
         # ── Profile approval ────────────────────────────────────────────────
         _section("Step 6 / 14: advisor profile approval (approve)")

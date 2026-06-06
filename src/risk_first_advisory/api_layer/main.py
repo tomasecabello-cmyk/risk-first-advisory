@@ -3637,14 +3637,14 @@ def create_case_profile_analysis(
             ) from exc
 
     # ── 5. Derivar Risk Gap (campo derivado, no persistido) ─────────────────
-    # Flag de inconsistencia declarado-vs-respuestas, derivado del result que
-    # analyze_kyc ya produce. Determinístico. Ver ai_layer/risk_gap.py.
-    from risk_first_advisory.ai_layer.risk_gap import derive_risk_gap
+    # Combina la capa IA (analyze_kyc) con el motor determinístico (M-Engine):
+    # IA = capa rica; motor = base auditable + fallback sin key + cross-check.
+    # Ver ai_layer/risk_gap.py::combine_risk_gaps y ai_layer/risk_scoring.py.
+    from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
 
-    risk_gap_dict = (
-        derive_risk_gap(ai_result, kyc_payload)
-        if isinstance(ai_result, dict)
-        else None
+    risk_gap_dict = combine_risk_gaps(
+        ai_result if isinstance(ai_result, dict) else None,
+        kyc_payload,
     )
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
 

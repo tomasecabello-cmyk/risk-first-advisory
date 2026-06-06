@@ -124,3 +124,68 @@ def derive_risk_gap(
         "gap_explanation": gap_explanation,
         "confirmation_questions": confirmation_questions,
     }
+
+
+_SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def combine_risk_gaps(
+    result: dict[str, Any] | None,
+    kyc_payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """
+    Combina la capa IA con el motor determinístico (M-Engine).
+
+    - IA (derive_risk_gap sobre el output de analyze_kyc): capa rica — perfil,
+      explicación y preguntas en lenguaje natural. Requiere key, no determinística.
+    - Motor determinístico (risk_scoring.compute_risk_gap sobre el KYC): base
+      auditable y reproducible + fallback sin OPENAI_API_KEY.
+    - `agreement`: si coinciden, difieren (con ambos niveles), o si solo hay base.
+
+    El gap_level final es el MÁS severo de los dos (no sub-avisar). La IA manda en
+    la capa de texto cuando está; el cruce se agrega a la explicación.
+
+    Devuelve un dict con las claves públicas de RiskGap (+ agreement), o None.
+    """
+    # Import local para evitar ciclo si risk_scoring crece.
+    from risk_first_advisory.ai_layer.risk_scoring import compute_risk_gap
+
+    det = compute_risk_gap(kyc_payload or {})
+    det_public = (
+        {k: v for k, v in det.items() if not k.startswith("_")} if isinstance(det, dict) else None
+    )
+    ai_gap = derive_risk_gap(result, kyc_payload) if isinstance(result, dict) else None
+
+    if ai_gap is None:
+        if det_public is None:
+            return None
+        det_public["agreement"] = "solo-base (sin IA)"
+        return det_public
+
+    if det_public is None:
+        ai_gap["agreement"] = "solo-IA"
+        return ai_gap
+
+    ai_level = ai_gap.get("gap_level", "low")
+    det_level = det_public.get("gap_level", "low")
+    final_level = (
+        ai_level if _SEVERITY_ORDER.get(ai_level, 0) >= _SEVERITY_ORDER.get(det_level, 0)
+        else det_level
+    )
+    agreement = (
+        "coinciden" if ai_level == det_level
+        else f"difieren (IA: {ai_level} / base: {det_level})"
+    )
+
+    explanation = str(ai_gap.get("gap_explanation", "")).strip()
+    explanation = (explanation + " " if explanation else "") + f"Cruce con la base auditable: {agreement}."
+    questions = ai_gap.get("confirmation_questions") or det_public.get("confirmation_questions") or []
+
+    return {
+        "declared_profile": ai_gap.get("declared_profile") or det_public.get("declared_profile"),
+        "stress_signal": ai_gap.get("stress_signal") or det_public.get("stress_signal", ""),
+        "gap_level": final_level,
+        "gap_explanation": explanation,
+        "confirmation_questions": questions,
+        "agreement": agreement,
+    }
