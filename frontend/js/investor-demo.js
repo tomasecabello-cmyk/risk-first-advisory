@@ -523,7 +523,29 @@ async function idemoApproveProfile() {
   } else {
     body.proposed_profile = window.idemoState.aiProposedProfile || "moderado";
   }
-  const res = await idemoApi("POST", `/cases/${encodeURIComponent(window.idemoState.caseId)}/profile-approval`, body);
+  const approvalPath = `/cases/${encodeURIComponent(window.idemoState.caseId)}/profile-approval`;
+  let res = await idemoApi("POST", approvalPath, body);
+
+  // El marco determinístico (capacidad) acota a la IA: si el perfil supera el
+  // tope, el backend devuelve 409. El asesor firma el override explícitamente.
+  if (!res.ok && res.status === 409 && /tope de capacidad|marco determ/i.test(res.detail || "")) {
+    const firmar = window.confirm(
+      "El marco determinístico bloquea este perfil:\n\n" +
+      (res.detail || "") +
+      "\n\n¿Firmás el override y lo aprobás igual? Queda registrado en la auditoría."
+    );
+    if (!firmar) {
+      idemoSetStep("approve", "warn");
+      idemoStepResult("approve", "warn",
+        `<strong>Aprobación detenida por el marco.</strong> El perfil supera el tope ` +
+        `de capacidad y el asesor no firmó el override. ${escapeHTML(res.detail || "")}`);
+      return false;
+    }
+    body.framework_override_acknowledged = true;
+    body.rationale += " [Override del tope de capacidad firmado por el asesor.]";
+    res = await idemoApi("POST", approvalPath, body);
+  }
+
   if (!res.ok) {
     idemoSetStep("approve", "error");
     idemoStepResult("approve", "error",
@@ -534,11 +556,17 @@ async function idemoApproveProfile() {
   window.idemoState.approvalId = res.json.approval_id;
   window.idemoState.approvedProfile = res.json.approved_profile;
   idemoSetStep("approve", "done");
+  const overrideNote = res.json.framework_override
+    ? `<div style="margin-top:6px;color:#c90;font-size:12px;">⚠ Override del marco firmado: el perfil ` +
+      `<code>${escapeHTML(res.json.approved_profile || "")}</code> supera el tope de capacidad ` +
+      `<code>${escapeHTML(res.json.framework_ceiling_profile || "")}</code>. Registrado en auditoría.</div>`
+    : "";
   idemoStepResult("approve", "ok",
     `<strong>Perfil aprobado por el asesor.</strong> ` +
     `Perfil aprobado: <code>${escapeHTML(res.json.approved_profile || "—")}</code> · ` +
     `decisión <code>${escapeHTML(res.json.decision)}</code>. ` +
-    `Esta firma queda registrada en la cadena de auditoría y conduce todo lo de abajo.`);
+    `Esta firma queda registrada en la cadena de auditoría y conduce todo lo de abajo.` +
+    overrideNote);
   return true;
 }
 

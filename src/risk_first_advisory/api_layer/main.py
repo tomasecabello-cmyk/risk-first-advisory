@@ -4167,6 +4167,41 @@ def create_case_profile_approval(
                         detail="decision='reject' requires approved_profile=None.",
                     )
 
+        # ── 5b. Tope determinístico: el marco (capacidad) acota a la IA ───
+        # Si el perfil aprobado es MÁS riesgoso que lo que la situación
+        # financiera del cliente soporta (ability), exige override explícito.
+        # La IA propone, el marco acota, el asesor firma. Mismo patrón que el
+        # override de presupuesto de cartera.
+        from risk_first_advisory.ai_layer.risk_scoring import (
+            deterministic_ceiling,
+            profile_exceeds,
+        )
+
+        framework_override = False
+        framework_ceiling: str | None = None
+        if (
+            req.decision in ("approve", "modify")
+            and approved_profile is not None
+            and kyc_id is not None
+        ):
+            kyc_for_cap = kyc_repo.get(kyc_id)
+            if kyc_for_cap is not None:
+                framework_ceiling = deterministic_ceiling(kyc_for_cap["payload"])["cap_profile"]
+                if profile_exceeds(approved_profile, framework_ceiling):
+                    if not req.framework_override_acknowledged:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"El perfil aprobado ({approved_profile!r}) supera el tope de "
+                                f"capacidad del marco determinístico ({framework_ceiling!r}): el "
+                                "cliente asumiría más riesgo del que su situación financiera "
+                                "soporta. Para aprobarlo igualmente, reenviar con "
+                                "framework_override_acknowledged=true y una justificación en "
+                                "rationale."
+                            ),
+                        )
+                    framework_override = True
+
         # ── 6. soft FK lookup advisor_id ──────────────────────────────────
         advisor_id_for_row: str | None = None
         if adv_repo.get(advisor.advisor_id) is not None:
@@ -4224,6 +4259,8 @@ def create_case_profile_approval(
                     "decision":               approval_data["decision"],
                     "approved_profile":       approval_data["approved_profile"],
                     "advisor_id":             approval_data["advisor_id"],
+                    "framework_ceiling_profile": framework_ceiling,
+                    "framework_override":        framework_override,
                 },
             )
         except Exception as exc:
@@ -4235,7 +4272,11 @@ def create_case_profile_approval(
                 ),
             ) from exc
 
-    return CaseAdvisorProfileApprovalResponse(**approval_data)
+    return CaseAdvisorProfileApprovalResponse(
+        **approval_data,
+        framework_override=framework_override,
+        framework_ceiling_profile=framework_ceiling,
+    )
 
 
 @app.get(

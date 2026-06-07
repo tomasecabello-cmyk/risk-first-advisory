@@ -267,3 +267,28 @@ def deterministic_assessment(payload: dict[str, Any]) -> dict[str, Any]:
         "revealed_direction": g["_revealed_direction"],
         "gap_level": g["gap_level"],
     }
+
+
+def deterministic_ceiling(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Tope de CAPACIDAD: el perfil más alto que la situación financiera del cliente
+    soporta, derivado de `ability` (NO de willingness/tolerancia). Aprobar un
+    perfil más riesgoso que este tope = asumir más riesgo del que el cliente
+    puede afrontar → requiere override explícito del asesor.
+
+    El tope se basa en ability porque la capacidad es un límite financiero duro;
+    la tolerancia (willingness) es psicológica y el asesor puede educarla.
+
+    Returns: cap_profile, ability (0-1), ability_score (0-100).
+    """
+    stated = score_stated_profile(payload)
+    return {
+        "cap_profile": _profile_from_score(stated["ability"] * 100.0),
+        "ability": stated["ability"],
+        "ability_score": round(stated["ability"] * 100.0, 1),
+    }
+
+
+def profile_exceeds(profile_a: str, profile_b: str) -> bool:
+    """True si profile_a es MÁS riesgoso que profile_b (ambos en PROFILES)."""
+    return _profile_index(profile_a) > _profile_index(profile_b)

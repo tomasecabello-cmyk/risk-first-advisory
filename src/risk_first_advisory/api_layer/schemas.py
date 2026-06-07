@@ -1481,6 +1481,10 @@ class CaseAdvisorProfileApprovalCreateRequest(BaseModel):
     approved_profile:       str | None = None
     rationale:              str        = Field(min_length=1)
     source:                 str        = "manual"
+    # Override explícito del tope determinístico (capacidad): obligatorio cuando
+    # el perfil aprobado es MÁS riesgoso que lo que la situación financiera del
+    # cliente soporta. La IA propone; el marco acota; el asesor firma el override.
+    framework_override_acknowledged: bool = False
 
     @field_validator("ai_profile_analysis_id", mode="before")
     @classmethod
@@ -1589,6 +1593,11 @@ class CaseAdvisorProfileApprovalResponse(BaseModel):
     source:                 str
     is_current:             bool
     created_at_utc:         str
+    # Derivados del tope determinístico (no persistidos como columnas):
+    # framework_override=True cuando el perfil aprobado superó el tope de
+    # capacidad y el asesor firmó el override. ceiling = perfil tope.
+    framework_override:         bool       = False
+    framework_ceiling_profile:  str | None = None
 
 
 class CaseAdvisorProfileApprovalListResponse(BaseModel):

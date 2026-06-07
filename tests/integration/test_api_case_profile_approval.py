@@ -956,3 +956,69 @@ class TestNoRegression:
             },
         )
         assert r.status_code != 401
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tope determinístico: el marco (capacidad) acota a la IA
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFrameworkCeiling:
+    """El perfil aprobado no puede superar el tope de capacidad sin override."""
+
+    def _low_capacity_case(self, c: TestClient, patch_ai_client) -> dict:
+        # KYC de baja capacidad financiera → tope determinístico = conservador.
+        patch_ai_client()
+        firm = _create_firm(c)
+        adv = _create_advisor(c, firm["firm_id"], advisor_id="ADV-CPA10-001")
+        cli = _create_client(c, firm["firm_id"], adv["advisor_id"])
+        case = _create_case(c, firm["firm_id"], cli["client_id"], adv["advisor_id"])
+        _post_kyc(c, case["case_id"], risk_capacity_score=1,
+                  investment_horizon_years=1, liquidity_need_score=9)
+        _post_analysis(c, case["case_id"])
+        return case
+
+    def test_exceeding_ceiling_without_override_is_409(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case = self._low_capacity_case(client, patch_ai_client)
+        r = _post_approval(client, case["case_id"], decision="modify",
+                           approved_profile="agresivo",
+                           rationale="el cliente quiere agresivo")
+        assert r.status_code == 409
+        assert "tope de capacidad" in r.json()["detail"]
+
+    def test_exceeding_ceiling_with_override_is_201(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case = self._low_capacity_case(client, patch_ai_client)
+        r = _post_approval(client, case["case_id"], decision="modify",
+                           approved_profile="agresivo",
+                           rationale="cliente educado en riesgo, insiste y firma",
+                           framework_override_acknowledged=True)
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["framework_override"] is True
+        assert body["framework_ceiling_profile"] == "conservador"
+
+    def test_within_ceiling_no_override(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case = self._low_capacity_case(client, patch_ai_client)
+        r = _post_approval(client, case["case_id"], decision="modify",
+                           approved_profile="conservador",
+                           rationale="coherente con la capacidad")
+        assert r.status_code == 201, r.text
+        assert r.json()["framework_override"] is False
+
+    def test_override_keeps_audit_chain_intact(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case = self._low_capacity_case(client, patch_ai_client)
+        _post_approval(client, case["case_id"], decision="modify",
+                       approved_profile="agresivo", rationale="override firmado",
+                       framework_override_acknowledged=True)
+        ver = client.get(f"/cases/{case['case_id']}/audit/verify",
+                         headers={"Authorization": _COMPLIANCE})
+        assert ver.status_code == 200
+        assert ver.json()["is_intact"] is True
