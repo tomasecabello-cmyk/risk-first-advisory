@@ -10,6 +10,7 @@ from __future__ import annotations
 from risk_first_advisory.ai_layer.risk_scoring import (
     PROFILES,
     assess_revealed_signal,
+    compute_capacity_score,
     compute_risk_gap,
     score_stated_profile,
 )
@@ -128,3 +129,42 @@ def test_handles_missing_fields_without_crashing():
     gap = compute_risk_gap({})
     assert gap["declared_profile"] in PROFILES
     assert gap["gap_level"] in ("low", "medium", "high")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Capacidad medida de hechos (no fabricada de la tolerancia)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_compute_capacity_score_high_vs_low():
+    high = compute_capacity_score({
+        "annual_income_usd": 50000, "liquid_net_worth": 300000,  # colchón 6x
+        "investment_horizon_years": 20, "income_stability": "stable",
+        "essential_expenses_covered": True, "dependents_count": 0,
+    })
+    low = compute_capacity_score({
+        "annual_income_usd": 80000, "liquid_net_worth": 8000,  # colchón 0.1x
+        "investment_horizon_years": 1, "income_stability": "unstable",
+        "essential_expenses_covered": False, "dependents_count": 4,
+    })
+    assert 1.0 <= low <= 10.0 and 1.0 <= high <= 10.0
+    assert high >= 8.0 and low <= 3.0
+
+
+def test_capacity_from_facts_caps_high_tolerance():
+    # Tolerancia declarada alta + capacity_score declarado alto, pero los HECHOS
+    # dicen baja capacidad -> con capacity_from_facts la capacidad acota.
+    payload = {
+        "risk_tolerance_score": 10, "risk_capacity_score": 10,  # declarado (placeholder)
+        "investment_objective": "growth", "investment_horizon_years": 1,
+        "liquidity_need_score": 9, "investment_experience": "ninguna",
+        "annual_income_usd": 80000, "liquid_net_worth": 5000,
+        "income_stability": "unstable", "essential_expenses_covered": False,
+        "dependents_count": 3, "capacity_from_facts": True,
+    }
+    s = score_stated_profile(payload)
+    assert s["binding_dimension"] == "ability"  # la capacidad financiera limita
+    assert s["ability"] < 0.4
+    # Sin el flag, el score declarado (10) mandaría -> ability alta. Contraste:
+    legacy = score_stated_profile({**payload, "capacity_from_facts": False})
+    assert legacy["ability"] > s["ability"]

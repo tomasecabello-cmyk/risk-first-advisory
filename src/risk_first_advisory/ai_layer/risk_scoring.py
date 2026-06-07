@@ -97,6 +97,55 @@ def _liquidity_inv_pts(score: Any) -> float:
     return 0.10
 
 
+_INCOME_STABILITY_PTS: dict[str, float] = {
+    "stable": 0.20, "estable": 0.20,
+    "variable": 0.10,
+    "unstable": 0.03, "inestable": 0.03,
+}
+
+
+def compute_capacity_score(payload: dict[str, Any]) -> float:
+    """
+    Capacidad financiera (1-10) DERIVADA de hechos objetivos, no autoreportada.
+
+    Capacidad = cuánto puede perder el cliente sin afectar su vida. Se computa de:
+      - colchón: patrimonio líquido en años de ingreso (liquid / annual_income),
+      - horizonte de inversión,
+      - estabilidad del ingreso,
+      - si los gastos esenciales están cubiertos sin tocar la inversión,
+      - dependientes a cargo.
+
+    NO usa risk_tolerance_score ni risk_capacity_score (evita la circularidad de
+    "capacidad = tolerancia"). Función pura.
+    """
+    p = payload or {}
+    income = float(p.get("annual_income_usd") or 0.0)
+    liquid = float(p.get("liquid_net_worth") or 0.0)
+    ratio = (liquid / income) if income > 0 else (5.0 if liquid > 0 else 0.0)
+    if ratio >= 5:
+        buf = 0.35
+    elif ratio >= 2:
+        buf = 0.28
+    elif ratio >= 1:
+        buf = 0.20
+    elif ratio >= 0.5:
+        buf = 0.10
+    else:
+        buf = 0.03
+
+    horizon = _horizon_pts(p.get("investment_horizon_years")) * 0.25
+    stab = _INCOME_STABILITY_PTS.get(str(p.get("income_stability", "")).lower(), 0.10)
+    cov = 0.10 if p.get("essential_expenses_covered", True) else 0.0
+    try:
+        dependents = int(p.get("dependents_count", 0) or 0)
+    except (TypeError, ValueError):
+        dependents = 0
+    dep_pts = 0.10 if dependents == 0 else (0.06 if dependents <= 2 else 0.02)
+
+    total = _clamp01(buf + horizon + stab + cov + dep_pts)
+    return round(1.0 + total * 9.0, 1)  # 1-10
+
+
 def _profile_from_score(score_0_100: float) -> str:
     """Mapea un score 0-100 a uno de los 5 perfiles por bandas de 20."""
     idx = int(score_0_100 // 20)
@@ -124,7 +173,11 @@ def score_stated_profile(payload: dict[str, Any]) -> dict[str, Any]:
     """
     p = payload or {}
     tolerance = _score_1_10(p.get("risk_tolerance_score"))
-    capacity = _score_1_10(p.get("risk_capacity_score"))
+    # Capacidad: medida de hechos (capacity_from_facts) o el score declarado (legacy).
+    if p.get("capacity_from_facts"):
+        capacity = _score_1_10(compute_capacity_score(p))
+    else:
+        capacity = _score_1_10(p.get("risk_capacity_score"))
     horizon = _horizon_pts(p.get("investment_horizon_years"))
     liquidity_inv = _liquidity_inv_pts(p.get("liquidity_need_score"))
     experience = _EXPERIENCE_PTS.get(str(p.get("investment_experience", "")).lower(), 0.5)

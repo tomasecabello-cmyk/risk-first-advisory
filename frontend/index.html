@@ -345,6 +345,25 @@
               <option value="experto">Experto</option>
             </select>
           </div>
+          <div class="field">
+            <label>Estabilidad del ingreso <span class="hint">capacidad, no tolerancia</span></label>
+            <select id="idemo-income-stability">
+              <option value="stable" selected>Estable</option>
+              <option value="variable">Variable</option>
+              <option value="unstable">Inestable</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Personas a cargo (dependientes)</label>
+            <input type="number" id="idemo-dependents" value="0" min="0" />
+          </div>
+          <div class="field">
+            <label>¿Gastos esenciales cubiertos sin tocar esta inversión?</label>
+            <select id="idemo-expenses-covered">
+              <option value="si" selected>Sí</option>
+              <option value="no">No</option>
+            </select>
+          </div>
         </div>
 
         <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preguntas abiertas</div>

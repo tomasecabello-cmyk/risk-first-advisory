@@ -137,8 +137,11 @@ function idemoStr(id, fallback) {
 function idemoBuildKycPayload() {
   // Mapeos:
   //   liquidity_need (baja/media/alta) → liquidity_need_score (3/5/8)
-  //   risk_tolerance (1-10) → risk_capacity_score = min(risk+1, 10)
   //   risk_tolerance → max_acceptable_drawdown_pct ≈ risk * 3
+  // CAPACIDAD: ya NO se fabrica de la tolerancia. Se manda capacity_from_facts=true
+  // y el backend la computa de hechos (líquido/ingreso/horizonte/estabilidad/
+  // dependientes/gastos cubiertos). risk_capacity_score queda como placeholder
+  // (el schema lo exige) pero el motor lo ignora.
   const liqMap = { baja: 3, media: 5, alta: 8 };
   const risk = idemoInt("idemo-risk", 6);
   const liquidNeed = liqMap[idemoStr("idemo-liquidity", "media")] || 5;
@@ -147,11 +150,11 @@ function idemoBuildKycPayload() {
   return {
     age:                          idemoInt("idemo-age", 42),
     risk_tolerance_score:         risk,
-    risk_capacity_score:          Math.min(risk + 1, 10),
+    risk_capacity_score:          risk,  // placeholder; ver capacity_from_facts
     liquidity_need_score:         liquidNeed,
     investment_horizon_years:     idemoInt("idemo-horizon", 10),
     investment_experience:        idemoStr("idemo-experience", "moderada"),
-    income_stability:             "stable",
+    income_stability:             idemoStr("idemo-income-stability", "stable"),
     net_worth:                    liquidNW * 2,  // estimación razonable
     liquid_net_worth:             liquidNW,
     max_acceptable_drawdown_pct:  Math.min(Math.max(risk * 3, 5), 50),
@@ -159,6 +162,10 @@ function idemoBuildKycPayload() {
     preferred_currency:           idemoStr("idemo-currency", "USD"),
     investment_objective:         idemoStr("idemo-objective", "balanced"),
     annual_income_usd:            idemoNumber("idemo-income", 80000),
+    // Capacidad medida de hechos (no autoreportada):
+    capacity_from_facts:          true,
+    dependents_count:             idemoInt("idemo-dependents", 0),
+    essential_expenses_covered:   idemoStr("idemo-expenses-covered", "si") === "si",
     open_investment_goal:         idemoStr("idemo-open-goal", "") || null,
     open_risk_reaction:           idemoStr("idemo-open-reaction", "") || null,
     open_past_experience:         idemoStr("idemo-open-experience", "") || null,

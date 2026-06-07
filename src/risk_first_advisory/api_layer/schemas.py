@@ -161,6 +161,15 @@ class KYCDataRequest(BaseModel):
     # histórico de derivarlo desde liquid_net_worth * 0.05 (documentado).
     annual_income_usd:       float | None = Field(default=None, ge=0.0)
 
+    # ── Capacidad financiera medida de hechos (no autoreportada) ──────────
+    # Cuando capacity_from_facts=True, el motor determinístico computa la
+    # capacidad desde liquid_net_worth/annual_income/horizonte/income_stability
+    # + estos dos campos, e IGNORA risk_capacity_score (que pasa a ser un
+    # placeholder). Default False → comportamiento legacy (usa el score).
+    dependents_count:           int  = Field(default=0, ge=0)
+    essential_expenses_covered: bool = True
+    capacity_from_facts:        bool = False
+
     # ESG — opcional. Por defecto se construye un ESGProfile vacío
     # (strictness_level=none, sin exclusions/preferences) que reproduce
     # el comportamiento previo del endpoint.
