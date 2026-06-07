@@ -244,3 +244,26 @@ def compute_risk_gap(payload: dict[str, Any]) -> dict[str, Any]:
         "_revealed_direction": revealed["direction"],
         "_severity_bands": severity_bands,
     }
+
+
+def deterministic_assessment(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Resumen público del marco determinístico para mostrar AL LADO del análisis
+    de la IA (el asesor contrasta IA vs base auditable). Es lo mismo que computa
+    compute_risk_gap, pero expuesto sin las claves `_` internas.
+
+    Returns: profile, score (0-100), willingness, ability (0-1), binding_dimension,
+    internal_gap_bands, revealed_direction, gap_level.
+    """
+    g = compute_risk_gap(payload)
+    s = g["_stated"]
+    return {
+        "profile": s["profile"],
+        "score": s["score"],
+        "willingness": s["willingness"],
+        "ability": s["ability"],
+        "binding_dimension": s["binding_dimension"],
+        "internal_gap_bands": s["internal_gap_bands"],
+        "revealed_direction": g["_revealed_direction"],
+        "gap_level": g["gap_level"],
+    }

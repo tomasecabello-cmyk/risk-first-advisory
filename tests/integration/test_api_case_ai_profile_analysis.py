@@ -316,6 +316,23 @@ class TestCreateAnalysis:
         r = _post_analysis(client, ctx["case"]["case_id"])
         assert r.json()["case_id"] == ctx["case"]["case_id"]
 
+    def test_deterministic_assessment_present(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        # El marco determinístico (sin IA) viaja al lado del análisis de la IA.
+        patch_ai_client()
+        ctx = _full_chain_with_kyc(client)
+        det = _post_analysis(client, ctx["case"]["case_id"]).json()["deterministic"]
+        assert det is not None
+        assert det["profile"] in {
+            "conservador", "moderado-defensivo", "moderado",
+            "moderado-agresivo", "agresivo",
+        }
+        assert 0.0 <= det["willingness"] <= 1.0
+        assert 0.0 <= det["ability"] <= 1.0
+        assert det["binding_dimension"] in {"willingness", "ability"}
+        assert det["gap_level"] in {"low", "medium", "high"}
+
     def test_kyc_submission_id_in_response(
         self, client: TestClient, patch_ai_client
     ) -> None:
@@ -910,6 +927,9 @@ class TestCaseProfileFollowUp:
         # Risk Gap recomputado y presente.
         assert body["risk_gap"] is not None
         assert body["risk_gap"]["gap_level"] in {"low", "medium", "high"}
+        # El marco determinístico también viaja en la respuesta del follow-up.
+        assert body["deterministic"] is not None
+        assert body["deterministic"]["profile"]
 
     def test_follow_up_appends_analysis_and_keeps_audit_intact(
         self, client: TestClient, patch_ai_client

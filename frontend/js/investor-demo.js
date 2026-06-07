@@ -313,6 +313,41 @@ async function idemoSubmitKyc() {
 
 // ── STEP 3 — análisis de perfil con IA ────────────────────────────────
 
+// Panel "dos lecturas": el análisis de la IA (tu API) AL LADO del marco
+// determinístico (motor sin IA, símil Nitrogen), con el cruce. El asesor
+// contrasta. Guard: si no hay `det`, no se renderiza.
+function idemoDeterministicPanelHTML(aiProfile, aiConfidence, det, agreement) {
+  if (!det) return "";
+  const conf = (aiConfidence != null && aiConfidence !== "")
+    ? `confianza ${Math.round(Number(aiConfidence) * 100)}%` : "";
+  const difieren = typeof agreement === "string" && agreement.indexOf("difieren") === 0;
+  const agreeColor = difieren ? "#c90" : "#3a7";
+  return (
+    `<div style="margin-top:12px;border:1px solid #ddd;border-radius:6px;padding:12px;background:#fff;">` +
+      `<div style="font-weight:600;margin-bottom:8px;">Dos lecturas del mismo caso</div>` +
+      `<div style="display:flex;gap:12px;flex-wrap:wrap;">` +
+        `<div style="flex:1;min-width:190px;border-left:3px solid #69c;padding-left:10px;">` +
+          `<div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.65;">IA (tu API)</div>` +
+          `<div>Perfil: <code>${escapeHTML(aiProfile || "—")}</code></div>` +
+          (conf ? `<div style="font-size:12px;opacity:.8;">${conf}</div>` : "") +
+        `</div>` +
+        `<div style="flex:1;min-width:190px;border-left:3px solid #6a6;padding-left:10px;">` +
+          `<div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.65;">Marco (sin IA)</div>` +
+          `<div>Perfil: <code>${escapeHTML(det.profile)}</code></div>` +
+          `<div style="font-size:12px;opacity:.85;">quiere ${Math.round(det.willingness * 100)} / ` +
+            `puede ${Math.round(det.ability * 100)} → efectivo ${Math.round(det.score)}/100</div>` +
+          `<div style="font-size:12px;opacity:.85;">dimensión que limita: ${escapeHTML(det.binding_dimension)}</div>` +
+        `</div>` +
+      `</div>` +
+      (agreement
+        ? `<div style="margin-top:8px;font-size:12px;color:${agreeColor};">Cruce IA vs marco: ` +
+          `<strong>${escapeHTML(agreement)}</strong>` +
+          (difieren ? " — revisá antes de aprobar." : "") + `</div>`
+        : "") +
+    `</div>`
+  );
+}
+
 // Card Risk Gap: flag de inconsistencia declarado-vs-respuestas.
 // Guard: si no hay risk_gap (respuesta vieja / null), devuelve "" y no se renderiza.
 // Jerarquía: comparación primero, honesty line como caption, preguntas como cierre.
@@ -415,6 +450,8 @@ async function idemoRunAiProfile() {
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code> · ` +
     `${contraN} contradicción(es) detectada(s) · ${fuN} pregunta(s) de seguimiento. ` +
     `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>` +
+    idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
+      res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoRiskGapCardHTML(res.json.risk_gap));
   return true;
 }
@@ -460,6 +497,8 @@ async function idemoSubmitFollowUp() {
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code>. ` +
     (reason ? `<div style="font-size:12px;margin:4px 0;">${escapeHTML(reason)}</div>` : "") +
     `<em>La IA propone; el asesor aprueba en el paso 4.</em>` +
+    idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
+      res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoRiskGapCardHTML(res.json.risk_gap));
 }
 

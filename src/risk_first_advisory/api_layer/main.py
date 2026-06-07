@@ -47,6 +47,7 @@ from risk_first_advisory.api_layer.schemas import (
     AIProfileAnalysisResponse,
     AIRequestLogCreateRequest,
     AIRequestLogListResponse,
+    DeterministicAssessment,
     RiskGap,
     AIRequestLogResponse,
     AuditEventCreateRequest,
@@ -3679,21 +3680,24 @@ def create_case_profile_analysis(
                 ),
             ) from exc
 
-    # ── 5. Derivar Risk Gap (campo derivado, no persistido) ─────────────────
+    # ── 5. Derivar Risk Gap + marco determinístico (campos derivados) ───────
     # Combina la capa IA (analyze_kyc) con el motor determinístico (M-Engine):
     # IA = capa rica; motor = base auditable + fallback sin key + cross-check.
     # Ver ai_layer/risk_gap.py::combine_risk_gaps y ai_layer/risk_scoring.py.
     from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
+    from risk_first_advisory.ai_layer.risk_scoring import deterministic_assessment
 
     risk_gap_dict = combine_risk_gaps(
         ai_result if isinstance(ai_result, dict) else None,
         kyc_payload,
     )
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
+    det_obj = DeterministicAssessment(**deterministic_assessment(kyc_payload))
 
     return AIProfileAnalysisResponse(
         **analysis_data,
         risk_gap=risk_gap_obj,
+        deterministic=det_obj,
     )
 
 
@@ -3964,13 +3968,17 @@ def create_case_profile_follow_up(
                 ),
             ) from exc
 
-    # ── 5. Recomputar Risk Gap (IA + motor determinístico) ──────────────────
+    # ── 5. Recomputar Risk Gap + marco determinístico ───────────────────────
     from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
+    from risk_first_advisory.ai_layer.risk_scoring import deterministic_assessment
 
     risk_gap_dict = combine_risk_gaps(normalized_result, kyc_payload)
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
+    det_obj = DeterministicAssessment(**deterministic_assessment(kyc_payload))
 
-    return AIProfileAnalysisResponse(**analysis_data, risk_gap=risk_gap_obj)
+    return AIProfileAnalysisResponse(
+        **analysis_data, risk_gap=risk_gap_obj, deterministic=det_obj
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

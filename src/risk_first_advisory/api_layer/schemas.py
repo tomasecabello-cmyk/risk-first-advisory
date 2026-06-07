@@ -1403,6 +1403,23 @@ class RiskGap(BaseModel):
     agreement:              str | None = None
 
 
+class DeterministicAssessment(BaseModel):
+    """
+    Resumen del marco determinístico (motor sin IA, símil Nitrogen) para que el
+    asesor lo contraste con el análisis de la IA. Ver ai_layer/risk_scoring.py.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    profile:            str
+    score:              float  # 0-100, riesgo efectivo = min(willingness, ability)
+    willingness:        float  # 0-1, lo que el cliente QUIERE asumir
+    ability:            float  # 0-1, lo que su situación financiera SOPORTA
+    binding_dimension:  str    # "willingness" | "ability" (la que limita)
+    internal_gap_bands: int    # distancia willingness-vs-ability en bandas
+    revealed_direction: str    # "lower" | "composed" | "none" (señal de estrés)
+    gap_level:          Literal["low", "medium", "high"]
+
+
 class AIProfileAnalysisResponse(BaseModel):
     analysis_id:         str
     case_id:             str
@@ -1417,6 +1434,9 @@ class AIProfileAnalysisResponse(BaseModel):
     # vía ai_layer.risk_gap.derive_risk_gap. None en lecturas que no lo derivan
     # (GET/list en M-Demo); el POST lo incluye.
     risk_gap:            RiskGap | None = None
+    # Marco determinístico (sin IA) para contrastar con el análisis de la IA.
+    # Derivado del KYC; None en GET/list (no recomputa). El POST lo incluye.
+    deterministic:       DeterministicAssessment | None = None
 
 
 class AIProfileAnalysisListResponse(BaseModel):
