@@ -209,6 +209,10 @@ _SUITABILITY_YAML = FIXTURES / "suitability" / "instrument_matrix.yaml"
 _ESG_YAML = FIXTURES / "esg" / "instrument_esg_metadata.yaml"
 _MARKET_DATA_YAML = FIXTURES / "market_data" / "m1_market_data.yaml"
 _INSTRUMENT_UNIVERSE_CSV = FIXTURES / "universe" / "sample_instrument_universe.csv"
+# Universo de tickers REALES (resuelven en data912/yfinance/Rava), usado por el
+# flujo del caso solo con RFA_LIVE_DATA. El fixture sintético queda intacto para
+# los tests/offline. Ver data_layer/live_market_data.py.
+_INSTRUMENT_UNIVERSE_CSV_LIVE = FIXTURES / "universe" / "live_instrument_universe.csv"
 
 # Rutas por defecto — monkeypatcheables en tests.
 DEFAULT_DB_PATH: Path = ROOT / "data" / "demo_api.db"
@@ -4671,7 +4675,12 @@ def create_case_universe_filter_run(
             created_by_advisor_id = advisor.advisor_id
 
     # ── 2. Cargar universo CSV + aplicar filter engine ─────────────────────
+    # Con RFA_LIVE_DATA usa el universo de tickers reales (resuelven live);
+    # sin la env var, el fixture sintético (tests/offline deterministas).
+    import os
     csv_path: Path = _INSTRUMENT_UNIVERSE_CSV
+    if os.environ.get("RFA_LIVE_DATA") and _INSTRUMENT_UNIVERSE_CSV_LIVE.exists():
+        csv_path = _INSTRUMENT_UNIVERSE_CSV_LIVE
     if not csv_path.exists():
         raise HTTPException(
             status_code=500,
@@ -4883,8 +4892,22 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
     for ticker in source_map:
         live = provider.get_snapshot(ticker)
         if live is not None:
-            by_ticker[ticker] = live
-    return [by_ticker.get(s.ticker, s) for s in adapter_snapshots]
+            by_ticker[ticker] = live  # reemplaza el del fixture o AGREGA uno nuevo
+
+    # Devolver un snapshot por instrumento del universo (no solo los que el
+    # adapter cubrió: así los ETF/CEDEAR con data live también entran al optimizador).
+    ordered: list[Any] = []
+    seen: set[str] = set()
+    for inst in instruments:
+        tk = getattr(inst, "ticker", None)
+        if tk and tk in by_ticker and tk not in seen:
+            ordered.append(by_ticker[tk])
+            seen.add(tk)
+    for snap in adapter_snapshots:  # defensivo: cualquier resto no mapeado
+        if snap.ticker not in seen:
+            ordered.append(snap)
+            seen.add(snap.ticker)
+    return ordered
 
 
 def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
