@@ -67,7 +67,7 @@ REQUIRED_FRONTEND_FILES: tuple[str, ...] = (
     "frontend/index.html",
     "frontend/css/base.css",
     "frontend/js/common.js",
-    "frontend/js/legacy-demo.js",
+    "frontend/js/investor-demo.js",
     "frontend/js/case-dashboard.js",
     "frontend/js/case-workbench.js",
 )
