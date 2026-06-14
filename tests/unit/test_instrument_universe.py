@@ -43,21 +43,19 @@ CSVInstrumentUniverseProvider:
 
 from __future__ import annotations
 
-import csv
-import io
 import textwrap
 from pathlib import Path
 
 import pytest
 
+from risk_first_advisory.universe_layer.csv_provider import (
+    CSVInstrumentUniverseProvider,
+)
 from risk_first_advisory.universe_layer.instruments import (
     AssetClass,
     FinancialInstrument,
     InstrumentType,
     InstrumentUniverse,
-)
-from risk_first_advisory.universe_layer.csv_provider import (
-    CSVInstrumentUniverseProvider,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

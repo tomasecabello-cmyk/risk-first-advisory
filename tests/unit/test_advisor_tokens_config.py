@@ -28,12 +28,10 @@ import pytest
 from risk_first_advisory.config_layer.advisor_tokens import (
     ADVISOR_TOKENS_ENV_VAR,
     ALLOWED_ROLES,
-    DEFAULT_ADVISOR_TOKENS_PATH,
     REQUIRED_TOKEN_FIELDS,
     get_default_advisor_tokens,
     load_advisor_tokens,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures

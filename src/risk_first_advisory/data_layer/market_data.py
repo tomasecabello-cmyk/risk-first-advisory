@@ -23,7 +23,6 @@ from typing import Any
 
 import yaml
 
-
 # Campos críticos: si falta cualquiera de estos, el snapshot NO es usable
 # por la capa cuantitativa. Otros campos (como `duration`) pueden faltar
 # legítimamente para ciertos asset_classes (por ejemplo, equity).

@@ -36,7 +36,6 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     compute_payload_hash,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Import migrate module (no es paquete — importlib)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -46,7 +46,6 @@ from risk_first_advisory.data_layer.covariance import CovarianceMatrix
 from risk_first_advisory.data_layer.return_estimator import ReturnEstimate
 from risk_first_advisory.models.risk_budget import RiskBudget
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Códigos de check (failed_checks y warnings)
 # ─────────────────────────────────────────────────────────────────────────

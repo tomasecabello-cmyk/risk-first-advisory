@@ -56,7 +56,6 @@ from risk_first_advisory.rules_layer.esg_compliance import (
     ESGComplianceStatus,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 

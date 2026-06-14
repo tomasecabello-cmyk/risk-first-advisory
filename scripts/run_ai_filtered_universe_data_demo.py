@@ -140,11 +140,11 @@ def _print_filter_result(eligible_count: int, excluded_count: int,
     print(f"  excluded_count   : {excluded_count}")
     print(f"  applied_filters  : {', '.join(applied_filters) if applied_filters else '—'}")
     if warnings:
-        print(f"  warnings         :")
+        print("  warnings         :")
         for w in warnings:
             print(f"    ⚠  {w}")
     else:
-        print(f"  warnings         : none")
+        print("  warnings         : none")
 
 
 def _print_eligible_table(instruments: list[Any]) -> None:
@@ -259,7 +259,7 @@ def run(preferences: str, debug: bool) -> None:
     _print_preferences(preferences)
 
     # ── Step 1: AI extraction ─────────────────────────────────────────────────
-    print(f"\n  [1/4] Calling OpenAI to extract structured preferences…")
+    print("\n  [1/4] Calling OpenAI to extract structured preferences…")
     try:
         client = OpenAIProfileClient()
     except ValueError as exc:
@@ -290,7 +290,7 @@ def run(preferences: str, debug: bool) -> None:
     _print_ai_prefs(ai_result)
 
     # ── Step 2: Load CSV universe ─────────────────────────────────────────────
-    print(f"\n  [2/4] Loading instrument universe from CSV…")
+    print("\n  [2/4] Loading instrument universe from CSV…")
     if not _UNIVERSE_CSV.exists():
         print(f"\n  ✗  Universe CSV not found: {_UNIVERSE_CSV}")
         print("     Ensure the fixture file exists at tests/fixtures/universe/sample_instrument_universe.csv")
@@ -308,7 +308,7 @@ def run(preferences: str, debug: bool) -> None:
     print(f"     Loaded {len(universe)} instruments.")
 
     # ── Step 3: Apply filter ──────────────────────────────────────────────────
-    print(f"\n  [3/4] Applying preference filter…")
+    print("\n  [3/4] Applying preference filter…")
     filter_preferences = {k: v for k, v in ai_result.items() if k in _FILTER_KEYS}
     try:
         engine = PreferenceFilterEngine()
@@ -333,7 +333,7 @@ def run(preferences: str, debug: bool) -> None:
     _print_exclusions(filter_result.exclusions)
 
     # ── Step 4: Convert to snapshots ──────────────────────────────────────────
-    print(f"\n  [4/4] Converting eligible instruments to MarketDataSnapshot…")
+    print("\n  [4/4] Converting eligible instruments to MarketDataSnapshot…")
     adapter = InstrumentMarketDataAdapter()
     snapshots = adapter.to_many(eligible_instruments)
     skipped = len(eligible_instruments) - len(snapshots)

@@ -16,23 +16,21 @@ from risk_first_advisory.portfolio_layer.feasibility import (
     FC_TICKER_MISMATCH,
     HIGH_CONCENTRATION_THRESHOLD,
     LOW_DIVERSIFICATION_THRESHOLD,
-    PortfolioFeasibilityChecker,
-    PortfolioFeasibilityResult,
-    PortfolioFeasibilityStatus,
     WARN_CONCENTRATION_REQUIRED,
     WARN_LOW_DIVERSIFICATION,
     WARN_MIN_VOL_UNDETERMINED,
+    PortfolioFeasibilityChecker,
+    PortfolioFeasibilityResult,
+    PortfolioFeasibilityStatus,
 )
-
 from risk_first_advisory.portfolio_layer.generation import (
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
+    RC_VARIANT_INFEASIBLE,
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
     PortfolioVariant,
     PortfolioVariantMetadata,
-    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
-    RC_VARIANT_INFEASIBLE,
 )
-
 from risk_first_advisory.portfolio_layer.optimizer import (
     UTILITY_LAMBDA,
     WEIGHT_CLEANUP_THRESHOLD,

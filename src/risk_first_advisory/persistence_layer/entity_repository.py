@@ -34,10 +34,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Exceptions
@@ -138,7 +138,7 @@ class SQLiteEntityStore:
         if self._conn is not None:
             self._conn.close()
 
-    def __enter__(self) -> "SQLiteEntityStore":
+    def __enter__(self) -> SQLiteEntityStore:
         return self
 
     def __exit__(self, *_: Any) -> None:

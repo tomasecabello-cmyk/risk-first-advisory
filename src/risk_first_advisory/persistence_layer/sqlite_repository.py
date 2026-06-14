@@ -28,12 +28,11 @@ from typing import Any
 from risk_first_advisory.persistence_layer.repositories import (
     AuditRepository,
     RecordNotFoundError,
-    RepositoryError,
     ReportRepository,
+    RepositoryError,
     StoredRecord,
     WorkflowRunRepository,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -113,7 +112,7 @@ class SQLitePersistenceStore:
         if self._conn is not None:
             self._conn.close()
 
-    def __enter__(self) -> "SQLitePersistenceStore":
+    def __enter__(self) -> SQLitePersistenceStore:
         return self
 
     def __exit__(self, *_: Any) -> None:

@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # UTF-8 stdout/stderr (Windows cp1252 default crashea con ▶ ✓ ✗).
 # Mismo patrón que scripts/migrate.py: errors='replace' garantiza que nunca
@@ -236,6 +235,7 @@ def _install_stubs(db_path: Path, tokens_yaml: Path) -> None:
 def _build_test_client():
     """Construye un FastAPI TestClient con la app actual."""
     from fastapi.testclient import TestClient
+
     import risk_first_advisory.api_layer.main as main_mod
 
     return TestClient(main_mod.app, raise_server_exceptions=False)
@@ -567,7 +567,7 @@ def run_case_workflow_smoke_check(
     _section("Result")
     passed = len(failures) == 0
     if passed:
-        print(f"  ✓  PASS — case workflow smoke check completed")
+        print("  ✓  PASS — case workflow smoke check completed")
         print(f"      case_id          : {case_id}")
         print(f"      report_id        : {report_id}")
         print(f"      audit intact     : {audit_intact}")

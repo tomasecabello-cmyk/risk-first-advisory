@@ -4,8 +4,8 @@ from risk_first_advisory.persistence_layer.repositories import (
     InMemoryReportRepository,
     InMemoryWorkflowRunRepository,
     RecordNotFoundError,
-    RepositoryError,
     ReportRepository,
+    RepositoryError,
     StoredRecord,
     WorkflowRunRepository,
 )

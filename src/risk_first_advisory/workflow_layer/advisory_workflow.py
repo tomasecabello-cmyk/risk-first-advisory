@@ -60,7 +60,6 @@ from risk_first_advisory.rules_layer.esg_compliance import (
     ESGMetadataStore,
 )
 from risk_first_advisory.rules_layer.goal_feasibility import (
-    FeasibilityReport,
     GoalFeasibilityEngine,
 )
 from risk_first_advisory.rules_layer.instrument_suitability import (
@@ -72,7 +71,6 @@ from risk_first_advisory.rules_layer.product_governance import (
     ProductGovernanceRecord,
 )
 from risk_first_advisory.rules_layer.risk_budget_builder import RiskBudgetBuilder
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Reason codes del workflow

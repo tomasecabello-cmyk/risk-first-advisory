@@ -11,19 +11,15 @@ Principios:
 
 from __future__ import annotations
 
-import math
-
-import pandas as pd
 import numpy as np
-import pytest
+import pandas as pd
 
 from risk_first_advisory.data_layer.free_market_data import (
-    FreeMarketDataProvider,
     _MIN_OBSERVATIONS,
     _TRADING_DAYS_PER_YEAR,
+    FreeMarketDataProvider,
 )
 from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
-
 
 # ---------------------------------------------------------------------------
 # Helpers de construcción de DataFrames mock

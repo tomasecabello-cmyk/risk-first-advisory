@@ -51,7 +51,6 @@ from risk_first_advisory.config_layer.advisor_tokens import (
     get_default_advisor_tokens,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # AdvisorIdentity
 # ─────────────────────────────────────────────────────────────────────────────

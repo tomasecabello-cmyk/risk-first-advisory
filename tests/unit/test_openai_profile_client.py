@@ -17,12 +17,10 @@ Clases:
 from __future__ import annotations
 
 import json
-import types
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -502,6 +500,7 @@ class TestApiKeyNotLeaked:
         que es la forma de una clave real de OpenAI.
         """
         import re
+
         from risk_first_advisory.ai_layer import openai_profile_client as module
 
         # "sk-" seguido de 20+ chars alfanuméricos (patrón de key real)
@@ -1365,6 +1364,7 @@ class TestExtractPreferencesPrompt:
 
     def test_followup_prompt_no_api_key_hardcoded(self):
         import re
+
         from risk_first_advisory.ai_layer import openai_profile_client as module
 
         assert not re.search(r"sk-[A-Za-z0-9_-]{20,}", module._FOLLOWUP_SYSTEM_PROMPT), (

@@ -31,7 +31,7 @@ Clipping:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from risk_first_advisory.data_layer.data_quality import (
@@ -43,7 +43,6 @@ from risk_first_advisory.rules_layer.esg_compliance import (
     ESGComplianceResult,
     ESGComplianceStatus,
 )
-
 
 # ── Reason codes propios de esta capa ────────────────────────────────────────
 

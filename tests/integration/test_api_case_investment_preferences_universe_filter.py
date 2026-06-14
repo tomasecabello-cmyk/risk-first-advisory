@@ -32,7 +32,6 @@ from fastapi.testclient import TestClient
 import risk_first_advisory.api_layer.main as _main_module
 import risk_first_advisory.config_layer.advisor_tokens as _tokens_module
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Migrate import
 # ─────────────────────────────────────────────────────────────────────────────

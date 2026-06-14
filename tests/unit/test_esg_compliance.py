@@ -39,7 +39,6 @@ from risk_first_advisory.rules_layer.esg_compliance import (
     InstrumentESGMetadata,
 )
 
-
 FIXTURE_PATH = (
     Path(__file__).parent.parent
     / "fixtures"

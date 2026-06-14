@@ -14,7 +14,6 @@ from typing import Any
 
 from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 
-
 # ---------------------------------------------------------------------------
 # Normalización de asset_class
 # ---------------------------------------------------------------------------

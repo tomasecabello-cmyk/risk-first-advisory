@@ -36,7 +36,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Configurar stdout/stderr para UTF-8 cuando es posible.
 #

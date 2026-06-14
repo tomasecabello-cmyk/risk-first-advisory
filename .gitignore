@@ -17,3 +17,6 @@ data/
 # Real advisor tokens config (Phase 2). Only the .example template is committed.
 config/advisor_tokens.yaml
 .gstack/
+
+# capturas de trabajo (no es codigo)
+screenshots analysis/

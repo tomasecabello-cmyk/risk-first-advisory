@@ -23,7 +23,6 @@ from fastapi.testclient import TestClient
 import risk_first_advisory.api_layer.main as _main_module
 import risk_first_advisory.config_layer.advisor_tokens as _advisor_tokens_module
 
-
 _AUTH_URL = "/auth/me"
 _GENERIC_AUTH_ERROR = "Invalid or missing advisor authentication token."
 

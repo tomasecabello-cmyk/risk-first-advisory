@@ -33,7 +33,6 @@ from risk_first_advisory.universe_layer.instruments import (
     InstrumentType,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers — minimal FinancialInstrument factories
 # ─────────────────────────────────────────────────────────────────────────────
@@ -575,7 +574,6 @@ class TestGALI28Integration:
         from risk_first_advisory.universe_layer.csv_provider import (
             CSVInstrumentUniverseProvider,
         )
-        from risk_first_advisory.universe_layer.instruments import InstrumentType
         from risk_first_advisory.universe_layer.preference_filter import (
             PreferenceFilterEngine,
         )
@@ -606,7 +604,7 @@ class TestGALI28Integration:
         snaps = adapter.to_many(eligible)
 
         # Universe has grown: multiple Balanz non-Energy CORPORATE_BONDs are now eligible.
-        assert len(snaps) >= 1, f"Expected at least 1 snapshot, got 0"
+        assert len(snaps) >= 1, "Expected at least 1 snapshot, got 0"
         gali28 = next((s for s in snaps if s.ticker == "GALI28"), None)
         assert gali28 is not None, (
             f"GALI28 not found in snapshots: {[s.ticker for s in snaps]}"

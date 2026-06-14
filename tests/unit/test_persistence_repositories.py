@@ -27,7 +27,6 @@ from risk_first_advisory.persistence_layer import (
 from risk_first_advisory.reporting_layer import MarkdownReport
 from risk_first_advisory.workflow_layer import AdvisoryWorkflowResult, AdvisoryWorkflowStatus
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────

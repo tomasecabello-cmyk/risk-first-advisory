@@ -42,7 +42,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # ── UTF-8 stdout/stderr (Windows cp1252) ─────────────────────────────────────
 for _stream in (sys.stdout, sys.stderr):
     reconfigure = getattr(_stream, "reconfigure", None)
@@ -302,7 +301,7 @@ def bootstrap_local_demo(
     _section("bootstrap_local_demo — Phase 3 local environment")
     _info(f"Repo root  : {repo}")
     _info(f"DB path    : {db_path}")
-    _info(f"Mode       : check-only" if check_only else f"Mode       : full bootstrap")
+    _info("Mode       : check-only" if check_only else "Mode       : full bootstrap")
 
     try:
         # ── 1. Python + repo files ─────────────────────────────────────────
@@ -439,9 +438,9 @@ def bootstrap_local_demo(
     _section("Result")
     passed = len(failures) == 0
     if passed:
-        print(f"  ✓  PASS — local demo environment is ready")
+        print("  ✓  PASS — local demo environment is ready")
         if check_only:
-            print(f"      (check-only: DB / seed no fueron tocados)")
+            print("      (check-only: DB / seed no fueron tocados)")
     else:
         print(f"  ✗  FAIL — {len(failures)} issue(s):")
         for f in failures:

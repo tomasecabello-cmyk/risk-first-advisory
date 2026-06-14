@@ -221,7 +221,7 @@ def _print_section_f_candidates(candidate_set: Any) -> None:
             print("  (no active positions)")
 
     if candidate_set.notes:
-        print(f"\n  Coordinator notes:")
+        print("\n  Coordinator notes:")
         for note in candidate_set.notes:
             print(f"    • {note}")
 
@@ -328,7 +328,7 @@ def run(preferences: str, profile: str, debug: bool) -> None:
     _print_section_a(preferences)
 
     # ── Step 1: AI extraction ─────────────────────────────────────────────────
-    print(f"\n  [1/5] Calling OpenAI to extract structured preferences…")
+    print("\n  [1/5] Calling OpenAI to extract structured preferences…")
     try:
         client = OpenAIProfileClient()
     except ValueError as exc:
@@ -358,7 +358,7 @@ def run(preferences: str, profile: str, debug: bool) -> None:
     _print_section_b(ai_result)
 
     # ── Step 2: Load CSV universe ─────────────────────────────────────────────
-    print(f"\n  [2/5] Loading instrument universe from CSV…")
+    print("\n  [2/5] Loading instrument universe from CSV…")
     if not _UNIVERSE_CSV.exists():
         print(f"\n  ✗  Universe CSV not found: {_UNIVERSE_CSV}")
         return
@@ -375,7 +375,7 @@ def run(preferences: str, profile: str, debug: bool) -> None:
     print(f"     Loaded {len(universe)} instruments.")
 
     # ── Step 3: Filter ────────────────────────────────────────────────────────
-    print(f"\n  [3/5] Applying preference filter…")
+    print("\n  [3/5] Applying preference filter…")
     filter_preferences = {k: v for k, v in ai_result.items() if k in _FILTER_KEYS}
     try:
         filter_result = PreferenceFilterEngine().apply(universe, filter_preferences)
@@ -397,7 +397,7 @@ def run(preferences: str, profile: str, debug: bool) -> None:
     )
 
     # ── Step 4: Convert to snapshots ──────────────────────────────────────────
-    print(f"\n  [4/5] Converting eligible instruments to MarketDataSnapshot…")
+    print("\n  [4/5] Converting eligible instruments to MarketDataSnapshot…")
     all_snapshots = InstrumentMarketDataAdapter().to_many(eligible_instruments)
     usable_snapshots = [s for s in all_snapshots if s.is_usable]
 
@@ -440,7 +440,7 @@ def run(preferences: str, profile: str, debug: bool) -> None:
         return
 
     # ── Step 5: Portfolio generation ──────────────────────────────────────────
-    print(f"\n  [5/5] Generating candidate portfolios…")
+    print("\n  [5/5] Generating candidate portfolios…")
 
     return_estimates = ReturnEstimator().estimate_many(usable_snapshots)
     covariance_matrix = CovarianceEngine().build(usable_snapshots)

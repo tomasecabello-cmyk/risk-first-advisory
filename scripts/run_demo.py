@@ -39,18 +39,17 @@ from risk_first_advisory.kyc.models import (
     KYCData,
 )
 from risk_first_advisory.portfolio_layer.generation import PortfolioVariant
+from risk_first_advisory.reporting_layer import MarkdownReportGenerator
 from risk_first_advisory.rules_layer.esg_compliance import ESGMetadataStore
 from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityMatrix,
 )
 from risk_first_advisory.rules_layer.product_governance import ApprovedProductUniverse
-from risk_first_advisory.reporting_layer import MarkdownReportGenerator
 from risk_first_advisory.workflow_layer import (
     AdvisoryWorkflowCoordinator,
     AdvisoryWorkflowResult,
     AdvisoryWorkflowStatus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Paths a los fixtures

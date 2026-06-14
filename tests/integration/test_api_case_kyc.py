@@ -38,7 +38,6 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     SQLiteKYCSubmissionRepository,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # migrate import
 # ─────────────────────────────────────────────────────────────────────────────

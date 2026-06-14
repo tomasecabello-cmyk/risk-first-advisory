@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixture de payload completo (caso real basado en el demo)
 # ─────────────────────────────────────────────────────────────────────────────

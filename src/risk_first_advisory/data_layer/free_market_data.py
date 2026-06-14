@@ -21,12 +21,11 @@ Extensibilidad:
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import pandas as pd
 
 from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
-
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -178,7 +177,7 @@ class FreeMarketDataProvider:
             stale=False,
             missing_fields=["expense_ratio"],  # marcado como faltante para DataQualityGate
             notes=[
-                f"source=yfinance",
+                "source=yfinance",
                 f"period={self._lookback_period}",
                 f"interval={self._interval}",
                 f"observations={len(daily_returns)}",

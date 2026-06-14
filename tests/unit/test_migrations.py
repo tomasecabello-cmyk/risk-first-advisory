@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Importar el módulo `migrate` desde scripts/ sin contaminar sys.path
 # globalmente (importlib es más robusto que sys.path.insert + import).
@@ -54,7 +53,6 @@ _spec.loader.exec_module(migrate)
 from risk_first_advisory.persistence_layer.sqlite_repository import (  # noqa: E402
     SQLitePersistenceStore,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Schema esperado tras 0001

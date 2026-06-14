@@ -29,7 +29,6 @@ from risk_first_advisory.config_layer.risk_assumptions import (
     load_risk_profile_params,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers para construir YAMLs inválidos rápidamente en tmp_path
 # ─────────────────────────────────────────────────────────────────────────────

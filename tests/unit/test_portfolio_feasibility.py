@@ -34,13 +34,12 @@ from risk_first_advisory.portfolio_layer.feasibility import (
     FC_MIN_VOL_EXCEEDS_BUDGET,
     FC_NO_ASSETS,
     FC_TICKER_MISMATCH,
+    WARN_CONCENTRATION_REQUIRED,
+    WARN_LOW_DIVERSIFICATION,
     PortfolioFeasibilityChecker,
     PortfolioFeasibilityResult,
     PortfolioFeasibilityStatus,
-    WARN_CONCENTRATION_REQUIRED,
-    WARN_LOW_DIVERSIFICATION,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Helpers

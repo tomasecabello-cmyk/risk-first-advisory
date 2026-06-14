@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Enums
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,12 +205,12 @@ class InstrumentUniverse:
 
     # ── filters (all preserve insertion order) ───────────────────────────────
 
-    def filter_by_entity(self, entity: str) -> "InstrumentUniverse":
+    def filter_by_entity(self, entity: str) -> InstrumentUniverse:
         return InstrumentUniverse(
             instruments=[i for i in self.instruments if i.is_available_at(entity)]
         )
 
-    def filter_by_currency(self, currency: str) -> "InstrumentUniverse":
+    def filter_by_currency(self, currency: str) -> InstrumentUniverse:
         upper = currency.strip().upper()
         return InstrumentUniverse(
             instruments=[
@@ -220,7 +219,7 @@ class InstrumentUniverse:
             ]
         )
 
-    def filter_by_country(self, country: str) -> "InstrumentUniverse":
+    def filter_by_country(self, country: str) -> InstrumentUniverse:
         upper = country.strip().upper()
         return InstrumentUniverse(
             instruments=[
@@ -231,18 +230,18 @@ class InstrumentUniverse:
 
     def filter_by_instrument_type(
         self, types: list[InstrumentType]
-    ) -> "InstrumentUniverse":
+    ) -> InstrumentUniverse:
         type_set = set(types)
         return InstrumentUniverse(
             instruments=[i for i in self.instruments if i.instrument_type in type_set]
         )
 
-    def filter_hard_dollar_only(self) -> "InstrumentUniverse":
+    def filter_hard_dollar_only(self) -> InstrumentUniverse:
         return InstrumentUniverse(
             instruments=[i for i in self.instruments if i.hard_dollar]
         )
 
-    def filter_min_liquidity(self, min_liquidity: float) -> "InstrumentUniverse":
+    def filter_min_liquidity(self, min_liquidity: float) -> InstrumentUniverse:
         return InstrumentUniverse(
             instruments=[
                 i for i in self.instruments if i.liquidity_score >= min_liquidity

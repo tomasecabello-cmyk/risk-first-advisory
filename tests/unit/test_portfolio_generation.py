@@ -7,6 +7,7 @@ Cubre todos los requisitos del spec.
 from __future__ import annotations
 
 import json
+
 import pytest
 
 from risk_first_advisory.data_layer.covariance import CovarianceEngine
@@ -15,25 +16,22 @@ from risk_first_advisory.data_layer.return_estimator import ReturnEstimate
 from risk_first_advisory.models.risk_budget import RiskBudget
 from risk_first_advisory.portfolio_layer.feasibility import (
     FC_MAX_SINGLE_ASSET_TOO_LOW,
-    FC_MIN_VOL_EXCEEDS_BUDGET,
-    PortfolioFeasibilityChecker,
     PortfolioFeasibilityResult,
     PortfolioFeasibilityStatus,
 )
 from risk_first_advisory.portfolio_layer.generation import (
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
+    RC_VARIANT_INFEASIBLE,
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
     PortfolioVariant,
     PortfolioVariantMetadata,
-    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
-    RC_VARIANT_INFEASIBLE,
 )
 from risk_first_advisory.portfolio_layer.optimizer import (
     OptimizationObjective,
     OptimizedPortfolio,
     PortfolioOptimizer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

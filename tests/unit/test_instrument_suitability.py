@@ -20,7 +20,6 @@ from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityStatus,
 )
 
-
 FIXTURE_PATH = (
     Path(__file__).parent.parent
     / "fixtures"

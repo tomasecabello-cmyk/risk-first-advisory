@@ -28,11 +28,10 @@ from risk_first_advisory.human_layer.override_approval import (
     OverrideDecision,
 )
 from risk_first_advisory.portfolio_layer.generation import (
+    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
     PortfolioVariant,
     PortfolioVariantMetadata,
-    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

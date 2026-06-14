@@ -238,7 +238,7 @@ class FinancialGoalRequest(BaseModel):
     annual_contribution: float = Field(default=0.0, ge=0.0)
 
     @model_validator(mode="after")
-    def check_amounts(self) -> "FinancialGoalRequest":
+    def check_amounts(self) -> FinancialGoalRequest:
         if (
             self.target_amount < self.initial_amount
             and self.annual_contribution == 0.0
@@ -623,7 +623,7 @@ class AdvisorProfileApprovalRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _validate_decision_consistency(self) -> "AdvisorProfileApprovalRequest":
+    def _validate_decision_consistency(self) -> AdvisorProfileApprovalRequest:
         if self.decision == "approve":
             if self.approved_profile is None:
                 # Completar approved_profile con proposed_profile para
@@ -1565,7 +1565,7 @@ class CaseAdvisorProfileApprovalCreateRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _cross_validate_decision(self) -> "CaseAdvisorProfileApprovalCreateRequest":
+    def _cross_validate_decision(self) -> CaseAdvisorProfileApprovalCreateRequest:
         # Si proposed_profile NO viene, no se puede validar coherencia acá;
         # el endpoint lo deriva del último análisis o devuelve 422.
         if self.proposed_profile is None:
@@ -1681,7 +1681,7 @@ class CaseInvestmentPreferenceCreateRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _at_least_one_input(self) -> "CaseInvestmentPreferenceCreateRequest":
+    def _at_least_one_input(self) -> CaseInvestmentPreferenceCreateRequest:
         if self.natural_language_preferences is None and self.structured_preferences is None:
             raise ValueError(
                 "Debe proveerse al menos uno de "

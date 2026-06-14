@@ -21,7 +21,6 @@ from risk_first_advisory.kyc.models import (
     InvestmentObjective,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixture base: KYCDataRequest mínimo válido
 # ─────────────────────────────────────────────────────────────────────────────

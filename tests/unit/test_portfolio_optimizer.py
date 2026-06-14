@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+
 import pytest
 
 from risk_first_advisory.data_layer.covariance import CovarianceEngine, CovarianceMatrix
@@ -23,10 +24,8 @@ from risk_first_advisory.models.risk_budget import RiskBudget
 from risk_first_advisory.portfolio_layer.optimizer import (
     OptimizationInput,
     OptimizationObjective,
-    OptimizedPortfolio,
     PortfolioOptimizer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

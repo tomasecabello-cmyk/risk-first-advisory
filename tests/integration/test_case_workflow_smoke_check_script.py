@@ -17,13 +17,11 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Importar el script vía importlib (no es paquete instalable).

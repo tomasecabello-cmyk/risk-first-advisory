@@ -49,14 +49,13 @@ from risk_first_advisory.rules_layer.product_governance import (
     ApprovedProductUniverse,
 )
 from risk_first_advisory.workflow_layer import (
-    AdvisoryWorkflowCoordinator,
-    AdvisoryWorkflowResult,
-    AdvisoryWorkflowStatus,
     RC_GOAL_FEASIBILITY_BLOCKED,
     RC_PORTFOLIO_EMPTY_FINAL_UNIVERSE,
     RC_PORTFOLIO_GENERATION_BLOCKED,
+    AdvisoryWorkflowCoordinator,
+    AdvisoryWorkflowResult,
+    AdvisoryWorkflowStatus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Paths a fixtures existentes

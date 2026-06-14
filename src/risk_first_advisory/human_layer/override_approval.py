@@ -13,7 +13,6 @@ de workflow/UI futura.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -22,9 +21,7 @@ from typing import Any
 from risk_first_advisory.portfolio_layer.generation import (
     PortfolioVariant,
     PortfolioVariantMetadata,
-    RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
 )
-
 
 # ---------------------------------------------------------------------------
 # Enums

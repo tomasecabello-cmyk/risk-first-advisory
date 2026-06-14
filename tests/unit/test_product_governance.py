@@ -23,7 +23,6 @@ from risk_first_advisory.rules_layer.product_governance import (
     is_watchlist,
 )
 
-
 FIXTURE_PATH = (
     Path(__file__).parent.parent
     / "fixtures"

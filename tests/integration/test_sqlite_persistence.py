@@ -15,7 +15,6 @@ import pytest
 
 from risk_first_advisory.persistence_layer.repositories import (
     RecordNotFoundError,
-    RepositoryError,
     StoredRecord,
 )
 from risk_first_advisory.persistence_layer.sqlite_repository import (
@@ -26,7 +25,6 @@ from risk_first_advisory.persistence_layer.sqlite_repository import (
 )
 from risk_first_advisory.reporting_layer import MarkdownReport
 from risk_first_advisory.workflow_layer import AdvisoryWorkflowResult, AdvisoryWorkflowStatus
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers

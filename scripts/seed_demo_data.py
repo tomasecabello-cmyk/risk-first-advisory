@@ -28,13 +28,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import sys
-import tempfile
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTF-8 stdout/stderr (Windows cp1252 crashea con ▶ ✓ ✗).
@@ -164,6 +161,7 @@ def _install_seed_environment(db_path: Path, tokens_yaml: Path):
     Returns (main_module, tokens_module) ready to be used by TestClient.
     """
     import os
+
     import risk_first_advisory.api_layer.main as main_mod
     import risk_first_advisory.config_layer.advisor_tokens as tokens_mod
 
@@ -400,23 +398,23 @@ def seed_demo_data(
     _section("Result")
     passed = len(failures) == 0
     if passed:
-        print(f"  ✓  PASS — demo data ready")
+        print("  ✓  PASS — demo data ready")
         print(f"      firm_id    : {firm_id}    ({firm_st})")
         print(f"      advisor_id : {advisor_id} ({advisor_st})")
         print(f"      client_id  : {client_id}  ({client_st})")
         print(f"      case_id    : {case_id}    ({case_st})")
         print()
-        print(f"  Next steps:")
-        print(f"    Backend  : uvicorn risk_first_advisory.api_layer.main:app --reload")
-        print(f"               http://127.0.0.1:8000/docs")
-        print(f"    Frontend : python -m http.server 5500 -d frontend")
-        print(f"               http://127.0.0.1:5500")
-        print(f"    Tokens   :")
-        print(f"      dev-admin-token       — admin role (setup)")
-        print(f"      dev-advisor-token     — advisor role (workflow)")
-        print(f"      dev-compliance-token  — audit/verify + ai-logs")
-        print(f"      (Frontend default es dev-advisor-token; cambiar en input")
-        print(f"       'Bearer token' del Case Dashboard según operación)")
+        print("  Next steps:")
+        print("    Backend  : uvicorn risk_first_advisory.api_layer.main:app --reload")
+        print("               http://127.0.0.1:8000/docs")
+        print("    Frontend : python -m http.server 5500 -d frontend")
+        print("               http://127.0.0.1:5500")
+        print("    Tokens   :")
+        print("      dev-admin-token       — admin role (setup)")
+        print("      dev-advisor-token     — advisor role (workflow)")
+        print("      dev-compliance-token  — audit/verify + ai-logs")
+        print("      (Frontend default es dev-advisor-token; cambiar en input")
+        print("       'Bearer token' del Case Dashboard según operación)")
     else:
         print(f"  ✗  FAIL — {len(failures)} failure(s):")
         for f in failures:

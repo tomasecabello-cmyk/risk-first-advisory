@@ -34,7 +34,6 @@ from risk_first_advisory.data_layer.market_data import (
     MarketDataSnapshot,
 )
 
-
 # Códigos de motivo específicos de la capa de calidad de datos.
 REASON_DATA_STALE = "DATA_STALE"
 REASON_CRITICAL_FIELD_MISSING = "DATA_CRITICAL_FIELD_MISSING"

@@ -45,7 +45,6 @@ from risk_first_advisory.portfolio_layer.optimizer import (
     PortfolioOptimizer,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constantes / reason codes
 # ---------------------------------------------------------------------------

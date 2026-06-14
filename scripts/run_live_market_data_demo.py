@@ -144,7 +144,7 @@ def main(period: str, interval: str, debug: bool) -> int:
     print(f"  Universo: {len(TICKERS)} ETFs  |  período: {period}  |  intervalo: {interval}")
     print("=" * 70)
     print()
-    print(f"  Descargando datos desde yfinance... (esto puede tardar unos segundos)")
+    print("  Descargando datos desde yfinance... (esto puede tardar unos segundos)")
     print()
 
     # ── 1. Construir provider ──────────────────────────────────────────────
@@ -376,7 +376,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[Interrompido por el usuario]")
         exit_code = 0
-    except Exception as exc:
+    except Exception:
         if args.debug:
             traceback.print_exc()
         else:

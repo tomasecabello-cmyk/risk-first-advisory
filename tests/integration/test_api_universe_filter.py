@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from risk_first_advisory.api_layer.main import app
@@ -41,7 +40,7 @@ _URL = "/universe/filter-demo"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _post(body: dict) -> "requests.Response":  # type: ignore[name-defined]
+def _post(body: dict) -> requests.Response:  # type: ignore[name-defined]
     return _CLIENT.post(_URL, json=body)
 
 

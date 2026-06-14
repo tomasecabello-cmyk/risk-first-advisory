@@ -11,14 +11,14 @@ Cubre todos los requisitos funcionales del spec:
 """
 
 import json
+
 import pytest
 
-from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 from risk_first_advisory.data_layer.covariance import (
     CovarianceEngine,
     CovarianceMatrix,
 )
-
+from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 
 # ---------------------------------------------------------------------------
 # Helpers de fixtures

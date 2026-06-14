@@ -10,13 +10,11 @@ Política de diseño:
 
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MarkdownReport
@@ -266,8 +264,8 @@ def _section_universe_summary(result: Any) -> str:
     lines = [
         "## Universe Summary",
         "",
-        f"| Stage | Tickers |",
-        f"|---|---|",
+        "| Stage | Tickers |",
+        "|---|---|",
         f"| Governance passed | {len(gov)} ({', '.join(gov) or 'none'}) |",
         f"| Suitability passed | {len(suit)} ({', '.join(suit) or 'none'}) |",
         f"| ESG blocked | {len(esg_blocked)} ({', '.join(esg_blocked) or 'none'}) |",

@@ -28,7 +28,6 @@ import yaml
 
 from risk_first_advisory.kyc.models import ESGExclusion, ESGPreference, ESGProfile
 
-
 # Códigos de motivo específicos de ESG.
 # Las capas superiores pueden mapearlos al catálogo de ReasonCode si lo desean.
 REASON_METADATA_MISSING = "ESG_METADATA_MISSING"

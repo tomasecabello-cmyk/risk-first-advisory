@@ -9,7 +9,6 @@ workflow_layer completo. Esto mantiene los tests rápidos y aislados.
 from __future__ import annotations
 
 import json
-import math
 import types
 from pathlib import Path
 
@@ -17,7 +16,6 @@ import pytest
 
 from risk_first_advisory.reporting_layer import MarkdownReport, MarkdownReportGenerator
 from risk_first_advisory.workflow_layer import AdvisoryWorkflowStatus
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers para construir objetos fake
@@ -175,9 +173,9 @@ def _make_candidate_set_with_metadata(with_growth_override: bool = False):
     RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET en reason_codes.
     """
     from risk_first_advisory.portfolio_layer.generation import (
+        RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
         PortfolioVariant,
         PortfolioVariantMetadata,
-        RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET,
     )
 
     def _neutral(variant):

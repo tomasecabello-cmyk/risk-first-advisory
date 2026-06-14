@@ -20,7 +20,6 @@ from risk_first_advisory.data_layer.market_data import (
     MockMarketDataProvider,
 )
 
-
 FIXTURE_PATH = (
     Path(__file__).parent.parent
     / "fixtures"

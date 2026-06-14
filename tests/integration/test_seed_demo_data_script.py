@@ -19,13 +19,11 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Importar el script vía importlib
@@ -103,7 +101,8 @@ class TestIdempotency:
         _seed.seed_demo_data(db_path=db_path)
         # Query DB directly via repos to count.
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteEntityStore, SQLiteFirmRepository,
+            SQLiteEntityStore,
+            SQLiteFirmRepository,
         )
         with SQLiteEntityStore(db_path) as store:
             firms = SQLiteFirmRepository(store).list_all()
@@ -114,7 +113,8 @@ class TestIdempotency:
         _seed.seed_demo_data(db_path=db_path)
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteAdvisoryCaseRepository, SQLiteEntityStore,
+            SQLiteAdvisoryCaseRepository,
+            SQLiteEntityStore,
         )
         with SQLiteEntityStore(db_path) as store:
             cases = SQLiteAdvisoryCaseRepository(store).list_all()
@@ -127,7 +127,8 @@ class TestDbContents:
         db_path = tmp_path / "seed.db"
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteEntityStore, SQLiteFirmRepository,
+            SQLiteEntityStore,
+            SQLiteFirmRepository,
         )
         with SQLiteEntityStore(db_path) as store:
             firm = SQLiteFirmRepository(store).get("firm_demo_local")
@@ -139,7 +140,8 @@ class TestDbContents:
         db_path = tmp_path / "seed.db"
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteAdvisorRepository, SQLiteEntityStore,
+            SQLiteAdvisorRepository,
+            SQLiteEntityStore,
         )
         with SQLiteEntityStore(db_path) as store:
             adv = SQLiteAdvisorRepository(store).get("advisor_demo_local")
@@ -151,7 +153,8 @@ class TestDbContents:
         db_path = tmp_path / "seed.db"
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteClientRepository, SQLiteEntityStore,
+            SQLiteClientRepository,
+            SQLiteEntityStore,
         )
         with SQLiteEntityStore(db_path) as store:
             cli = SQLiteClientRepository(store).get("client_demo_local")
@@ -165,7 +168,8 @@ class TestDbContents:
         db_path = tmp_path / "seed.db"
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteAdvisoryCaseRepository, SQLiteEntityStore,
+            SQLiteAdvisoryCaseRepository,
+            SQLiteEntityStore,
         )
         with SQLiteEntityStore(db_path) as store:
             case = SQLiteAdvisoryCaseRepository(store).get("case_demo_local")
@@ -181,7 +185,8 @@ class TestDbContents:
         db_path = tmp_path / "seed.db"
         _seed.seed_demo_data(db_path=db_path)
         from risk_first_advisory.persistence_layer.entity_repository import (
-            SQLiteAuditEventRepository, SQLiteEntityStore,
+            SQLiteAuditEventRepository,
+            SQLiteEntityStore,
         )
         with SQLiteEntityStore(db_path) as store:
             events = SQLiteAuditEventRepository(store).list_by_case("case_demo_local")

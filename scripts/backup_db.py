@@ -31,7 +31,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-
 # Stdout/stderr en UTF-8 para que la consola Windows no crashee en caracteres
 # fuera de cp1252. Mismo patrón que scripts/migrate.py.
 for _stream in (sys.stdout, sys.stderr):

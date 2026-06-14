@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers de formateo (privados)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -101,8 +100,8 @@ def _section_executive_summary(payload: dict) -> str:
     lines = [
         "## 1. Executive Summary",
         "",
-        f"| Field | Value |",
-        f"|---|---|",
+        "| Field | Value |",
+        "|---|---|",
         _table_row("Client ID", payload.get("client_id", "—")),
         _table_row("Profile", payload.get("profile", "—")),
         _table_row("Status", payload.get("status", "—")),

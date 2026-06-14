@@ -217,7 +217,7 @@ def _print_portfolio(variant_name: str, portfolio, metadata) -> None:
             exceeded = ", ".join(metadata.exceeded_constraints) or "—"
             print(f"     ⚠  Requiere advisor override  (excede: {exceeded})")
         else:
-            print(f"     ✓  Dentro del risk budget aprobado")
+            print("     ✓  Dentro del risk budget aprobado")
 
     # Pesos (ordenados mayor a menor, solo > 0)
     active_weights = {
@@ -519,7 +519,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[Interrumpido por el usuario]")
         exit_code = 0
-    except Exception as exc:
+    except Exception:
         if args.debug:
             traceback.print_exc()
         else:

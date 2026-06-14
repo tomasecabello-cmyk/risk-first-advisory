@@ -25,7 +25,6 @@ from risk_first_advisory.persistence_layer.entity_repository import (
     redact_ai_input,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # client_id redaction
 # ─────────────────────────────────────────────────────────────────────────────

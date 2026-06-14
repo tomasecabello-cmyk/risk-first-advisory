@@ -22,11 +22,10 @@ from __future__ import annotations
 import math
 
 from pptx import Presentation
-from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.util import Inches, Pt
 
 # ─────────────────────────────────────────────────────────────────────
 # Palette  (misma del producto y del pitch deck — coherencia visual)

@@ -18,8 +18,12 @@ Coverage:
 from __future__ import annotations
 
 import pathlib
+
 import pytest
 
+from risk_first_advisory.universe_layer.csv_provider import (
+    CSVInstrumentUniverseProvider,
+)
 from risk_first_advisory.universe_layer.instruments import (
     AssetClass,
     FinancialInstrument,
@@ -30,9 +34,6 @@ from risk_first_advisory.universe_layer.preference_filter import (
     InstrumentExclusion,
     PreferenceFilterEngine,
     PreferenceFilterResult,
-)
-from risk_first_advisory.universe_layer.csv_provider import (
-    CSVInstrumentUniverseProvider,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
