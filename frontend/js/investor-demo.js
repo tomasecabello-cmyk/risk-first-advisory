@@ -142,32 +142,40 @@ function idemoBuildKycPayload() {
   // y el backend la computa de hechos (líquido/ingreso/horizonte/estabilidad/
   // dependientes/gastos cubiertos). risk_capacity_score queda como placeholder
   // (el schema lo exige) pero el motor lo ignora.
+  // TOLERANCIA: cuestionario Grable-Lytton validado (no slider). Se manda
+  // tolerance_from_questionnaire=true + las respuestas; risk_tolerance_score
+  // queda como placeholder (el schema lo exige) pero el motor lo ignora.
   const liqMap = { baja: 3, media: 5, alta: 8 };
-  const risk = idemoInt("idemo-risk", 6);
   const liquidNeed = liqMap[idemoStr("idemo-liquidity", "media")] || 5;
   const liquidNW = idemoNumber("idemo-liquid", 150000);
+  const tolAnswers = idemoToleranceAnswers();
+  const tolEst = idemoEstimatedTolerance();  // 1-10, solo para placeholders coherentes
 
   return {
     age:                          idemoInt("idemo-age", 42),
-    risk_tolerance_score:         risk,
-    risk_capacity_score:          risk,  // placeholder; ver capacity_from_facts
+    risk_tolerance_score:         Math.max(1, Math.min(10, Math.round(tolEst))),  // placeholder
+    risk_capacity_score:          5,  // placeholder; ver capacity_from_facts
     liquidity_need_score:         liquidNeed,
     investment_horizon_years:     idemoInt("idemo-horizon", 10),
     investment_experience:        idemoStr("idemo-experience", "moderada"),
     income_stability:             idemoStr("idemo-income-stability", "stable"),
     net_worth:                    liquidNW * 2,  // estimación razonable
     liquid_net_worth:             liquidNW,
-    max_acceptable_drawdown_pct:  Math.min(Math.max(risk * 3, 5), 50),
+    max_acceptable_drawdown_pct:  Math.min(Math.max(Math.round(tolEst) * 3, 5), 50),
     jurisdiction:                 idemoStr("idemo-jurisdiction", "AR"),
     preferred_currency:           idemoStr("idemo-currency", "USD"),
     investment_objective:         idemoStr("idemo-objective", "balanced"),
     annual_income_usd:            idemoNumber("idemo-income", 80000),
+    // Tolerancia medida con el cuestionario (no autoreportada en slider):
+    tolerance_from_questionnaire: true,
+    tolerance_answers:            tolAnswers,
     // Capacidad medida de hechos (no autoreportada):
     capacity_from_facts:          true,
     dependents_count:             idemoInt("idemo-dependents", 0),
     essential_expenses_covered:   idemoStr("idemo-expenses-covered", "si") === "si",
     open_investment_goal:         idemoStr("idemo-open-goal", "") || null,
-    open_risk_reaction:           idemoStr("idemo-open-reaction", "") || null,
+    // Señal revelada del Risk Gap: reacción estructurada a una caída del 30%.
+    open_risk_reaction:           idemoStr("idemo-open-reaction-choice", "") || null,
     open_past_experience:         idemoStr("idemo-open-experience", "") || null,
     open_concerns:                idemoStr("idemo-open-concerns", "") || null,
   };
@@ -995,12 +1003,76 @@ function idemoBuildAuditExtraHtml(verifyResp) {
     : "";
 }
 
+// ── Cuestionario de tolerancia (Grable-Lytton) — render dinámico ───────
+// Trae los ítems del backend (sin scoring autoritativo: el server recalcula),
+// los renderiza, y muestra un preview de tolerancia que se actualiza en vivo.
+window.idemoGL = window.idemoGL || null;
+
+async function idemoLoadQuestionnaire() {
+  const cont = document.getElementById("idemo-gl-container");
+  if (!cont) return;
+  const res = await idemoApi("GET", "/kyc/tolerance-questionnaire");
+  if (!res.ok || !res.json || !Array.isArray(res.json.items)) {
+    cont.innerHTML =
+      `<div style="color:#c60;font-size:13px;">No se pudo cargar el cuestionario ` +
+      `(HTTP ${res.status}). ¿El backend está en :8000?</div>`;
+    return;
+  }
+  window.idemoGL = { rawMin: res.json.raw_min, rawMax: res.json.raw_max, n: res.json.items.length };
+  cont.innerHTML = res.json.items.map((item, i) => {
+    const opts = item.options.map((o) =>
+      `<label style="font-size:13px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:2px 0;">` +
+        `<input type="radio" name="gl-${item.id}" value="${escapeHTML(o.key)}" data-points="${Number(o.points) || 0}" />` +
+        `<span>${escapeHTML(o.text)}</span></label>`
+    ).join("");
+    return `<div class="idemo-gl-q" data-qid="${escapeHTML(item.id)}" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">` +
+      `<div style="font-weight:600;font-size:13px;margin-bottom:6px;">${i + 1}. ${escapeHTML(item.text)}</div>` +
+      `<div style="display:grid;gap:2px;">${opts}</div></div>`;
+  }).join("");
+  cont.addEventListener("change", idemoUpdateTolerancePreview);
+  idemoUpdateTolerancePreview();
+}
+
+function idemoEstimatedTolerance() {
+  if (!window.idemoGL) return 5;
+  const checked = document.querySelectorAll("#idemo-gl-container input[type=radio]:checked");
+  let sum = 0;
+  checked.forEach((c) => { sum += Number(c.getAttribute("data-points")) || 0; });
+  const n = window.idemoGL.n || 13;
+  // Relleno mínimo (1) para los sin responder, igual que el backend (conservador).
+  const raw = sum + (n - checked.length) * 1;
+  const t = 1 + (raw - window.idemoGL.rawMin) / (window.idemoGL.rawMax - window.idemoGL.rawMin) * 9;
+  return Math.max(1, Math.min(10, t));
+}
+
+function idemoToleranceAnswers() {
+  const ans = {};
+  document.querySelectorAll("#idemo-gl-container .idemo-gl-q").forEach((q) => {
+    const checked = q.querySelector("input[type=radio]:checked");
+    if (checked) ans[q.getAttribute("data-qid")] = checked.value;
+  });
+  return ans;
+}
+
+function idemoUpdateTolerancePreview() {
+  const count = document.querySelectorAll("#idemo-gl-container input[type=radio]:checked").length;
+  const t = idemoEstimatedTolerance();
+  const n = (window.idemoGL && window.idemoGL.n) || 13;
+  const scoreEl = document.getElementById("idemo-gl-score");
+  const countEl = document.getElementById("idemo-gl-count");
+  const prev = document.getElementById("idemo-risk-preview");
+  if (countEl) countEl.textContent = String(count);
+  if (scoreEl) scoreEl.textContent = count ? `${t.toFixed(1)}/10` : "—";
+  if (prev) prev.value = count ? `${t.toFixed(1)}/10 (G-L · ${count}/${n})` : "— responder cuestionario";
+}
+
 // ── Init: render checklist al cargar ──────────────────────────────────
 
 (function () {
+  function _idemoInit() { idemoRenderProgress(); idemoLoadQuestionnaire(); }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", idemoRenderProgress);
+    document.addEventListener("DOMContentLoaded", _idemoInit);
   } else {
-    idemoRenderProgress();
+    _idemoInit();
   }
 })();

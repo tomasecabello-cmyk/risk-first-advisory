@@ -314,8 +314,8 @@
             <input type="number" id="idemo-horizon" value="10" min="1" />
           </div>
           <div class="field">
-            <label>Tolerancia al riesgo <span class="hint">1 = mínima · 10 = máxima</span></label>
-            <input type="number" id="idemo-risk" value="6" min="1" max="10" />
+            <label>Tolerancia al riesgo <span class="hint">se calcula con el cuestionario ↓</span></label>
+            <input type="text" id="idemo-risk-preview" value="— responder cuestionario" readonly />
           </div>
           <div class="field">
             <label>Objetivo principal</label>
@@ -366,6 +366,20 @@
           </div>
         </div>
 
+        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Cuestionario de tolerancia <span class="hint">Grable-Lytton (1999), escala validada de 13 ítems</span></div>
+        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
+          <strong>Respondé con honestidad — no hay respuesta correcta.</strong> La meta es que tu
+          cartera coincida con lo que <strong>realmente</strong> vas a tolerar cuando el mercado caiga,
+          no con lo que te gustaría tolerar. Si exagerás tu aguante, la cartera te va a doler de verdad.
+          Esto no mide tu conducta futura: te ayuda a ser honesto con vos mismo.
+        </div>
+        <div id="idemo-gl-container" style="display:grid;gap:14px;">
+          <div style="opacity:.7;font-size:13px;">Cargando cuestionario…</div>
+        </div>
+        <div id="idemo-gl-preview" style="margin-top:12px;font-size:13px;padding:10px 12px;border-radius:8px;background:#f1f5f9;color:#475569;">
+          Tolerancia estimada: <strong id="idemo-gl-score">—</strong> · respondidas <span id="idemo-gl-count">0</span>/13
+        </div>
+
         <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preguntas abiertas</div>
         <div class="form-grid cols-2">
           <div class="field full-span">
@@ -373,8 +387,13 @@
             <textarea id="idemo-open-goal" rows="2">Ahorro de largo plazo con horizonte 10 años, objetivo jubilación.</textarea>
           </div>
           <div class="field full-span">
-            <label>¿Cómo reaccionarías ante una caída del 15%?</label>
-            <textarea id="idemo-open-reaction" rows="2">Mantengo posiciones si la caída es de mercado; revisaría si hay un evento de crédito específico al emisor.</textarea>
+            <label>Imaginá que tu cartera cae 30% en pocas semanas. ¿Qué harías? <span class="hint">señal revelada del Risk Gap</span></label>
+            <select id="idemo-open-reaction-choice">
+              <option value="Vendería todo, no aguanto seguir perdiendo">Vendería todo, no aguanto seguir perdiendo</option>
+              <option value="Vendería una parte para bajar el riesgo">Vendería una parte para bajar el riesgo</option>
+              <option value="No tocaría nada, esperaría la recuperación" selected>No tocaría nada, esperaría la recuperación</option>
+              <option value="Compraría más, aprovecho que está barato">Compraría más, aprovecho que está barato</option>
+            </select>
           </div>
           <div class="field full-span">
             <label>¿Qué experiencia tenés invirtiendo?</label>

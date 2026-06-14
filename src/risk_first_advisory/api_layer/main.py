@@ -1141,6 +1141,38 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok", service="risk-first-advisory")
 
 
+@app.get("/kyc/tolerance-questionnaire")
+def tolerance_questionnaire() -> dict[str, Any]:
+    """
+    Sirve el cuestionario Grable-Lytton (13 ítems) para que el frontend lo renderice
+    dinámicamente. NO incluye los puntajes: el scoring queda server-side
+    (compute_tolerance_score); el cliente solo manda las letras elegidas. Público.
+    """
+    from risk_first_advisory.ai_layer.grable_lytton import (
+        GRABLE_LYTTON_ITEMS,
+        RAW_MAX,
+        RAW_MIN,
+    )
+
+    items = [
+        {
+            "id": item["id"],
+            "text": item["text"],
+            "options": [
+                {"key": letter, "text": text, "points": pts}
+                for (letter, text, pts) in item["options"]
+            ],
+        }
+        for item in GRABLE_LYTTON_ITEMS
+    ]
+    return {
+        "items": items,
+        "raw_min": RAW_MIN,
+        "raw_max": RAW_MAX,
+        "source": "Grable & Lytton (1999), Financial Services Review 8",
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # /auth/me — diagnostic endpoint for the Phase-1 advisor-auth scaffold.
 #
