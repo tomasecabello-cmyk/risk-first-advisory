@@ -313,6 +313,45 @@ def fetch_series(symbol: str, source: str, period: str) -> PriceSeries:
 
 
 # ---------------------------------------------------------------------------
+# Cache en disco para fetch_series (para no pegarle a la red en cada request)
+# ---------------------------------------------------------------------------
+import hashlib as _hashlib  # noqa: E402
+import pickle as _pickle  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_DEFAULT_CACHE_DIR = _Path("data") / "market_cache"
+_CACHE_TTL_SECONDS = 86400  # 24h: data diaria, no hace falta intradía para el demo
+
+
+def fetch_series_cached(
+    symbol: str, source: str, period: str,
+    *, cache_dir: _Path | str | None = None, ttl: int = _CACHE_TTL_SECONDS,
+) -> PriceSeries:
+    """
+    fetch_series con cache en disco (TTL por defecto 24h). Evita re-descargar las
+    mismas series en cada propuesta. Si el cache falla, cae a la red (fetch_series).
+    Los errores NO se cachean (se propaga ProviderError).
+    """
+    cdir = _Path(cache_dir) if cache_dir else _DEFAULT_CACHE_DIR
+    key = _hashlib.sha256(f"{symbol.strip().upper()}|{source}|{period}".encode()).hexdigest()[:16]
+    fpath = cdir / f"{key}.pkl"
+    try:
+        if fpath.exists() and (time.time() - fpath.stat().st_mtime) < ttl:
+            with open(fpath, "rb") as fh:
+                return _pickle.load(fh)
+    except Exception:  # noqa: BLE001 — cache corrupto → re-fetch
+        pass
+    ps = fetch_series(symbol, source, period)  # puede lanzar ProviderError
+    try:
+        cdir.mkdir(parents=True, exist_ok=True)
+        with open(fpath, "wb") as fh:
+            _pickle.dump(ps, fh)
+    except Exception:  # noqa: BLE001 — sin cache, igual devolvemos la serie
+        pass
+    return ps
+
+
+# ---------------------------------------------------------------------------
 # BYMA open data — snapshot de ONs
 # ---------------------------------------------------------------------------
 

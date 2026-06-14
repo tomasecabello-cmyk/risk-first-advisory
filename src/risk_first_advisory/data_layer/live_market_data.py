@@ -23,7 +23,7 @@ from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 from risk_first_advisory.data_layer.providers import (
     PriceSeries,
     ProviderError,
-    fetch_series,
+    fetch_series_cached,
     usd_ars_history,
 )
 
@@ -76,7 +76,7 @@ class LiveMarketDataProvider:
         self._source_map = {k.strip().upper(): v for k, v in (source_map or {}).items()}
         self._period = period
         self._normalize_usd = normalize_usd
-        self._fetch = _fetch or fetch_series
+        self._fetch = _fetch or fetch_series_cached  # cache en disco (24h) por defecto
         self._fx = _fx or usd_ars_history
 
     def contains(self, ticker: str) -> bool:

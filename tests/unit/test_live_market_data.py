@@ -88,6 +88,36 @@ def test_get_many_skips_failures():
     assert [s.ticker for s in out] == ["GOOD"]
 
 
+def test_fetch_series_cached_hits_disk_cache(tmp_path, monkeypatch):
+    # La segunda llamada (mismo symbol/source/period) NO debe re-fetchear: lee disco.
+    from risk_first_advisory.data_layer import providers
+    calls = {"n": 0}
+
+    def _fake(sym, source, period):
+        calls["n"] += 1
+        return PriceSeries(sym, source, "USD", "equity", _series(60))
+
+    monkeypatch.setattr(providers, "fetch_series", _fake)
+    ps1 = providers.fetch_series_cached("SPY", "us", "1y", cache_dir=tmp_path)
+    ps2 = providers.fetch_series_cached("SPY", "us", "1y", cache_dir=tmp_path)
+    assert calls["n"] == 1  # la segunda salió del cache
+    assert len(ps1.close) == len(ps2.close) == 60
+
+
+def test_fetch_series_cached_expired_refetches(tmp_path, monkeypatch):
+    from risk_first_advisory.data_layer import providers
+    calls = {"n": 0}
+
+    def _fake(sym, source, period):
+        calls["n"] += 1
+        return PriceSeries(sym, source, "USD", "equity", _series(60))
+
+    monkeypatch.setattr(providers, "fetch_series", _fake)
+    providers.fetch_series_cached("SPY", "us", "1y", cache_dir=tmp_path, ttl=0)
+    providers.fetch_series_cached("SPY", "us", "1y", cache_dir=tmp_path, ttl=0)
+    assert calls["n"] == 2  # ttl=0 → siempre re-fetch
+
+
 @pytest.mark.parametrize("itype,country,expected", [
     ("ETF", "US", "us"),
     ("STOCK", "US", "us"),
