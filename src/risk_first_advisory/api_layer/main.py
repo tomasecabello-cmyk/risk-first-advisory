@@ -4855,6 +4855,42 @@ def _reconstruct_instrument_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
+def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]) -> list[Any]:
+    """
+    Reemplaza los snapshots derivados del fixture por datos de mercado REALES
+    (data912 / yfinance / Rava, normalizados a USD) cuando se pueden traer; si un
+    ticker falla, conserva el snapshot del adapter. Preserva el orden original.
+
+    Opt-in: el endpoint solo lo llama si RFA_LIVE_DATA está seteada. Sin la env var,
+    el flujo sigue con el fixture (tests y smoke check deterministas).
+    """
+    from risk_first_advisory.data_layer.live_market_data import (
+        LiveMarketDataProvider,
+        instrument_type_to_source,
+    )
+
+    source_map: dict[str, str] = {}
+    for inst in instruments:
+        ticker = getattr(inst, "ticker", None)
+        if not ticker:
+            continue
+        itype = getattr(inst, "instrument_type", None)
+        itype_str = itype.value if hasattr(itype, "value") else str(itype or "")
+        source_map[ticker] = instrument_type_to_source(
+            itype_str, getattr(inst, "country", "") or ""
+        )
+    if not source_map:
+        return adapter_snapshots
+
+    provider = LiveMarketDataProvider(source_map, period="3y")
+    by_ticker = {s.ticker: s for s in adapter_snapshots}
+    for ticker in source_map:
+        live = provider.get_snapshot(ticker)
+        if live is not None:
+            by_ticker[ticker] = live
+    return [by_ticker.get(s.ticker, s) for s in adapter_snapshots]
+
+
 def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
     """Mismo shape que FilteredSnapshotResponse para coherencia con endpoints legacy."""
     return {
@@ -5106,6 +5142,14 @@ def create_case_portfolio_proposal(
     # ── 3. Convertir a MarketDataSnapshot ───────────────────────────────────
     adapter = InstrumentMarketDataAdapter()
     all_snapshots = adapter.to_many(eligible_instruments)
+
+    # ── 3b. Data de mercado REAL (opt-in via RFA_LIVE_DATA) ─────────────────
+    # Reemplaza return/vol del fixture por datos reales (data912/yfinance, USD).
+    # Sin la env var, sigue el fixture → tests y smoke check deterministas.
+    import os
+    if os.environ.get("RFA_LIVE_DATA"):
+        all_snapshots = _apply_live_market_data(eligible_instruments, all_snapshots)
+
     usable_snapshots = [s for s in all_snapshots if s.is_usable]
     snapshots_serialized = [_serialize_snapshot_for_proposal(s) for s in all_snapshots]
 
