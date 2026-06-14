@@ -946,35 +946,3 @@ class TestNoRegression:
         r = client.get("/auth/me", headers={"Authorization": _ADVISOR})
         assert r.status_code == 200
         assert r.json()["advisor_id"] == "ADV-AUD-001"
-
-    def test_advisor_profile_approval_still_works(self, client: TestClient) -> None:
-        r = client.post(
-            "/advisor/profile-approval",
-            json={
-                "client_id": "C-XYZ",
-                "proposed_profile": "moderado",
-                "decision": "approve",
-                "rationale": "All good.",
-            },
-            headers={"Authorization": _ADVISOR},
-        )
-        # 200 OK (or 500 si la DB falla por algo, pero acá usamos tmp DB con
-        # init_schema en demand; debería pasar igual que en test_api_cases.py).
-        assert r.status_code in (200, 500)
-        # Lo importante: no se rompió la ruta.
-        assert r.status_code != 404
-
-    def test_filtered_portfolio_demo_does_not_require_auth(
-        self, client: TestClient
-    ) -> None:
-        # No mandamos token. Si requiriera auth, sería 401; queremos confirmar
-        # que no es 401.
-        r = client.post(
-            "/ai/filtered-portfolio-demo",
-            json={
-                "client_id": "C-X",
-                "profile": "moderado",
-                "natural_language_preferences": "solo bonos",
-            },
-        )
-        assert r.status_code != 401

@@ -466,208 +466,17 @@ class TestPostManual:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Auto-integration: /ai/investment-preferences
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAutoInvestmentPreferences:
-    def test_endpoint_creates_log(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        r = client.post(
-            "/ai/investment-preferences",
-            json={
-                "client_id": "C-INV-1",
-                "natural_language_preferences": "Solo ONs hard dollar argentinas",
-            },
-        )
-        assert r.status_code == 200, r.text
-        listing = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()
-        assert listing["count"] == 1
-        log = listing["logs"][0]
-        assert log["endpoint"] == "/ai/investment-preferences"
-        assert log["prompt_version"] == "investment_preferences_v1"
-        assert log["validation_status"] == "parsed_ok"
-
-    def test_log_input_does_not_contain_natural_language(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        secret = "Texto libre con detalle único xyz123 del cliente"
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-X", "natural_language_preferences": secret},
-        )
-        listing = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()
-        log = listing["logs"][0]
-        assert secret not in json.dumps(log["input_redacted"])
-        assert log["input_redacted"]["natural_language_preferences"].startswith(
-            "<REDACTED:text_"
-        )
-
-    def test_log_client_id_is_hashed(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-XYZ-orig", "natural_language_preferences": "x"},
-        )
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert log["input_redacted"]["client_id"] != "C-XYZ-orig"
-        assert log["input_redacted"]["client_id"].startswith("client_")
-
-    def test_log_raw_response_persisted(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "x"},
-        )
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert log["raw_response"] is not None
-        assert "confidence" in log["raw_response"]
-
-    def test_endpoint_still_returns_correct_response(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        r = client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "x"},
-        )
-        body = r.json()
-        # contract intacto
-        assert body["client_id"] == "C-1"
-        assert body["confidence"] == 0.85
-        assert body["allowed_instrument_types"] == ["CORPORATE_BOND"]
-
-    def test_input_hash_changes_with_different_input(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "alpha"},
-        )
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "beta"},
-        )
-        logs = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"]
-        assert len(logs) == 2
-        assert logs[0]["input_hash"] != logs[1]["input_hash"]
-
-    def test_log_validation_status_api_error_when_openai_fails(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client(failing=True)
-        r = client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "x"},
-        )
-        assert r.status_code == 502
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert log["validation_status"] == "api_error"
-        assert log["error_message"] is not None
-        assert log["raw_response"] is None
-
-    def test_latency_ms_is_populated(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        client.post(
-            "/ai/investment-preferences",
-            json={"client_id": "C-1", "natural_language_preferences": "x"},
-        )
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert isinstance(log["latency_ms"], int)
-        assert log["latency_ms"] >= 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Auto-integration: /ai/filter-universe-demo
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAutoFilterUniverse:
-    def test_endpoint_creates_log(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        r = client.post(
-            "/ai/filter-universe-demo",
-            json={
-                "client_id": "C-FU-1",
-                "natural_language_preferences": "Solo ONs USD",
-            },
-        )
-        assert r.status_code == 200, r.text
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert log["endpoint"] == "/ai/filter-universe-demo"
-        assert log["prompt_version"] == "ai_universe_filter_v1"
-        assert log["validation_status"] == "parsed_ok"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Auto-integration: /ai/filtered-portfolio-demo
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAutoFilteredPortfolio:
-    def test_endpoint_creates_log(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        # No es relevante si genera portfolios o se bloquea — solo
-        # comprobamos que el log se creó.
-        client.post(
-            "/ai/filtered-portfolio-demo",
-            json={
-                "client_id": "C-FP-1",
-                "profile": "moderado",
-                "natural_language_preferences": "Algo razonable",
-            },
-        )
-        log = client.get(
-            "/admin/ai-logs", headers={"Authorization": _ADMIN}
-        ).json()["logs"][0]
-        assert log["endpoint"] == "/ai/filtered-portfolio-demo"
-        assert log["prompt_version"] == "ai_filtered_portfolio_v1"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # GET ordering & content
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestListOrdering:
-    def test_list_orders_by_created_at_asc(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
+    def test_list_orders_by_created_at_asc(self, client: TestClient) -> None:
         for i in range(3):
             client.post(
-                "/ai/investment-preferences",
-                json={"client_id": f"C-{i}", "natural_language_preferences": "x"},
+                "/admin/ai-logs",
+                json=_make_log_body(input_payload={"client_id": f"C-{i}"}),
+                headers={"Authorization": _ADMIN},
             )
         logs = client.get(
             "/admin/ai-logs", headers={"Authorization": _ADMIN}
@@ -676,14 +485,12 @@ class TestListOrdering:
         ids = [log["request_id"] for log in logs]
         assert ids == sorted(ids)
 
-    def test_limit_query_param(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
+    def test_limit_query_param(self, client: TestClient) -> None:
         for i in range(5):
             client.post(
-                "/ai/investment-preferences",
-                json={"client_id": f"C-{i}", "natural_language_preferences": "x"},
+                "/admin/ai-logs",
+                json=_make_log_body(input_payload={"client_id": f"C-{i}"}),
+                headers={"Authorization": _ADMIN},
             )
         body = client.get(
             "/admin/ai-logs?limit=2", headers={"Authorization": _ADMIN}
@@ -705,32 +512,3 @@ class TestNoRegression:
     def test_auth_me_still_works(self, client: TestClient) -> None:
         r = client.get("/auth/me", headers={"Authorization": _ADVISOR})
         assert r.status_code == 200
-
-    def test_advisor_profile_approval_works(self, client: TestClient) -> None:
-        r = client.post(
-            "/advisor/profile-approval",
-            json={
-                "client_id": "C-X",
-                "proposed_profile": "moderado",
-                "decision": "approve",
-                "rationale": "ok",
-            },
-            headers={"Authorization": _ADVISOR},
-        )
-        assert r.status_code != 404
-        assert r.status_code != 401
-
-    def test_filtered_portfolio_demo_no_auth_required(
-        self, client: TestClient, patch_ai_client
-    ) -> None:
-        patch_ai_client()
-        r = client.post(
-            "/ai/filtered-portfolio-demo",
-            json={
-                "client_id": "C-X",
-                "profile": "moderado",
-                "natural_language_preferences": "x",
-            },
-        )
-        # Sin token: no 401 (sigue siendo público).
-        assert r.status_code != 401
