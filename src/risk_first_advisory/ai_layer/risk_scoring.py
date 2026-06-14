@@ -104,6 +104,23 @@ _INCOME_STABILITY_PTS: dict[str, float] = {
 }
 
 
+def compute_tolerance_score(payload: dict[str, Any]) -> float:
+    """
+    Tolerancia (willingness) 1–10 DERIVADA del cuestionario Grable-Lytton (13 ítems
+    validados), no de un slider autoreportado. Lee `tolerance_answers` (dict qN→letra).
+
+    Es tolerancia DECLARADA. La reacción real bajo estrés se mide aparte
+    (open_risk_reaction → assess_revealed_signal) y el Risk Gap compara ambas.
+    Función pura. Ver ai_layer/grable_lytton.py.
+    """
+    from risk_first_advisory.ai_layer.grable_lytton import score_tolerance
+
+    answers = (payload or {}).get("tolerance_answers") or {}
+    if not isinstance(answers, dict):
+        answers = {}
+    return score_tolerance(answers)
+
+
 def compute_capacity_score(payload: dict[str, Any]) -> float:
     """
     Capacidad financiera (1-10) DERIVADA de hechos objetivos, no autoreportada.
@@ -172,7 +189,12 @@ def score_stated_profile(payload: dict[str, Any]) -> dict[str, Any]:
     internal_gap (|willingness-ability| en bandas).
     """
     p = payload or {}
-    tolerance = _score_1_10(p.get("risk_tolerance_score"))
+    # Tolerancia: cuestionario Grable-Lytton validado (tolerance_from_questionnaire)
+    # o el slider 1-10 autoreportado (legacy).
+    if p.get("tolerance_from_questionnaire"):
+        tolerance = _score_1_10(compute_tolerance_score(p))
+    else:
+        tolerance = _score_1_10(p.get("risk_tolerance_score"))
     # Capacidad: medida de hechos (capacity_from_facts) o el score declarado (legacy).
     if p.get("capacity_from_facts"):
         capacity = _score_1_10(compute_capacity_score(p))

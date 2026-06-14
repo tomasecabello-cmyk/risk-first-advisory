@@ -12,6 +12,7 @@ from risk_first_advisory.ai_layer.risk_scoring import (
     assess_revealed_signal,
     compute_capacity_score,
     compute_risk_gap,
+    compute_tolerance_score,
     score_stated_profile,
 )
 from risk_first_advisory.api_layer.schemas import RiskGap
@@ -168,3 +169,39 @@ def test_capacity_from_facts_caps_high_tolerance():
     # Sin el flag, el score declarado (10) mandaría -> ability alta. Contraste:
     legacy = score_stated_profile({**payload, "capacity_from_facts": False})
     assert legacy["ability"] > s["ability"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tolerancia medida con Grable-Lytton (no slider autoreportado)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_compute_tolerance_score_high_vs_low():
+    high = compute_tolerance_score({"tolerance_answers": {
+        "q1": "a", "q2": "d", "q3": "d", "q4": "c", "q5": "c", "q6": "d", "q7": "d",
+        "q8": "d", "q9": "b", "q10": "b", "q11": "d", "q12": "c", "q13": "d",
+    }})
+    low = compute_tolerance_score({"tolerance_answers": {
+        "q1": "d", "q2": "a", "q3": "a", "q4": "a", "q5": "a", "q6": "a", "q7": "a",
+        "q8": "a", "q9": "a", "q10": "a", "q11": "a", "q12": "a", "q13": "a",
+    }})
+    assert high == 10.0 and low == 1.0
+
+
+def test_tolerance_from_questionnaire_gate_overrides_slider():
+    # Slider declara bajo (2) pero el cuestionario G-L sale máximo → willingness alta.
+    base = {
+        "risk_tolerance_score": 2, "investment_objective": "growth",
+        "risk_capacity_score": 9, "investment_horizon_years": 20,
+        "liquidity_need_score": 3, "investment_experience": "avanzada",
+        "tolerance_from_questionnaire": True,
+        "tolerance_answers": {
+            "q1": "a", "q2": "d", "q3": "d", "q4": "c", "q5": "c", "q6": "d",
+            "q7": "d", "q8": "d", "q9": "b", "q10": "b", "q11": "d", "q12": "c", "q13": "d",
+        },
+    }
+    s = score_stated_profile(base)
+    # Sin el flag mandaría el slider (2 → willingness baja). Con el flag, el
+    # cuestionario manda → willingness alta.
+    legacy = score_stated_profile({**base, "tolerance_from_questionnaire": False})
+    assert s["willingness"] > legacy["willingness"]

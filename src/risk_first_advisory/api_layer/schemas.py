@@ -170,6 +170,13 @@ class KYCDataRequest(BaseModel):
     essential_expenses_covered: bool = True
     capacity_from_facts:        bool = False
 
+    # ── Tolerancia medida con el cuestionario Grable-Lytton (no slider) ───
+    # Cuando tolerance_from_questionnaire=True, el motor computa la tolerancia
+    # desde tolerance_answers (dict qN→letra, 13 ítems validados) e ignora
+    # risk_tolerance_score (placeholder). Default False → comportamiento legacy.
+    tolerance_from_questionnaire: bool           = False
+    tolerance_answers:            dict[str, str] = Field(default_factory=dict)
+
     # ESG — opcional. Por defecto se construye un ESGProfile vacío
     # (strictness_level=none, sin exclusions/preferences) que reproduce
     # el comportamiento previo del endpoint.
