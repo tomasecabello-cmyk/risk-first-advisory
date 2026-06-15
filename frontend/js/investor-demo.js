@@ -533,17 +533,28 @@ async function idemoSubmitFollowUp() {
   }
   // El follow-up es un nuevo análisis (append-only): pasa a ser el de la aprobación.
   window.idemoState.aiAnalysisId = res.json.analysis_id;
+  const prevProfile = window.idemoState.aiProposedProfile;
   window.idemoState.aiProposedProfile = res.json.preliminary_profile || window.idemoState.aiProposedProfile;
   const reason = (res.json.result && res.json.result.profile_change_reason) || "";
+  // Si el perfil no cambió, marcarlo explícito: "sin cambios" suele confundir
+  // (parecía que no había pasado nada). Si cambió, resaltar el antes→después.
+  const changed = prevProfile && prevProfile !== window.idemoState.aiProposedProfile;
+  const changeBadge = changed
+    ? `<span class="pill pill-orange">perfil ajustado: ${escapeHTML(prevProfile)} → ${escapeHTML(window.idemoState.aiProposedProfile)}</span>`
+    : `<span class="pill pill-green">perfil confirmado (sin cambios)</span>`;
   idemoStepResult("ai", "ok",
-    `<strong>Re-análisis listo (segunda ronda).</strong> Perfil revisado por la IA: ` +
-    `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code>. ` +
+    `<strong>Re-análisis listo (segunda ronda).</strong> ${changeBadge} ` +
+    `Perfil revisado por la IA: <code>${escapeHTML(window.idemoState.aiProposedProfile)}</code>. ` +
     (reason ? `<div style="font-size:12px;margin:4px 0;">${escapeHTML(reason)}</div>` : "") +
     `<em>La IA propone; el asesor aprueba en el paso 4.</em>` +
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoCapacityGapCardHTML(res.json.capacity_gap) +
     idemoRiskGapCardHTML(res.json.risk_gap));
+  // Scrollear al resultado: sin esto el banner re-renderiza arriba y el asesor,
+  // que está abajo en el botón, no ve que algo cambió ("no pasa nada").
+  const aiCard = document.getElementById("idemo-step-ai");
+  if (aiCard && aiCard.scrollIntoView) aiCard.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ── STEP 4 — aprobar perfil como asesor ───────────────────────────────
