@@ -929,12 +929,22 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
     const n = (typeof c.holdings_count === "number") ? c.holdings_count
       : (Array.isArray(c.holdings) ? c.holdings.length
         : (Array.isArray(c.weights) ? c.weights.length : 0));
+    // Diversificación (descomposición pura del backend): score + banda + flags.
+    const dv = c.diversification || {};
+    const dvScore = (typeof dv.diversification_score === "number") ? dv.diversification_score : null;
+    const dvFlags = Array.isArray(dv.flags) ? dv.flags.length : 0;
+    const dvColor = dvScore == null ? "#888" : (dvScore >= 70 ? "#3a7" : dvScore >= 50 ? "#c90" : "#c60");
+    const dvCell = dvScore == null ? "—" :
+      `<span style="color:${dvColor};font-weight:600;">${Math.round(dvScore)}/100</span>` +
+      ` <span style="font-size:11px;opacity:.7;">${escapeHTML(dv.concentration_band || "")}</span>` +
+      (dvFlags ? ` <span class="pill pill-orange" title="${escapeHTML((dv.flags || []).join(', '))}">${dvFlags} flag${dvFlags > 1 ? 's' : ''}</span>` : "");
     const btnLabel = meta.requires_advisor_override ? "Seleccionar (override)" : "Seleccionar";
     return `<tr>
       <td style="padding:10px 12px;"><strong>${escapeHTML(c.variant || "?")}</strong></td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;">${n}</td>
+      <td style="padding:10px 12px;text-align:right;">${dvCell}</td>
       <td style="padding:10px 12px;">${ovr}</td>
       <td style="padding:10px 12px;text-align:right;">
         <button class="btn-primary" style="padding:6px 12px;font-size:12px;white-space:nowrap;" onclick="idemoSelectPortfolio('${escapeHTML(c.variant || "")}')">${btnLabel}</button>
@@ -949,6 +959,7 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Retorno esperado</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Volatilidad</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;"># Instrumentos</th>
+        <th style="padding:10px 12px;font-size:11px;text-align:right;">Diversificación</th>
         <th style="padding:10px 12px;font-size:11px;text-align:left;">Presupuesto de riesgo</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Acción del asesor</th>
       </tr></thead>

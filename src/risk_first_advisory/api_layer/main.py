@@ -4967,6 +4967,10 @@ def _serialize_candidate_for_proposal(
         Si un ticker del portfolio no aparece en el snapshot (caso edge),
         la holding se emite con metadata `None` pero conserva ticker/weight.
     """
+    from risk_first_advisory.portfolio_layer.diversification import (
+        assess_diversification,
+    )
+
     sorted_weights = sorted(
         ((t, w) for t, w in portfolio.weights.items() if w > 1e-6),
         key=lambda kv: kv[1],
@@ -5040,6 +5044,9 @@ def _serialize_candidate_for_proposal(
         "holdings":       holdings,
         "holdings_count": len(holdings),
         "total_weight":   round(total_weight, 6),
+        # Descomposición de diversificación (pura, sin red/LLM): concentración,
+        # repartos por eje y score, para comparar variantes y explicar el porqué.
+        "diversification": assess_diversification(holdings),
     }
 
 
