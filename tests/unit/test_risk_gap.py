@@ -271,6 +271,37 @@ def test_demo_client_is_deterministic():
     assert _DemoProfileClient().analyze_kyc(payload) == _DemoProfileClient().analyze_kyc(payload)
 
 
+def test_demo_client_profile_reflects_questionnaire_not_hardcoded():
+    # Regresión: antes devolvía siempre "moderado" ignorando el KYC. Ahora el
+    # perfil sale del motor determinístico (G-L + capacidad).
+    from risk_first_advisory.api_layer.main import _DemoProfileClient
+
+    agressive_tol = {
+        "q1": "a", "q2": "d", "q3": "d", "q4": "c", "q5": "c", "q6": "d",
+        "q7": "d", "q8": "d", "q9": "b", "q10": "b", "q11": "d", "q12": "c", "q13": "d",
+    }
+    # Alta tolerancia PERO capacidad pésima → el perfil debe caer a conservador
+    # (capacidad acota), no quedar fijo en "moderado".
+    low_cap = {
+        "tolerance_from_questionnaire": True, "tolerance_answers": agressive_tol,
+        "capacity_from_facts": True, "annual_income_usd": 80000,
+        "liquid_net_worth": 5000, "net_worth": 10000, "investment_horizon_years": 1,
+        "liquidity_need_score": 8, "investment_experience": "ninguna",
+        "income_stability": "inestable", "dependents_count": 3,
+        "essential_expenses_covered": False, "investment_objective": "aggressive_growth",
+    }
+    res = _DemoProfileClient().analyze_kyc(low_cap)
+    assert res["preliminary_profile"] == "conservador"
+
+    # Misma tolerancia alta pero buena capacidad → perfil más arriba que conservador.
+    high_cap = {**low_cap, "liquid_net_worth": 500000, "net_worth": 1000000,
+                "investment_horizon_years": 20, "liquidity_need_score": 3,
+                "investment_experience": "experto", "income_stability": "stable",
+                "dependents_count": 0, "essential_expenses_covered": True}
+    res_hi = _DemoProfileClient().analyze_kyc(high_cap)
+    assert res_hi["preliminary_profile"] != "conservador"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # combine_risk_gaps — IA + motor determinístico (M-Engine)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -367,3 +367,74 @@ def deterministic_ceiling(payload: dict[str, Any]) -> dict[str, Any]:
 def profile_exceeds(profile_a: str, profile_b: str) -> bool:
     """True si profile_a es MÁS riesgoso que profile_b (ambos en PROFILES)."""
     return _profile_index(profile_a) > _profile_index(profile_b)
+
+
+# Etiquetas legibles de la dimensión que limita (para la conversación con el cliente).
+_BINDING_LABEL: dict[str, str] = {
+    "ability": "la capacidad financiera (cuánto puede perder sin afectar su vida)",
+    "willingness": "la tolerancia declarada (cuánto riesgo dice querer asumir)",
+}
+
+
+def explain_capacity_gap(
+    payload: dict[str, Any], desired_profile: str
+) -> dict[str, Any]:
+    """
+    Explica, en términos de la conversación asesor↔cliente, cuánto excede
+    `desired_profile` la capacidad financiera del cliente y qué lo limita.
+
+    Es la base del flujo "che, acá te estás pasando de tu capacidad: esto es por
+    qué y por cuánto" que precede al override firmado. Read-only: NO aprueba ni
+    cambia estado, no decide nada. Función pura — empaqueta lo que ya computan
+    deterministic_ceiling + deterministic_assessment en un objeto que el frontend
+    muestra en lenguaje claro.
+
+    El override (aprobar igual) sigue siendo decisión EXPLÍCITA del asesor en
+    POST /cases/{id}/profile-approval; esta función solo informa la conversación.
+
+    Returns dict: desired_profile, capacity_ceiling, exceeds_capacity, bands_over,
+    binding_dimension, willingness_score (0-100), ability_score (0-100),
+    override_required, explanation (es).
+    """
+    ceiling = deterministic_ceiling(payload)
+    assessment = deterministic_assessment(payload)
+    cap_profile = ceiling["cap_profile"]
+
+    desired_idx = _profile_index(desired_profile)
+    cap_idx = _profile_index(cap_profile)
+    bands_over = max(0, desired_idx - cap_idx)
+    exceeds = bands_over > 0
+
+    will_score = round(assessment["willingness"] * 100.0, 1)
+    abil_score = ceiling["ability_score"]
+    binding = assessment["binding_dimension"]
+    binding_label = _BINDING_LABEL.get(binding, binding)
+
+    if exceeds:
+        banda = "banda" if bands_over == 1 else "bandas"
+        explanation = (
+            f"El cliente quiere un perfil «{desired_profile}» (tolerancia "
+            f"{will_score:.0f}/100), pero su situación financiera soporta hasta "
+            f"«{cap_profile}» ({abil_score:.0f}/100): está {bands_over} {banda} por "
+            f"encima de su capacidad. Lo que limita es {binding_label}. Si el cliente "
+            "está convencido, el asesor puede aprobar igualmente, pero queda como "
+            "override firmado con justificación en el audit trail: el cliente asume "
+            "más riesgo del que su situación financiera soporta."
+        )
+    else:
+        explanation = (
+            f"El perfil «{desired_profile}» está dentro de la capacidad financiera "
+            f"del cliente (tope «{cap_profile}»). No requiere override."
+        )
+
+    return {
+        "desired_profile": desired_profile,
+        "capacity_ceiling": cap_profile,
+        "exceeds_capacity": exceeds,
+        "bands_over": bands_over,
+        "binding_dimension": binding,
+        "willingness_score": will_score,
+        "ability_score": abil_score,
+        "override_required": exceeds,
+        "explanation": explanation,
+    }

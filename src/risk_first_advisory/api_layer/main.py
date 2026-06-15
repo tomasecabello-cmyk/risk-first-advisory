@@ -1028,6 +1028,11 @@ class _DemoProfileClient:
     Se activa SOLO con la env var RFA_DEMO_MODE (no es un fallback silencioso
     en producción: sin la var, el endpoint sigue exigiendo OPENAI_API_KEY).
 
+    El `preliminary_profile` se deriva del motor determinístico M-Engine
+    (cuestionario Grable-Lytton + capacidad financiera de hechos), NO es un valor
+    fijo: refleja lo que el cliente realmente cargó. La capacidad acota la
+    tolerancia (effective = min(willingness, ability)), igual que en producción.
+
     Deriva una contradicción de la señal de estrés del KYC (`open_risk_reaction`):
     si el cliente expresa pánico/venta ante una caída, marca una contradicción
     media → el Risk Gap muestra gap_level "medium". Si no, queda alineado (low).
@@ -1037,18 +1042,23 @@ class _DemoProfileClient:
     _PANIC_HINTS = ("vend", "pánico", "panico", "todo", "salir", "miedo")
 
     def analyze_kyc(self, payload: dict) -> dict:
+        from risk_first_advisory.ai_layer.risk_scoring import deterministic_assessment
+
+        # Perfil REAL del cliente: cuestionario G-L + capacidad (no hardcodeado).
+        profile = deterministic_assessment(payload)["profile"]
+
         reaction = str((payload or {}).get("open_risk_reaction") or "").lower()
         panics = any(h in reaction for h in self._PANIC_HINTS)
         if panics:
             return {
-                "preliminary_profile": "moderado",
+                "preliminary_profile": profile,
                 "confidence": 0.7,
                 "contradictions": [
                     {
                         "field": "open_risk_reaction",
                         "severity": "medium",
                         "explanation": (
-                            "El perfil declarado es moderado, pero ante una caída "
+                            f"El perfil declarado es {profile}, pero ante una caída "
                             "del 30% el cliente indica que vendería todo."
                         ),
                     }
@@ -1058,15 +1068,20 @@ class _DemoProfileClient:
                     "Si tuvieras una pérdida importante, ¿afectaría tus gastos del día a día?",
                 ],
                 "advisor_notes": [
-                    "Demo determinística (RFA_DEMO_MODE). Revisar tolerancia real con el cliente.",
+                    "Perfil determinístico (RFA_DEMO_MODE, sin OpenAI): derivado del "
+                    "cuestionario Grable-Lytton y la capacidad financiera (M-Engine). "
+                    "Revisar tolerancia real con el cliente.",
                 ],
             }
         return {
-            "preliminary_profile": "moderado",
+            "preliminary_profile": profile,
             "confidence": 0.82,
             "contradictions": [],
             "follow_up_questions": [],
-            "advisor_notes": ["Demo determinística (RFA_DEMO_MODE). Perfil consistente."],
+            "advisor_notes": [
+                "Perfil determinístico (RFA_DEMO_MODE, sin OpenAI): derivado del "
+                "cuestionario Grable-Lytton y la capacidad financiera (M-Engine).",
+            ],
         }
 
     def analyze_follow_up(self, payload: dict) -> dict:

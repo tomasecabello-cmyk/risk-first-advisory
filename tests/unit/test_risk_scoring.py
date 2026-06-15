@@ -13,6 +13,7 @@ from risk_first_advisory.ai_layer.risk_scoring import (
     compute_capacity_score,
     compute_risk_gap,
     compute_tolerance_score,
+    explain_capacity_gap,
     score_stated_profile,
 )
 from risk_first_advisory.api_layer.schemas import RiskGap
@@ -205,3 +206,57 @@ def test_tolerance_from_questionnaire_gate_overrides_slider():
     # cuestionario manda → willingness alta.
     legacy = score_stated_profile({**base, "tolerance_from_questionnaire": False})
     assert s["willingness"] > legacy["willingness"]
+
+
+# ── explain_capacity_gap (conversación pre-override) ──────────────────────────
+
+
+def _kyc_low_capacity(**over):
+    # Capacidad TODA mal → ability bajísima (tope conservador), sin importar tolerancia.
+    base = {
+        "capacity_from_facts": True,
+        "annual_income_usd": 80000,
+        "liquid_net_worth": 5000,
+        "net_worth": 10000,
+        "investment_horizon_years": 1,
+        "liquidity_need_score": 8,
+        "investment_experience": "ninguna",
+        "income_stability": "inestable",
+        "dependents_count": 3,
+        "essential_expenses_covered": False,
+        "investment_objective": "aggressive_growth",
+    }
+    base.update(over)
+    return base
+
+
+def test_explain_capacity_gap_exceeds_requires_override():
+    # Cliente con capacidad muy baja que quiere agresivo: el perfil supera el tope.
+    g = explain_capacity_gap(_kyc_low_capacity(), "agresivo")
+    assert g["capacity_ceiling"] == "conservador"
+    assert g["exceeds_capacity"] is True
+    assert g["override_required"] is True
+    assert g["bands_over"] == PROFILES.index("agresivo") - PROFILES.index("conservador")
+    assert g["binding_dimension"] == "ability"
+    assert "override" in g["explanation"].lower()
+    assert "agresivo" in g["explanation"]
+
+
+def test_explain_capacity_gap_within_capacity_no_override():
+    g = explain_capacity_gap(_kyc_low_capacity(), "conservador")
+    assert g["exceeds_capacity"] is False
+    assert g["override_required"] is False
+    assert g["bands_over"] == 0
+    assert "no requiere override" in g["explanation"].lower()
+
+
+def test_explain_capacity_gap_bands_count_is_distance():
+    # Un escalón por encima del tope → exactamente 1 banda.
+    g = explain_capacity_gap(_kyc_low_capacity(), "moderado-defensivo")
+    assert g["bands_over"] == 1
+    assert g["exceeds_capacity"] is True
+
+
+def test_explain_capacity_gap_is_pure():
+    payload = _kyc_low_capacity()
+    assert explain_capacity_gap(payload, "agresivo") == explain_capacity_gap(payload, "agresivo")
