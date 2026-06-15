@@ -1436,6 +1436,26 @@ class DeterministicAssessment(BaseModel):
     gap_level:          Literal["low", "medium", "high"]
 
 
+class CapacityGap(BaseModel):
+    """
+    Brecha entre lo que el cliente QUIERE (perfil implícito por su tolerancia) y
+    lo que su capacidad financiera SOPORTA. Para la conversación "querés X, tu
+    capacidad soporta Y" que precede al override firmado. Ver
+    ai_layer/risk_scoring.py::capacity_gap_from_kyc (read-only, no aprueba nada).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    desired_profile:   str    # perfil que implica la tolerancia (willingness)
+    capacity_ceiling:  str    # tope que soporta la capacidad (ability)
+    exceeds_capacity:  bool
+    bands_over:        int    # cuántas bandas por encima del tope
+    binding_dimension: str    # "ability" | "willingness"
+    willingness_score: float  # 0-100
+    ability_score:     float  # 0-100
+    override_required: bool   # True si aprobar el deseado exige override firmado
+    explanation:       str    # texto en español para mostrar al asesor
+
+
 class AIProfileAnalysisResponse(BaseModel):
     analysis_id:         str
     case_id:             str
@@ -1453,6 +1473,9 @@ class AIProfileAnalysisResponse(BaseModel):
     # Marco determinístico (sin IA) para contrastar con el análisis de la IA.
     # Derivado del KYC; None en GET/list (no recomputa). El POST lo incluye.
     deterministic:       DeterministicAssessment | None = None
+    # Brecha capacidad-vs-tolerancia para la conversación pre-override.
+    # Derivado del KYC; None en GET/list (no recomputa). El POST lo incluye.
+    capacity_gap:        CapacityGap | None = None
 
 
 class AIProfileAnalysisListResponse(BaseModel):

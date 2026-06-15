@@ -438,3 +438,18 @@ def explain_capacity_gap(
         "override_required": exceeds,
         "explanation": explanation,
     }
+
+
+def capacity_gap_from_kyc(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Capacity gap usando como perfil "deseado" el que la TOLERANCIA del cliente
+    implica (willingness), antes de que la capacidad lo acote.
+
+    Es lo que se muestra en el panel de análisis para abrir la conversación
+    "querés X, tu capacidad soporta Y" — sin esperar a la aprobación. El perfil
+    deseado sale de willingness (no del efectivo, que ya está capado por ability).
+    Función pura. Ver explain_capacity_gap.
+    """
+    stated = score_stated_profile(payload)
+    willingness_profile = _profile_from_score(stated["willingness"] * 100.0)
+    return explain_capacity_gap(payload, willingness_profile)

@@ -95,6 +95,7 @@ from risk_first_advisory.api_layer.schemas import (
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
     CaseWorkflowProgressResponse,
+    CapacityGap,
     ClientCreateRequest,
     ClientListResponse,
     ClientResponse,
@@ -3732,7 +3733,10 @@ def create_case_profile_analysis(
     # IA = capa rica; motor = base auditable + fallback sin key + cross-check.
     # Ver ai_layer/risk_gap.py::combine_risk_gaps y ai_layer/risk_scoring.py.
     from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
-    from risk_first_advisory.ai_layer.risk_scoring import deterministic_assessment
+    from risk_first_advisory.ai_layer.risk_scoring import (
+        capacity_gap_from_kyc,
+        deterministic_assessment,
+    )
 
     risk_gap_dict = combine_risk_gaps(
         ai_result if isinstance(ai_result, dict) else None,
@@ -3740,11 +3744,13 @@ def create_case_profile_analysis(
     )
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
     det_obj = DeterministicAssessment(**deterministic_assessment(kyc_payload))
+    capacity_gap_obj = CapacityGap(**capacity_gap_from_kyc(kyc_payload))
 
     return AIProfileAnalysisResponse(
         **analysis_data,
         risk_gap=risk_gap_obj,
         deterministic=det_obj,
+        capacity_gap=capacity_gap_obj,
     )
 
 

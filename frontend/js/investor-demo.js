@@ -413,6 +413,38 @@ function idemoRiskGapCardHTML(rg) {
   );
 }
 
+// Card "querés X / tu capacidad soporta Y": la conversación pre-override.
+// Solo se renderiza cuando el perfil deseado SUPERA el tope de capacidad
+// (override_required). Si está dentro de capacidad, devuelve "" (sin ruido).
+// Tono ámbar/neutro: no es un error, es un límite financiero a conversar.
+function idemoCapacityGapCardHTML(cg) {
+  if (!cg || !cg.override_required) return "";
+  const banda = cg.bands_over === 1 ? "banda" : "bandas";
+  return (
+    `<div style="margin-top:12px;border:1px solid #ddd;border-left:4px solid #c90;border-radius:6px;padding:12px;background:#fffdf7;">` +
+      `<div style="font-weight:600;">Capacidad vs. tolerancia` +
+        ` <span style="font-weight:500;color:#c90;">· requiere override</span></div>` +
+      `<div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;">` +
+        `<div style="border-left:3px solid #69c;padding-left:10px;">` +
+          `<div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.65;">Querés</div>` +
+          `<div>Perfil <code>${escapeHTML(cg.desired_profile)}</code></div>` +
+          `<div style="font-size:12px;opacity:.8;">tolerancia ${Math.round(cg.willingness_score)}/100</div>` +
+        `</div>` +
+        `<div style="border-left:3px solid #6a6;padding-left:10px;">` +
+          `<div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.65;">Tu capacidad soporta</div>` +
+          `<div>Perfil <code>${escapeHTML(cg.capacity_ceiling)}</code></div>` +
+          `<div style="font-size:12px;opacity:.8;">capacidad ${Math.round(cg.ability_score)}/100</div>` +
+        `</div>` +
+        `<div style="align-self:center;color:#c90;font-weight:600;">${cg.bands_over} ${banda} por encima</div>` +
+      `</div>` +
+      `<div style="margin:6px 0;font-size:13px;">${escapeHTML(cg.explanation || "")}</div>` +
+      `<div style="font-size:12px;opacity:.8;border-top:1px solid #eee;padding-top:6px;">` +
+        `Cómo proceder: explicarle el límite al cliente. Si está convencido, aprobás en el paso 4 ` +
+        `con <code>framework_override_acknowledged=true</code> y justificación — queda firmado en auditoría.</div>` +
+    `</div>`
+  );
+}
+
 async function idemoRunAiProfile() {
   if (!window.idemoState.caseId || !window.idemoState.kycSubmissionId) {
     idemoStepResult("ai", "warn", "Primero ejecutá los pasos 1 (preparar caso) y 2 (enviar KYC).");
@@ -462,6 +494,7 @@ async function idemoRunAiProfile() {
     `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>` +
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
+    idemoCapacityGapCardHTML(res.json.capacity_gap) +
     idemoRiskGapCardHTML(res.json.risk_gap));
   return true;
 }
@@ -509,6 +542,7 @@ async function idemoSubmitFollowUp() {
     `<em>La IA propone; el asesor aprueba en el paso 4.</em>` +
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
+    idemoCapacityGapCardHTML(res.json.capacity_gap) +
     idemoRiskGapCardHTML(res.json.risk_gap));
 }
 

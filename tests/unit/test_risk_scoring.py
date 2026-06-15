@@ -11,6 +11,7 @@ from risk_first_advisory.ai_layer.risk_scoring import (
     PROFILES,
     assess_revealed_signal,
     compute_capacity_score,
+    capacity_gap_from_kyc,
     compute_risk_gap,
     compute_tolerance_score,
     explain_capacity_gap,
@@ -260,3 +261,20 @@ def test_explain_capacity_gap_bands_count_is_distance():
 def test_explain_capacity_gap_is_pure():
     payload = _kyc_low_capacity()
     assert explain_capacity_gap(payload, "agresivo") == explain_capacity_gap(payload, "agresivo")
+
+
+def test_capacity_gap_from_kyc_uses_willingness_as_desired():
+    # Tolerancia agresiva + capacidad pésima: el "deseado" sale de willingness
+    # (alto) y el tope de la capacidad (conservador) → override requerido.
+    agressive_tol = {
+        "tolerance_from_questionnaire": True,
+        "tolerance_answers": {
+            "q1": "a", "q2": "d", "q3": "d", "q4": "c", "q5": "c", "q6": "d",
+            "q7": "d", "q8": "d", "q9": "b", "q10": "b", "q11": "d", "q12": "c", "q13": "d",
+        },
+    }
+    g = capacity_gap_from_kyc({**_kyc_low_capacity(), **agressive_tol})
+    assert g["capacity_ceiling"] == "conservador"
+    assert g["override_required"] is True
+    # desired = perfil que implica la tolerancia (más riesgoso que el tope)
+    assert PROFILES.index(g["desired_profile"]) > PROFILES.index(g["capacity_ceiling"])
