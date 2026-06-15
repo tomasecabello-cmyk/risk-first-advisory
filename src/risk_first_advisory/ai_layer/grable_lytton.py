@@ -106,18 +106,20 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "q9",
-        "text": "Además de lo que ya tenés, te regalan USD 1.000. Tenés que elegir:",
+        "text": ("Escenario de GANANCIA: te dan USD 1.000. ¿Qué preferís hacer con esa "
+                 "ganancia?"),
         "options": [
-            ("a", "Ganar USD 500 seguro", 1),
-            ("b", "50% de ganar USD 1.000 y 50% de no ganar nada", 3),
+            ("a", "Asegurar +USD 500 (ganancia garantizada)", 1),
+            ("b", "Jugártela: 50% de ganar +USD 1.000, 50% de no ganar nada", 3),
         ],
     },
     {
         "id": "q10",
-        "text": "Además de lo que ya tenés, te regalan USD 2.000. Tenés que elegir:",
+        "text": ("Escenario de PÉRDIDA (es el mismo de antes, al revés): te dan USD 2.000 "
+                 "pero vas a perder. ¿Qué preferís?"),
         "options": [
-            ("a", "Perder USD 500 seguro", 1),
-            ("b", "50% de perder USD 1.000 y 50% de no perder nada", 3),
+            ("a", "Asegurar −USD 500 (pérdida garantizada, sabés cuánto perdés)", 1),
+            ("b", "Jugártela: 50% de perder −USD 1.000, 50% de no perder nada", 3),
         ],
     },
     {
