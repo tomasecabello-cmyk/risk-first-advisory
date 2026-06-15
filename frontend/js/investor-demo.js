@@ -182,17 +182,13 @@ function idemoBuildKycPayload() {
 }
 
 function idemoBuildPrefsPayload() {
-  const types = idemoStr("idemo-pref-types", "")
-    .split(",").map(s => s.trim()).filter(Boolean);
-  const hardDollar = idemoStr("idemo-pref-hard", "true") === "true";
-  const structured = {
-    allowed_instrument_types: types.length ? types
-      : ["CORPORATE_BOND", "SOVEREIGN_BOND", "ETF", "STOCK", "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET"],
-  };
-  if (hardDollar) {
-    structured.require_hard_dollar = true;
-  }
-  return { source: "manual", structured_preferences: structured };
+  // El universo lo define el bróker/admin (las fuentes de datos), NO el asesor.
+  // Se permite todo el universo disponible; la restricción operativa (si la hay)
+  // vive en el backend/config, no en un knob del asesor. Sin require_hard_dollar.
+  const allTypes = [
+    "CORPORATE_BOND", "SOVEREIGN_BOND", "ETF", "STOCK", "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET",
+  ];
+  return { source: "manual", structured_preferences: { allowed_instrument_types: allTypes } };
 }
 
 // ── Per-step state + inline rendering ─────────────────────────────────
@@ -378,11 +374,10 @@ function idemoRiskGapCardHTML(rg) {
     : "";
   const hasQuestions = Array.isArray(rg.confirmation_questions) && rg.confirmation_questions.length;
   let questions = "";
-  if (hasQuestions && aligned) {
-    // Alineado: las preguntas son informativas (no hay inconsistencia que cerrar).
-    questions =
-      `<div style="margin-top:10px;"><strong>Tus próximas preguntas para el cliente</strong><ul style="margin:4px 0 0 0;">` +
-      rg.confirmation_questions.map((q) => `<li>${escapeHTML(q)}</li>`).join("") + `</ul></div>`;
+  if (aligned) {
+    // Alineado: NO hay inconsistencia que confirmar → no se listan preguntas como
+    // acción pendiente (eso confundía: parecía que faltaba algo por hacer).
+    questions = "";
   } else if (hasQuestions) {
     // Inconsistencia: el asesor confirma con el cliente y re-analiza (segunda ronda).
     window.idemoState.followUpQuestions = rg.confirmation_questions.slice();

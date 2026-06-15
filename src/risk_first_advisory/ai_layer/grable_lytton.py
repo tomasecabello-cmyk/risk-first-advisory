@@ -62,6 +62,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("a", "Plazo fijo, caja de ahorro o dólar", 1),
             ("b", "Bonos de alta calidad o fondos de bonos", 2),
             ("c", "Acciones o fondos de acciones", 3),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
     {
@@ -92,6 +93,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("b", "Vendo la mitad y la paso a activos duros", 2),
             ("c", "Vendo todo y voy a activos duros", 3),
             ("d", "Vendo todo, voy a activos duros y me endeudo para comprar más", 4),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
     {
@@ -102,6 +104,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("b", "+USD 800 en el mejor caso; −USD 200 en el peor", 2),
             ("c", "+USD 2.600 en el mejor caso; −USD 800 en el peor", 3),
             ("d", "+USD 4.800 en el mejor caso; −USD 2.400 en el peor", 4),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
     {
@@ -131,6 +134,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("b", "Un fondo que tiene acciones y bonos", 2),
             ("c", "Una cartera de 15 acciones", 3),
             ("d", "Commodities (oro, plata, petróleo)", 4),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
     {
@@ -140,6 +144,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("a", "60% bajo riesgo, 30% medio, 10% alto", 1),
             ("b", "30% bajo riesgo, 40% medio, 30% alto", 2),
             ("c", "10% bajo riesgo, 40% medio, 50% alto", 3),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
     {
@@ -152,6 +157,7 @@ GRABLE_LYTTON_ITEMS: tuple[dict[str, Any], ...] = (
             ("b", "Un mes de sueldo", 2),
             ("c", "Tres meses de sueldo", 3),
             ("d", "Seis meses de sueldo", 4),
+            ("x", "No lo entiendo / no estoy seguro", 1),
         ],
     },
 )

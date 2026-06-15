@@ -405,19 +405,12 @@
           </div>
         </div>
 
-        <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preferencias de inversión</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>Solo instrumentos hard dollar</label>
-            <select id="idemo-pref-hard">
-              <option value="true" selected>Sí (USD hard dollar)</option>
-              <option value="false">No (cualquier moneda)</option>
-            </select>
-          </div>
-          <div class="field full-span">
-            <label>Tipos de instrumentos permitidos <span class="hint">universo demo acotado</span></label>
-            <input type="text" id="idemo-pref-types" value="CORPORATE_BOND, SOVEREIGN_BOND, ETF, STOCK, CEDEAR, MUTUAL_FUND, MONEY_MARKET" />
-          </div>
+        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Universo de instrumentos</div>
+        <div style="border:1px solid var(--rf-border);background:var(--rf-bg-subtle,#fafbfc);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.55;color:var(--rf-text-body);">
+          El universo es el que traen las fuentes de datos del bróker (data912 / yfinance en este demo).
+          El asesor <strong>no</strong> elige los instrumentos permitidos — eso lo configura el bróker / admin
+          (p. ej. restricciones operativas). El optimizador trabaja sobre ese universo, filtrado por
+          governance · suitability · ESG · calidad de datos.
         </div>
 
       </form>

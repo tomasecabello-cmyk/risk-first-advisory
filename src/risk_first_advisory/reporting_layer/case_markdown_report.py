@@ -342,9 +342,12 @@ def _section_risk_gap(analysis_data: dict[str, Any] | None) -> str:
     if stress:
         lines.append(f"- **Señal del cliente**: {stress}")
     lines.append(f"- **Lectura**: {_safe_str(gap.get('gap_explanation'))}")
+    # Las preguntas solo son una ACCIÓN pendiente si hay inconsistencia. Con el
+    # perfil alineado (gap bajo) no hay nada que confirmar → no se listan (evita
+    # que parezca que falta un paso).
     questions = gap.get("confirmation_questions") or []
-    if questions:
-        lines.append("- **Preguntas para confirmar con el cliente**:")
+    if questions and _safe_str(gap.get("gap_level")) != "low":
+        lines.append("- **Preguntas para confirmar con el cliente** (hay inconsistencia a revisar):")
         for q in questions:
             lines.append(f"  - {_safe_str(q)}")
     return "\n".join(lines)
