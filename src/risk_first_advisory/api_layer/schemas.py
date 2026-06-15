@@ -1825,6 +1825,9 @@ class CasePortfolioProposalResponse(BaseModel):
     created_by_advisor_id: str | None
     is_current:            bool
     created_at_utc:        str
+    # Encuadre A/B (dentro de capacidad vs requiere override) + explicación por
+    # opción. Derivado de los candidatos; None en lecturas que no lo recomputan.
+    options_framing:       dict[str, Any] | None = None
 
 
 class CasePortfolioProposalListResponse(BaseModel):

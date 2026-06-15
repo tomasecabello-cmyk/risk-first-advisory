@@ -5275,7 +5275,13 @@ def create_case_portfolio_proposal(
                     ),
                 ) from exc
 
-        return CasePortfolioProposalResponse(**proposal_data)
+        # Encuadre A/B (dentro de capacidad vs requiere override) + explicación
+        # por opción. Derivado de los candidatos persistidos; no se persiste.
+        from risk_first_advisory.portfolio_layer.option_framing import (
+            frame_portfolio_options,
+        )
+        framing = frame_portfolio_options(proposal_data.get("candidates") or [])
+        return CasePortfolioProposalResponse(**proposal_data, options_framing=framing)
 
     if len(usable_snapshots) < 3:
         return _persist_and_return(

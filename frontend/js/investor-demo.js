@@ -681,8 +681,38 @@ async function idemoGenerateProposal() {
     `<strong>${eligibleN}</strong> instrumentos elegibles (${excludedN} excluidos). ` +
     `Variantes propuestas: <strong>${window.idemoState.candidates.length}</strong>.`;
   idemoStepResultRich("propose", "ok", banner,
+    idemoOptionsFramingHTML(r3.json.options_framing) +
     idemoBuildPortfolioComparisonHtml(window.idemoState.candidates));
   return true;
+}
+
+// Encuadre A/B: "dentro de tu capacidad" (sin override) vs "requiere override",
+// con la explicación por opción (del backend, determinística). Guard: si no hay
+// framing (respuesta vieja), devuelve "".
+function idemoOptionsFramingHTML(framing) {
+  if (!framing || !Array.isArray(framing.options) || !framing.options.length) return "";
+  const groupA = framing.options.filter(o => o.option_role === "dentro_de_capacidad");
+  const groupB = framing.options.filter(o => o.option_role === "requiere_override");
+  const col = (opts, label, color) => {
+    if (!opts.length) return "";
+    const items = opts.map(o =>
+      `<div style="margin:6px 0;"><code>${escapeHTML(o.variant)}</code> ` +
+      `<div style="font-size:12px;opacity:.85;margin-top:2px;">${escapeHTML(o.rationale)}</div></div>`
+    ).join("");
+    return `<div style="flex:1;min-width:240px;border-left:3px solid ${color};padding-left:10px;">` +
+      `<div style="font-size:11px;font-weight:700;text-transform:uppercase;opacity:.65;">${escapeHTML(label)}</div>` +
+      items + `</div>`;
+  };
+  return (
+    `<div style="margin-top:12px;border:1px solid #ddd;border-radius:6px;padding:12px;background:#fff;">` +
+      `<div style="font-weight:600;margin-bottom:4px;">Dos caminos para el cliente</div>` +
+      `<div style="font-size:12px;opacity:.85;margin-bottom:8px;">${escapeHTML(framing.summary || "")}</div>` +
+      `<div style="display:flex;gap:12px;flex-wrap:wrap;">` +
+        col(groupA, "A · Dentro de tu capacidad", "#6a6") +
+        col(groupB, "B · Requiere override firmado", "#c90") +
+      `</div>` +
+    `</div>`
+  );
 }
 
 // ── STEP 6 — seleccionar cartera ──────────────────────────────────────
