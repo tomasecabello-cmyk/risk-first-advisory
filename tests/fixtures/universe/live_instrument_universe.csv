@@ -21,3 +21,5 @@ AGG,iShares Core US Aggregate Bond,BlackRock,ETF,FIXED_INCOME,USD,US,Aggregate B
 IEF,iShares 7-10 Year Treasury,BlackRock,ETF,FIXED_INCOME,USD,US,Treasuries,Balanz;PPI,false,0.95,,,4.30,7.5,1.0,,Treasuries medios US (yfinance)
 VCSH,Vanguard Short-Term Corporate Bond,Vanguard,ETF,FIXED_INCOME,USD,US,Corporate Bonds,Balanz;PPI,false,0.94,,,5.00,2.6,1.0,,Corporativos cortos US IG baja vol (yfinance)
 LQD,iShares iBoxx IG Corporate Bond,BlackRock,ETF,FIXED_INCOME,USD,US,Corporate Bonds,Balanz;PPI,false,0.95,,,5.20,8.4,1.0,,Corporativos US IG (yfinance)
+BIL,SPDR Bloomberg 1-3 Month T-Bill,State Street,ETF,FIXED_INCOME,USD,US,Cash Equivalents,Balanz;PPI,false,0.99,,,4.80,0.2,1.0,,T-bills ultra-corto cash-like (yfinance)
+SHV,iShares Short Treasury Bond,BlackRock,ETF,FIXED_INCOME,USD,US,Cash Equivalents,Balanz;PPI,false,0.98,,,4.70,0.3,1.0,,Treasuries ultra-corto cash-like (yfinance)
