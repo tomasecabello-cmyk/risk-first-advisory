@@ -4908,11 +4908,27 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
     if not source_map:
         return adapter_snapshots
 
+    # La clase de activo es autoridad del UNIVERSO (CSV), no del source del provider.
+    # Sin esto, un ETF de bonos US (TLT/SHY, source=us) saldría como "equity" porque
+    # el provider deriva la clase del source — rompiendo max_equity / suitability y
+    # dejando sin renta fija de baja vol a los perfiles conservadores.
+    import dataclasses
+    declared_class: dict[str, str] = {}
+    for inst in instruments:
+        tk = getattr(inst, "ticker", None)
+        ac = getattr(inst, "asset_class", None)
+        ac_str = ac.value if hasattr(ac, "value") else str(ac or "")
+        if tk and ac_str.upper() == "FIXED_INCOME":
+            declared_class[tk] = "fixed_income"
+
     provider = LiveMarketDataProvider(source_map, period="3y")
     by_ticker = {s.ticker: s for s in adapter_snapshots}
     for ticker in source_map:
         live = provider.get_snapshot(ticker)
         if live is not None:
+            forced = declared_class.get(ticker)
+            if forced and getattr(live, "asset_class", None) != forced:
+                live = dataclasses.replace(live, asset_class=forced)
             by_ticker[ticker] = live  # reemplaza el del fixture o AGREGA uno nuevo
 
     # Devolver un snapshot por instrumento del universo (no solo los que el

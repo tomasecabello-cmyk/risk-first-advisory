@@ -16,3 +16,8 @@ NVDA,NVIDIA CEDEAR,NVIDIA,CEDEAR,EQUITY,ARS,AR,Technology,Balanz;PPI;Cocos,false
 AMZN,Amazon CEDEAR,Amazon,CEDEAR,EQUITY,ARS,AR,Consumer,Balanz;PPI,false,0.74,,,,,,,CEDEAR Amazon en ARS (data912)
 AAPL,Apple CEDEAR,Apple,CEDEAR,EQUITY,ARS,AR,Technology,Balanz;Cocos,false,0.76,,,,,,,CEDEAR Apple en ARS (data912)
 KO,Coca-Cola CEDEAR,Coca-Cola,CEDEAR,EQUITY,ARS,AR,Consumer Staples,Balanz,false,0.70,,,,,,,CEDEAR Coca-Cola en ARS (data912)
+BND,Vanguard Total Bond Market ETF,Vanguard,ETF,FIXED_INCOME,USD,US,Aggregate Bonds,Balanz;PPI,false,0.97,,,4.50,6.0,1.0,,Bono agregado US IG baja vol (yfinance)
+AGG,iShares Core US Aggregate Bond,BlackRock,ETF,FIXED_INCOME,USD,US,Aggregate Bonds,Balanz;PPI,false,0.97,,,4.50,6.0,1.0,,Bono agregado US IG baja vol (yfinance)
+IEF,iShares 7-10 Year Treasury,BlackRock,ETF,FIXED_INCOME,USD,US,Treasuries,Balanz;PPI,false,0.95,,,4.30,7.5,1.0,,Treasuries medios US (yfinance)
+VCSH,Vanguard Short-Term Corporate Bond,Vanguard,ETF,FIXED_INCOME,USD,US,Corporate Bonds,Balanz;PPI,false,0.94,,,5.00,2.6,1.0,,Corporativos cortos US IG baja vol (yfinance)
+LQD,iShares iBoxx IG Corporate Bond,BlackRock,ETF,FIXED_INCOME,USD,US,Corporate Bonds,Balanz;PPI,false,0.95,,,5.20,8.4,1.0,,Corporativos US IG (yfinance)
