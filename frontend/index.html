@@ -34,24 +34,6 @@
         </a>
       </div>
     </div>
-    <div class="hero-stats">
-      <div class="hero-stat">
-        <div class="hero-stat-num">15</div>
-        <div class="hero-stat-label">Pasos del flujo</div>
-      </div>
-      <div class="hero-stat">
-        <div class="hero-stat-num is-mono">SHA-256</div>
-        <div class="hero-stat-label">Cadena de auditoría · por caso</div>
-      </div>
-      <div class="hero-stat">
-        <div class="hero-stat-num">Sin PII</div>
-        <div class="hero-stat-label">Logs de IA con datos sensibles redactados</div>
-      </div>
-      <div class="hero-stat">
-        <div class="hero-stat-num">0</div>
-        <div class="hero-stat-label">Frameworks · sin build step</div>
-      </div>
-    </div>
   </div>
   <div class="hero-badges">
     <span class="badge badge-ai">KYC asistido por IA</span>
@@ -131,9 +113,12 @@
   <!-- METHODOLOGY EXPLAINER (advisor-friendly — no formulas) -->
   <!-- ───────────────────────────────────────────────────────────────────── -->
   <section class="method-strip">
-    <div class="method-card">
-      <div class="story-eyebrow">Fundamento metodológico</div>
-      <div class="method-headline">¿En qué se basa el Risk Gap?</div>
+    <details class="method-card method-collapse">
+      <summary class="method-summary">
+        <span class="story-eyebrow">Fundamento metodológico</span>
+        <span class="method-headline">¿En qué se basa el Risk Gap?</span>
+        <span class="acc-chevron" aria-hidden="true">▾</span>
+      </summary>
       <p class="method-lede">
         Mide la brecha entre el riesgo que el cliente <strong>declara</strong> aceptar y el que
         realmente tolera <strong>bajo estrés</strong> — el problema #1 de una mesa de ventas. Se
@@ -163,7 +148,7 @@
         Inspirado en la teoría pública de Nitrogen/Riskalyze, deliberadamente distinto de su método
         patentado. <a href="advanced.html#fundamento">Ver el detalle técnico (fórmulas) en Modo técnico →</a>
       </div>
-    </div>
+    </details>
   </section>
 
   <!-- ───────────────────────────────────────────────────────────────────── -->
@@ -172,12 +157,12 @@
   <section class="demo-helpers">
 
     <!-- Recommended demo path — the click-by-click for a non-tech viewer -->
-    <aside class="demo-path">
-      <div class="demo-path-header">
+    <details class="demo-path">
+      <summary class="demo-path-header">
         <span class="demo-path-eyebrow">Recorrido recomendado</span>
-        <div class="demo-path-title">Un click y mirá el flujo completo</div>
-        <div class="demo-path-sub">Pensado para mostrarle la demo a un asesor o profesor en ~90 segundos.</div>
-      </div>
+        <span class="demo-path-title">Un click y mirá el flujo completo (~90s)</span>
+        <span class="acc-chevron" aria-hidden="true">▾</span>
+      </summary>
       <ol class="demo-path-steps">
         <li><span class="step-num">1</span> <strong>Cargá un perfil de inversor</strong> — o dejá los valores por defecto, ya son razonables para un cliente de riesgo moderado.</li>
         <li><span class="step-num">2</span> <strong>Hacé clic en <em>"Ejecutar demo guiada"</em></strong> — corre hasta la propuesta de cartera (KYC → análisis de IA → aprobación del asesor → propuesta) y <strong>se detiene para que vos elijas la variante</strong>, con override si excede el presupuesto. Recién ahí se generan el reporte y la auditoría.</li>
@@ -185,7 +170,7 @@
         <li><span class="step-num">4</span> <strong>Cerrá con el reporte y la auditoría</strong> — el reporte Markdown es revisable (no es asesoramiento automático) y la cadena SHA-256 verifica que cada decisión quedó registrada.</li>
       </ol>
       <div class="demo-path-sub" style="margin-top:10px;">Sin <code>OPENAI_API_KEY</code>: levantá el backend con <code>RFA_DEMO_MODE=1</code> y la demo corre con un análisis determinístico.</div>
-    </aside>
+    </details>
 
     <!-- Demo presenter notes — collapsed by default, for the human running the demo -->
     <details class="presenter-notes">
