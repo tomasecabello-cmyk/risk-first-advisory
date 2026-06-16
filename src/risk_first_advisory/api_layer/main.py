@@ -6053,6 +6053,25 @@ def create_case_report(
         if _analyses:
             latest_analysis_data = _analyses[-1]
 
+        # ── 4b. Capacidad vs. tolerancia (diferencial) desde el KYC vigente ──
+        # Carga el KYC del caso y computa el marco determinístico (capacidad
+        # acota tolerancia) + el capacity gap, para la sección de capacidad y el
+        # resumen ejecutivo del reporte. Tolerante: si no hay KYC, queda None.
+        capacity_data: dict[str, Any] | None = None
+        kyc_id = case_data.get("current_kyc_submission_id")
+        if kyc_id is not None:
+            kyc_row = SQLiteKYCSubmissionRepository(store).get(kyc_id)
+            kyc_payload = (kyc_row or {}).get("payload")
+            if isinstance(kyc_payload, dict):
+                from risk_first_advisory.ai_layer.risk_scoring import (
+                    capacity_gap_from_kyc,
+                    deterministic_assessment,
+                )
+                capacity_data = {
+                    "deterministic": deterministic_assessment(kyc_payload),
+                    "capacity_gap": capacity_gap_from_kyc(kyc_payload),
+                }
+
         # ── 5. generar markdown ───────────────────────────────────────────
         try:
             markdown, metadata = CaseMarkdownReportGenerator().generate(
@@ -6062,6 +6081,7 @@ def create_case_report(
                 approval_data=approval_data,
                 override_data=override_data,
                 analysis_data=latest_analysis_data,
+                capacity_data=capacity_data,
             )
         except Exception as exc:
             raise HTTPException(

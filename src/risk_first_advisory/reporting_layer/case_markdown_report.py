@@ -137,6 +137,24 @@ def _section_metrics(candidate: dict[str, Any]) -> str:
         f"- **Cantidad de instrumentos**: {n_instruments}",
         f"- **Constraints satisfied**: {bool(candidate.get('constraints_satisfied'))}",
     ]
+    div = candidate.get("diversification")
+    if isinstance(div, dict) and div.get("diversification_score") is not None:
+        score = round(float(div["diversification_score"]))
+        band = _safe_str(div.get("concentration_band"))
+        eff = div.get("effective_holdings")
+        eff_str = f", equivalente diversificado ~{float(eff):.1f}" if isinstance(eff, (int, float)) else ""
+        lines.append(
+            f"- **Diversificación**: {score}/100 (concentración {band}{eff_str})"
+        )
+        by_class = div.get("by_asset_class")
+        if isinstance(by_class, dict) and by_class:
+            reparto = ", ".join(
+                f"{k} {round(float(v) * 100)}%" for k, v in by_class.items()
+            )
+            lines.append(f"- **Reparto por clase de activo**: {reparto}")
+        flags = div.get("flags") or []
+        if flags:
+            lines.append(f"- **Alertas de concentración**: {', '.join(str(f) for f in flags)}")
     return "\n".join(lines)
 
 
@@ -353,6 +371,103 @@ def _section_risk_gap(analysis_data: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+def _section_executive_summary(
+    case_data: dict[str, Any],
+    approval_data: dict[str, Any] | None,
+    selection_data: dict[str, Any],
+    candidate: dict[str, Any],
+    override_data: dict[str, Any] | None,
+    capacity_data: dict[str, Any] | None,
+) -> str:
+    """
+    Párrafo legible que sintetiza el caso para un asesor/cliente, ANTES de las
+    tablas. Sin tablas ni IDs: perfil, capacidad, cartera recomendada, override.
+    100% derivado de los inputs (determinístico).
+    """
+    title = _safe_str(case_data.get("title"), default="el cliente")
+    profile = _safe_str((approval_data or {}).get("approved_profile"))
+    variant = _safe_str(selection_data.get("selected_variant"))
+    objective = _safe_str(candidate.get("objective"))
+    eret = _pct(candidate.get("expected_return_annual"))
+    vol = _pct(candidate.get("volatility_annual"))
+    n = candidate.get("holdings_count")
+    if not isinstance(n, int):
+        n = len(_normalize_holdings(candidate))
+
+    parts = [f"Para **{title}** se aprobó un perfil de riesgo **{profile}**."]
+
+    cg = (capacity_data or {}).get("capacity_gap")
+    if isinstance(cg, dict):
+        if cg.get("exceeds_capacity"):
+            parts.append(
+                f"El cliente busca asumir más riesgo (**{_safe_str(cg.get('desired_profile'))}**) "
+                f"del que su situación financiera soporta (**{_safe_str(cg.get('capacity_ceiling'))}**); "
+                "la diferencia se aprobó con override firmado del asesor."
+            )
+        else:
+            parts.append(
+                "Ese perfil está **dentro de la capacidad financiera** del cliente; "
+                "no requirió override."
+            )
+
+    rec = (
+        f"Se recomienda la cartera **{variant}** (objetivo {objective}): retorno esperado "
+        f"anual **{eret}**, volatilidad **{vol}**, {n} instrumento(s)."
+    )
+    div = candidate.get("diversification")
+    if isinstance(div, dict) and div.get("diversification_score") is not None:
+        rec += (
+            f" Diversificación {round(float(div['diversification_score']))}/100 "
+            f"(concentración {_safe_str(div.get('concentration_band'))})."
+        )
+    parts.append(rec)
+
+    if override_data is not None:
+        parts.append(
+            "Esta selección **excede el presupuesto de riesgo aprobado y fue firmada con "
+            "override del asesor**, registrado en la cadena de auditoría."
+        )
+
+    return "## Resumen ejecutivo\n\n" + " ".join(parts)
+
+
+def _section_capacity(capacity_data: dict[str, Any] | None) -> str:
+    """
+    Capacidad vs. tolerancia (el diferencial del producto): cuánto QUIERE asumir
+    el cliente vs cuánto PUEDE soportar su situación financiera. Condicional: si
+    no hay capacity_data, devuelve "" (backward-compat).
+    """
+    det = (capacity_data or {}).get("deterministic")
+    if not isinstance(det, dict):
+        return ""
+    cg = (capacity_data or {}).get("capacity_gap") or {}
+
+    def _0_100(v: Any) -> str:
+        try:
+            return f"{round(float(v) * 100)}/100"
+        except (TypeError, ValueError):
+            return "n/a"
+
+    lines = ["## Capacidad vs. tolerancia", ""]
+    lines.append(
+        "_La capacidad financiera acota la tolerancia: el riesgo efectivo es el mínimo "
+        "entre lo que el cliente quiere y lo que su situación soporta. No se asigna más "
+        "riesgo del que puede afrontar, por más que lo declare._"
+    )
+    lines.append("")
+    lines.append(f"- **Tolerancia declarada (quiere)**: {_0_100(det.get('willingness'))}")
+    lines.append(f"- **Capacidad financiera (puede)**: {_0_100(det.get('ability'))}")
+    lines.append(
+        f"- **Riesgo efectivo = mínimo de ambos**: {_decimal(det.get('score'), 1)}/100 "
+        f"→ perfil `{_safe_str(det.get('profile'))}`"
+    )
+    lines.append(f"- **Dimensión que limita**: `{_safe_str(det.get('binding_dimension'))}`")
+    explanation = _safe_str(cg.get("explanation"), default="")
+    if explanation:
+        lines.append(f"- **Lectura**: {explanation}")
+    return "\n".join(lines)
+
+
 def _section_disclaimers() -> str:
     lines = ["## Disclaimers", ""]
     for d in _DISCLAIMERS:
@@ -394,6 +509,7 @@ class CaseMarkdownReportGenerator:
         approval_data: dict[str, Any] | None = None,
         override_data: dict[str, Any] | None = None,
         analysis_data: dict[str, Any] | None = None,
+        capacity_data: dict[str, Any] | None = None,
         generated_at_utc: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -412,11 +528,19 @@ class CaseMarkdownReportGenerator:
         sections: list[str] = [
             _section_title(case_data.get("case_id", "n/a")),
             "",
+            _section_executive_summary(
+                case_data, approval_data, selection_data, candidate,
+                override_data, capacity_data,
+            ),
+            "",
             _section_meta(case_data, generated_at),
             "",
             _section_approved_profile(approval_data),
             "",
         ]
+        capacity_section = _section_capacity(capacity_data)
+        if capacity_section:
+            sections.extend([capacity_section, ""])
         risk_gap_section = _section_risk_gap(analysis_data)
         if risk_gap_section:
             sections.extend([risk_gap_section, ""])
