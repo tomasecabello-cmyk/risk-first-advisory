@@ -315,6 +315,21 @@ async function idemoSubmitKyc() {
     idemoStepResult("kyc", "warn", "Primero hacé clic en <strong>1. Preparar caso del inversor</strong>.");
     return false;
   }
+  // Validación: el cuestionario Grable-Lytton debe estar COMPLETO. Sin esto el
+  // backend rellena lo no respondido con la opción más conservadora y produce un
+  // perfil "real" de un cuestionario vacío, sin avisar. Para una herramienta de
+  // adecuación eso invalida la evaluación → se bloquea el envío.
+  const totalQ = (window.idemoGL && window.idemoGL.n) || 13;
+  const answered = Object.keys(idemoToleranceAnswers()).length;
+  if (answered < totalQ) {
+    idemoSetStep("kyc", "error");
+    idemoStepResult("kyc", "warn",
+      `<strong>Completá el cuestionario de tolerancia antes de enviar.</strong> ` +
+      `Respondiste <strong>${answered}/${totalQ}</strong> preguntas. Las que falten contarían ` +
+      `como la opción más conservadora y el perfil saldría sesgado — no sería una evaluación ` +
+      `válida. Respondé las que faltan y reintentá.`);
+    return false;
+  }
   idemoSetStep("kyc", "active");
   const payload = idemoBuildKycPayload();
   const res = await idemoApi("POST", `/cases/${encodeURIComponent(window.idemoState.caseId)}/kyc`, payload);
