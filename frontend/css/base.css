@@ -1364,3 +1364,53 @@ td.mono { font-size: 12px; color: var(--rf-text); }
   font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px; color: var(--rf-navy-700);
 }
+
+/* ── demo: dinamismo + pulido de los paneles de resultado ──────────────────
+ * Los paneles del flujo guiado los dibuja investor-demo.js con inline styles,
+ * así que no heredan el pulido de .card. Acá les damos: (1) entrada animada
+ * (fade + slide) cuando aparecen, (2) profundidad (sombra) y radio unificado
+ * a los sub-paneles planos sin tocar el JID inline, (3) micro-interacción en
+ * las opciones del cuestionario. Respeta prefers-reduced-motion. */
+
+@keyframes idemoReveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.idemo-reveal { animation: idemoReveal .38s cubic-bezier(.16, 1, .3, 1) both; }
+
+/* Sub-paneles planos (los divs con borde inline dentro de cada resultado):
+ * sombra suave + radio del sistema + lift al pasar el mouse. box-shadow no se
+ * setea inline, así que no hay conflicto; el radio se unifica con !important. */
+[id^="idemo-step-"][id$="-result"] > div {
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+[id^="idemo-step-"][id$="-result"] > div:not(.msg) {
+  box-shadow: var(--rf-shadow);
+  border-radius: var(--rf-radius) !important;
+}
+[id^="idemo-step-"][id$="-result"] > div:not(.msg):hover {
+  box-shadow: var(--rf-shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Cuestionario Grable-Lytton: las opciones se sienten vivas (hover + checked). */
+#idemo-gl-container label {
+  border-radius: var(--rf-radius-sm);
+  padding: 4px 8px !important;
+  transition: background .15s ease;
+}
+#idemo-gl-container label:hover { background: var(--rf-bg-soft); }
+#idemo-gl-container label:has(input:checked) {
+  background: var(--rf-blue-100);
+  font-weight: 600;
+}
+
+/* Cards clickeables del flujo (los step wrappers) levantan al pasar el mouse. */
+[id^="idemo-step-"][data-state] {
+  transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .idemo-reveal { animation: none; }
+  [id^="idemo-step-"][id$="-result"] > div:not(.msg):hover { transform: none; }
+}

@@ -225,6 +225,16 @@ function idemoSetStep(key, status) {
 
 // Render inline en el panel de resultado de un paso.
 // kind: ok | info | warn | error
+// Re-dispara una animación de entrada en el contenedor de resultado. Quitar +
+// forzar reflow + re-agregar la clase garantiza que corra en cada render
+// (sin esto, cambiar innerHTML no reinicia la animación CSS).
+function idemoReveal(target) {
+  if (!target) return;
+  target.classList.remove("idemo-reveal");
+  void target.offsetWidth; // reflow
+  target.classList.add("idemo-reveal");
+}
+
 function idemoStepResult(key, kind, html) {
   const target = document.getElementById(`idemo-step-${key}-result`);
   if (!target) return;
@@ -233,6 +243,7 @@ function idemoStepResult(key, kind, html) {
     : kind === "error" ? "msg-error"
     : "msg-info";
   target.innerHTML = `<div class="msg ${cls}">${html}</div>`;
+  idemoReveal(target);
 }
 
 // Mismo que idemoStepResult pero permite agregar HTML extra (tablas, cards)
@@ -245,6 +256,7 @@ function idemoStepResultRich(key, kind, bannerHtml, extraHtml) {
     : kind === "error" ? "msg-error"
     : "msg-info";
   target.innerHTML = `<div class="msg ${cls}">${bannerHtml}</div>${extraHtml || ""}`;
+  idemoReveal(target);
 }
 
 // Compat shim: investor-demo.js previo usaba idemoStatus/idemoRenderProgress.
