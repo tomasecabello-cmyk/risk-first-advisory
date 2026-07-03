@@ -238,6 +238,125 @@ def portfolio_risk_number(
 
 
 # ---------------------------------------------------------------------------
+# Lado CARTERA — de una cartera candidata REAL (pesos + datos de mercado)
+# ---------------------------------------------------------------------------
+#
+# Slice 2 (docs/RISK_NUMBER_DESIGN.md §5): cierra el gap de
+# `InstrumentMarketDataAdapter`, que solo produce retorno/volatilidad reales
+# para renta fija (el proxy CSV no cubre ETF/STOCK/CEDEAR). El camino real
+# para equities ya existe — `LiveMarketDataProvider` (yfinance/data912,
+# opt-in vía RFA_LIVE_DATA) computa expected_return_annual/volatility_annual
+# reales para cualquier MarketDataSnapshot, y `CovarianceEngine` arma la
+# matriz de covarianza sobre esos snapshots. Lo que faltaba era combinar los
+# PESOS de una cartera candidata (OptimizedPortfolio.weights) con esos datos
+# para obtener los momentos DE LA CARTERA (no de cada activo por separado).
+# Estas funciones no importan tipos de data_layer/portfolio_layer a propósito
+# (mantener ai_layer/risk_number.py sin acoplar capas); el caller (Slice 3,
+# wiring) adapta CovarianceMatrix.tickers/.covariance y
+# {ReturnEstimate.ticker: .adjusted_expected_return_annual} a listas planas.
+
+
+def portfolio_moments_from_weights(
+    weights: dict[str, float],
+    expected_returns: dict[str, float],
+    tickers: list[str],
+    covariance: list[list[float]],
+) -> dict[str, Any]:
+    """
+    Momentos DE LA CARTERA (mu_annual, sigma_annual) a partir de pesos +
+    retornos esperados por ticker + matriz de covarianza anualizada:
+
+        mu_annual    = Σ w_i · μ_i
+        sigma_annual = sqrt(w' Σ w)
+
+    Con `expected_returns`/`covariance` provenientes de datos reales (vía
+    LiveMarketDataProvider + CovarianceEngine), estos momentos son reales
+    para cualquier tipo de instrumento, incluidas equities.
+
+    Solo se usan los tickers con peso > 0 que están presentes tanto en
+    `tickers` (índice de la matriz de covarianza) como en `expected_returns`;
+    los que falten se listan en `missing_tickers` en vez de fallar en
+    silencio — el caller decide si eso es aceptable. NO renormaliza los
+    pesos: `invested_weight_used` expone cuánto peso efectivamente entró al
+    cálculo, para que quede auditable.
+
+    Función pura. Raises ValueError si las dimensiones no calzan o si
+    ningún ticker con peso > 0 tiene datos disponibles.
+    """
+    if not weights:
+        raise ValueError("weights no puede estar vacío.")
+    if len(covariance) != len(tickers):
+        raise ValueError(
+            f"covariance debe tener {len(tickers)} filas (una por ticker), "
+            f"tiene {len(covariance)}."
+        )
+    for i, row in enumerate(covariance):
+        if len(row) != len(tickers):
+            raise ValueError(
+                f"covariance fila {i} debe tener {len(tickers)} columnas, "
+                f"tiene {len(row)}."
+            )
+
+    index = {t: i for i, t in enumerate(tickers)}
+    used: list[str] = []
+    missing: list[str] = []
+    for ticker, w in weights.items():
+        if w <= 0:
+            continue
+        if ticker in index and ticker in expected_returns:
+            used.append(ticker)
+        else:
+            missing.append(ticker)
+
+    if not used:
+        raise ValueError(
+            "Ninguno de los tickers con peso > 0 tiene retorno esperado y "
+            "covarianza disponibles; no se puede computar la cartera."
+        )
+
+    mu = sum(weights[t] * expected_returns[t] for t in used)
+    variance = 0.0
+    for a in used:
+        wa, ia = weights[a], index[a]
+        for b in used:
+            wb, ib = weights[b], index[b]
+            variance += wa * wb * covariance[ia][ib]
+    sigma = math.sqrt(max(0.0, variance))
+
+    return {
+        "mu_annual": round(mu, 6),
+        "sigma_annual": round(sigma, 6),
+        "used_tickers": used,
+        "missing_tickers": missing,
+        "invested_weight_used": round(sum(weights[t] for t in used), 4),
+    }
+
+
+def portfolio_risk_number_from_weights(
+    weights: dict[str, float],
+    expected_returns: dict[str, float],
+    tickers: list[str],
+    covariance: list[list[float]],
+    horizon_years: float = 1.0,
+    alpha: float = 0.95,
+) -> dict[str, Any]:
+    """
+    Conveniencia: pesos + datos de mercado de una cartera candidata real →
+    número de riesgo 0–100 (misma forma que `portfolio_risk_number`, más
+    `missing_tickers`/`invested_weight_used` de `portfolio_moments_from_weights`
+    para que el caller pueda mostrar de qué datos salió el número).
+    """
+    moments = portfolio_moments_from_weights(weights, expected_returns, tickers, covariance)
+    result = portfolio_risk_number(
+        mu_annual=moments["mu_annual"], sigma_annual=moments["sigma_annual"],
+        horizon_years=horizon_years, alpha=alpha,
+    )
+    result["missing_tickers"] = moments["missing_tickers"]
+    result["invested_weight_used"] = moments["invested_weight_used"]
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Lado CLIENTE — trade-off (certainty equivalent → γ CRRA) → número
 # ---------------------------------------------------------------------------
 

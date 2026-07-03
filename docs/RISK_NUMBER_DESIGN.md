@@ -1,10 +1,10 @@
 # Risk Number — diseño (enfoque A decidido, Slice 1 implementado)
 
 > **Estado:** ACTIVO. El usuario decidió el **enfoque A** (versión diferenciada,
-> 2026-07-02) y delegó la elección técnica. **Slice 1 implementado:**
+> 2026-07-02) y delegó la elección técnica. **Slice 1 y Slice 2 implementados:**
 > `ai_layer/risk_number.py` (módulo puro, sin red) + `tests/unit/test_risk_number.py`
-> (26 tests). Pendientes: Slice 2 (retornos reales para equities) y Slice 3 (wiring
-> a `/cases/*`, reporte y demo guiada). El §3 queda como registro de la decisión.
+> (30 tests). Pendiente: Slice 3 (wiring a `/cases/*`, reporte y demo guiada).
+> El §3 queda como registro de la decisión.
 
 ## 0. Empezar acá (para la sesión nueva)
 
@@ -119,11 +119,30 @@ mapeo → mismo número → alineación.
     número, con mapeo **documentado y tuneable en `config/`**.
   - alineación: cliente vs cartera vs **techo de capacidad** (ability) en la misma escala.
   - tests unitarios deterministas. Sin tocar API/DB/red.
-- **Slice 2 — datos reales.** Proveedor de retornos reales para el universo (yfinance + fuentes
-  ARG; el universo "tipo markowitz"). Reemplaza el proxy para equities en el scoring de cartera.
-- **Slice 3 — wiring.** Exponer en el flujo case-scoped (`/cases/...`) + en el reporte + en la
-  demo guiada. Respetar invariantes: **reports formatean, no recalculan** (I-013/I-020),
-  **AI propone, asesor decide**, **audit chain** intacto. Leer `docs/INVARIANTS.md` antes.
+- **Slice 2 — HECHO (2026-07-03).** El "proveedor de retornos reales para el universo" ya
+  existía (`LiveMarketDataProvider`, yfinance/data912, opt-in vía `RFA_LIVE_DATA`) y ya cubre
+  equities (a diferencia del proxy CSV de `InstrumentMarketDataAdapter`, que solo cubre renta
+  fija — ver §4 "Gotcha"). El gap real era que `risk_number.py` no tenía forma de consumir una
+  cartera candidata REAL (pesos del optimizador) junto con esos datos. Se agregó:
+  - `portfolio_moments_from_weights(weights, expected_returns, tickers, covariance)` — combina
+    pesos (p.ej. `OptimizedPortfolio.weights`) con retornos por ticker (p.ej.
+    `ReturnEstimate.adjusted_expected_return_annual`) y una matriz de covarianza anualizada
+    (p.ej. `CovarianceMatrix`) → `mu_annual = Σwᵢμᵢ`, `sigma_annual = √(w'Σw)`. NO renormaliza
+    pesos faltantes (los reporta en `missing_tickers`, auditable); NO importa tipos de
+    `data_layer`/`portfolio_layer` (mantiene `ai_layer/risk_number.py` sin acoplar capas — el
+    caller en Slice 3 adapta los objetos a listas planas).
+  - `portfolio_risk_number_from_weights(...)` — conveniencia que compone lo anterior con
+    `portfolio_risk_number`.
+  - 4 tests nuevos (30 en total en `test_risk_number.py`), suite completa sin regresiones.
+- **Slice 3 — wiring (pendiente).** Exponer en el flujo case-scoped (`/cases/...`) + en el
+  reporte + en la demo guiada. Falta: llamar `portfolio_risk_number_from_weights` desde donde
+  se genera `PortfolioCandidateSet` (`portfolio_layer/generation.py`) adaptando
+  `CovarianceMatrix`/`ReturnEstimate` a las listas planas que pide la función; mover
+  `DOWNSIDE_ANCHORS`/`GAMMA_ANCHORS` a `config/` (hoy son constantes de módulo, documentadas y
+  tuneables por parámetro pero no versionables sin tocar Python); exponer `client_risk_number`
+  desde el KYC ya persistido; card en el frontend. Respetar invariantes: **reports formatean,
+  no recalculan** (I-013/I-020), **AI propone, asesor decide** (I-001/I-016/I-019), **audit
+  chain** intacto (I-021). Leer `docs/INVARIANTS.md` antes.
 
 ## 6. Punteros
 - Teoría + IP: `docs/RISK_SCORING_THEORY.md`

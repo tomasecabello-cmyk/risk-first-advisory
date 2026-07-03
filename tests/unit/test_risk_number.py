@@ -24,7 +24,9 @@ from risk_first_advisory.ai_layer.risk_number import (
     gamma_to_number,
     number_to_band,
     portfolio_downside,
+    portfolio_moments_from_weights,
     portfolio_risk_number,
+    portfolio_risk_number_from_weights,
     tradeoff_risk_number,
 )
 
@@ -129,6 +131,64 @@ def test_portfolio_risk_number_lands_in_expected_band():
     assert 75.0 <= r["number"] <= 77.0
     assert r["band"] == "moderado-agresivo"
     assert "peor 5%" in r["explanation"]
+
+
+# ── portfolio_moments_from_weights / portfolio_risk_number_from_weights ──────
+
+
+_TICKERS = ["SPY", "AL30", "CASH"]
+_RETURNS = {"SPY": 0.09, "AL30": 0.06, "CASH": 0.02}
+# Covarianza diagonal (activos no correlacionados) para verificar a mano:
+# var = Σ w_i^2 σ_i^2, sin términos cruzados.
+_COV_DIAG = [
+    [0.18 ** 2, 0.0, 0.0],
+    [0.0, 0.12 ** 2, 0.0],
+    [0.0, 0.0, 0.01 ** 2],
+]
+
+
+def test_portfolio_moments_weighted_mean_and_variance():
+    weights = {"SPY": 0.6, "AL30": 0.3, "CASH": 0.1}
+    m = portfolio_moments_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
+    expected_mu = 0.6 * 0.09 + 0.3 * 0.06 + 0.1 * 0.02
+    expected_var = (0.6 ** 2) * (0.18 ** 2) + (0.3 ** 2) * (0.12 ** 2) + (0.1 ** 2) * (0.01 ** 2)
+    assert m["mu_annual"] == pytest.approx(expected_mu, abs=1e-6)
+    assert m["sigma_annual"] == pytest.approx(math.sqrt(expected_var), abs=1e-6)
+    assert m["missing_tickers"] == []
+    assert m["invested_weight_used"] == pytest.approx(1.0)
+
+
+def test_portfolio_moments_ignores_zero_weight_and_flags_missing():
+    # GLD no está en tickers/covarianza -> falta reportada, no falla.
+    weights = {"SPY": 0.7, "AL30": 0.0, "GLD": 0.3}
+    m = portfolio_moments_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
+    assert m["used_tickers"] == ["SPY"]
+    assert m["missing_tickers"] == ["GLD"]
+    assert m["invested_weight_used"] == pytest.approx(0.7)
+
+
+def test_portfolio_moments_validations():
+    with pytest.raises(ValueError):
+        portfolio_moments_from_weights({}, _RETURNS, _TICKERS, _COV_DIAG)
+    with pytest.raises(ValueError):
+        # covarianza con dimensiones que no calzan.
+        portfolio_moments_from_weights(
+            {"SPY": 1.0}, _RETURNS, _TICKERS, [[1.0, 0.0], [0.0, 1.0]])
+    with pytest.raises(ValueError):
+        # ningún ticker con peso > 0 tiene datos.
+        portfolio_moments_from_weights({"GLD": 1.0}, _RETURNS, _TICKERS, _COV_DIAG)
+
+
+def test_portfolio_risk_number_from_weights_matches_manual_composition():
+    weights = {"SPY": 0.6, "AL30": 0.3, "CASH": 0.1}
+    r = portfolio_risk_number_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
+    moments = portfolio_moments_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
+    manual = portfolio_risk_number(
+        mu_annual=moments["mu_annual"], sigma_annual=moments["sigma_annual"])
+    assert r["number"] == manual["number"]
+    assert r["band"] == manual["band"]
+    assert r["missing_tickers"] == []
+    assert r["invested_weight_used"] == pytest.approx(1.0)
 
 
 # ── γ CRRA desde certainty equivalent ─────────────────────────────────────────
