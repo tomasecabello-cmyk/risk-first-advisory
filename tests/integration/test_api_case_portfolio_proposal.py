@@ -576,6 +576,70 @@ class TestCandidateHoldings:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Risk Number (Slice 3 — docs/RISK_NUMBER_DESIGN.md)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestCandidateRiskNumber:
+    """
+    Cada candidate completed expone `risk_number` (0-100 de ESA cartera,
+    derivado de sus pesos reales + los retornos/covarianza ya estimados para
+    la propuesta — no vuelve a llamar al optimizer) y `risk_alignment`
+    (comparación con el número del cliente, derivado del KYC del case).
+    """
+
+    def test_every_completed_candidate_has_risk_number(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            rn = c.get("risk_number")
+            assert rn is not None, (
+                f"candidate {c.get('variant')!r} missing risk_number "
+                "(usable_snapshots feed both the optimizer and the risk "
+                "number, so a completed proposal should always have it)"
+            )
+            assert 0.0 <= rn["number"] <= 100.0
+            assert rn["band"] in {
+                "conservador", "moderado-defensivo", "moderado",
+                "moderado-agresivo", "agresivo",
+            }
+            assert rn["missing_tickers"] == []
+
+    def test_every_completed_candidate_has_risk_alignment(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        # _full_setup ya postea KYC, así que el case tiene current_kyc_submission_id.
+        _, cands = _completed_candidates(client, patch_ai_client)
+        for c in cands:
+            al = c.get("risk_alignment")
+            assert al is not None, (
+                f"candidate {c.get('variant')!r} missing risk_alignment "
+                "despite the case having a KYC submission"
+            )
+            assert al["status"] in {
+                "aligned", "over_tolerance", "under_tolerance", "over_capacity",
+            }
+            assert isinstance(al["override_required"], bool)
+            # override_required solo puede ser True cuando el status es over_capacity.
+            assert al["override_required"] == (al["status"] == "over_capacity")
+
+    def test_growth_variant_is_riskiest_or_tied(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        # No es un invariante estricto del optimizer, pero con el universo
+        # fixture GROWTH (MAX_RETURN, budget relajado) no debería quedar por
+        # debajo del número de DEFENSIVE (MIN_VARIANCE).
+        _, cands = _completed_candidates(client, patch_ai_client)
+        by_variant = {c["variant"]: c for c in cands}
+        if "DEFENSIVE" in by_variant and "GROWTH" in by_variant:
+            defensive_rn = by_variant["DEFENSIVE"]["risk_number"]
+            growth_rn = by_variant["GROWTH"]["risk_number"]
+            if defensive_rn and growth_rn:
+                assert growth_rn["number"] >= defensive_rn["number"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Validation
 # ═════════════════════════════════════════════════════════════════════════════
 

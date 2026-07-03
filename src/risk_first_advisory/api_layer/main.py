@@ -99,6 +99,7 @@ from risk_first_advisory.api_layer.schemas import (
     ClientCreateRequest,
     ClientListResponse,
     ClientResponse,
+    ClientRiskNumber,
     DemoRunResponse,
     DeterministicAssessment,
     FilteredSnapshotResponse,
@@ -3733,6 +3734,9 @@ def create_case_profile_analysis(
     # IA = capa rica; motor = base auditable + fallback sin key + cross-check.
     # Ver ai_layer/risk_gap.py::combine_risk_gaps y ai_layer/risk_scoring.py.
     from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
+    from risk_first_advisory.ai_layer.risk_number import (
+        client_risk_number as compute_client_risk_number,
+    )
     from risk_first_advisory.ai_layer.risk_scoring import (
         capacity_gap_from_kyc,
         deterministic_assessment,
@@ -3745,12 +3749,14 @@ def create_case_profile_analysis(
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
     det_obj = DeterministicAssessment(**deterministic_assessment(kyc_payload))
     capacity_gap_obj = CapacityGap(**capacity_gap_from_kyc(kyc_payload))
+    risk_number_obj = ClientRiskNumber(**compute_client_risk_number(kyc_payload))
 
     return AIProfileAnalysisResponse(
         **analysis_data,
         risk_gap=risk_gap_obj,
         deterministic=det_obj,
         capacity_gap=capacity_gap_obj,
+        risk_number=risk_number_obj,
     )
 
 
@@ -4959,12 +4965,62 @@ def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
     }
 
 
+def _compute_candidate_risk_number(
+    portfolio: Any,
+    expected_returns: dict[str, float] | None,
+    cov_tickers: list[str] | None,
+    cov_matrix: list[list[float]] | None,
+    client_number: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """
+    Risk Number 0-100 de ESTA cartera candidata (desde sus pesos reales +
+    retornos/covarianza ya estimados para la propuesta — Slice 2 del Risk
+    Number) + alineación con el número del cliente, si está disponible.
+
+    Puramente derivado de datos ya computados en este mismo request (no
+    vuelve a llamar al optimizer ni a ningún proveedor de mercado) —
+    consistente con I-013/I-020. Tolerante: si faltan datos de mercado para
+    los tickers con peso (p.ej. universo no cubierto por live data), devuelve
+    (None, None) en vez de romper la generación de la propuesta.
+
+    Returns (risk_number_dict | None, risk_alignment_dict | None).
+    """
+    if not expected_returns or not cov_tickers or not cov_matrix:
+        return None, None
+    from risk_first_advisory.ai_layer.risk_number import (
+        align_numbers,
+        portfolio_risk_number_from_weights,
+    )
+    try:
+        rn = portfolio_risk_number_from_weights(
+            weights=portfolio.weights,
+            expected_returns=expected_returns,
+            tickers=cov_tickers,
+            covariance=cov_matrix,
+        )
+    except ValueError:
+        return None, None
+
+    alignment = None
+    if client_number is not None:
+        alignment = align_numbers(
+            client_number=client_number["number"],
+            capacity_ceiling_number=client_number["capacity_ceiling_number"],
+            portfolio_number=rn["number"],
+        )
+    return rn, alignment
+
+
 def _serialize_candidate_for_proposal(
     variant_name: str,
     portfolio: Any,
     meta: Any,
     instruments_by_ticker: dict[str, dict[str, Any]] | None = None,
     risk_budget: Any = None,
+    expected_returns: dict[str, float] | None = None,
+    cov_tickers: list[str] | None = None,
+    cov_matrix: list[list[float]] | None = None,
+    client_number: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Mismo shape que LivePortfolioCandidateResponse para coherencia con
@@ -4982,6 +5038,15 @@ def _serialize_candidate_for_proposal(
         run (`filter_data["eligible_instruments"]`), keyed por ticker.
         Si un ticker del portfolio no aparece en el snapshot (caso edge),
         la holding se emite con metadata `None` pero conserva ticker/weight.
+
+    Risk Number (Slice 2/3 — docs/RISK_NUMBER_DESIGN.md):
+        `expected_returns`/`cov_tickers`/`cov_matrix` (de esta misma
+        generación, ver paso 6 del endpoint) producen `risk_number`: el
+        número 0-100 de ESTA cartera, misma escala que el del cliente.
+        `client_number` (del KYC vigente del case, si existe) agrega
+        `risk_alignment`: cómo se compara esta cartera contra el cliente y
+        su techo de capacidad. Ambos quedan `None` si faltan datos —no
+        bloquean la generación de la propuesta.
     """
     from risk_first_advisory.portfolio_layer.diversification import (
         assess_diversification,
@@ -5037,6 +5102,12 @@ def _serialize_candidate_for_proposal(
             "suitability_status":     None,  # TODO Fase 4: suitability per-instrument
         })
 
+    # Risk Number de esta cartera (None si faltan retornos/covarianza para los
+    # tickers con peso) + alineación con el cliente (None sin KYC del case).
+    risk_number, risk_alignment = _compute_candidate_risk_number(
+        portfolio, expected_returns, cov_tickers, cov_matrix, client_number
+    )
+
     return {
         "variant":                variant_name,
         "objective":              portfolio.objective.value,
@@ -5063,6 +5134,8 @@ def _serialize_candidate_for_proposal(
         # Descomposición de diversificación (pura, sin red/LLM): concentración,
         # repartos por eje y score, para comparar variantes y explicar el porqué.
         "diversification": assess_diversification(holdings),
+        "risk_number":     risk_number,
+        "risk_alignment":  risk_alignment,
     }
 
 
@@ -5316,6 +5389,25 @@ def create_case_portfolio_proposal(
     return_estimates = ReturnEstimator().estimate_many(usable_snapshots)
     covariance_matrix = CovarianceEngine().build(usable_snapshots)
 
+    # ── 6b. Risk Number: datos planos para el número de cartera + cliente ───
+    # docs/RISK_NUMBER_DESIGN.md (Slice 3). Puramente derivado de lo estimado
+    # arriba (nada de red/optimizer adicional) + el KYC vigente del case, si
+    # existe (tolerante: sin KYC, risk_alignment queda None por candidato).
+    expected_returns_by_ticker = {
+        e.ticker: e.adjusted_expected_return_annual for e in return_estimates
+    }
+    client_number: dict[str, Any] | None = None
+    kyc_id = case_data.get("current_kyc_submission_id")
+    if kyc_id is not None:
+        from risk_first_advisory.ai_layer.risk_number import (
+            client_risk_number as compute_client_risk_number,
+        )
+        with SQLiteEntityStore(db_path) as store:
+            kyc_row = SQLiteKYCSubmissionRepository(store).get(kyc_id)
+        kyc_payload_for_rn = (kyc_row or {}).get("payload")
+        if isinstance(kyc_payload_for_rn, dict):
+            client_number = compute_client_risk_number(kyc_payload_for_rn)
+
     # ── 7. Generar candidatos ───────────────────────────────────────────────
     try:
         candidate_set = PortfolioGenerationCoordinator().generate(
@@ -5355,6 +5447,10 @@ def create_case_portfolio_proposal(
                 variant.value, portfolio, meta,
                 instruments_by_ticker=instruments_by_ticker,
                 risk_budget=risk_budget,
+                expected_returns=expected_returns_by_ticker,
+                cov_tickers=covariance_matrix.tickers,
+                cov_matrix=covariance_matrix.covariance,
+                client_number=client_number,
             )
         )
 

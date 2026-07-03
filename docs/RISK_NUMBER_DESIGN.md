@@ -1,10 +1,13 @@
-# Risk Number — diseño (enfoque A decidido, Slice 1 implementado)
+# Risk Number — diseño (enfoque A decidido, Slices 1-3 implementados)
 
 > **Estado:** ACTIVO. El usuario decidió el **enfoque A** (versión diferenciada,
-> 2026-07-02) y delegó la elección técnica. **Slice 1 y Slice 2 implementados:**
-> `ai_layer/risk_number.py` (módulo puro, sin red) + `tests/unit/test_risk_number.py`
-> (30 tests). Pendiente: Slice 3 (wiring a `/cases/*`, reporte y demo guiada).
-> El §3 queda como registro de la decisión.
+> 2026-07-02) y delegó la elección técnica. **Slices 1, 2 y 3 implementados**
+> (2026-07-02/03): `ai_layer/risk_number.py` (módulo puro, sin red) +
+> `tests/unit/test_risk_number.py` (30 tests) + wiring en `POST
+> /cases/{id}/ai/profile-analysis` (`risk_number` del cliente) y `POST
+> /cases/{id}/portfolio-proposal` (`risk_number`/`risk_alignment` por
+> candidato). Pendiente: reporte markdown y demo guiada (frontend) — ver §5,
+> Slice 3 "queda". El §3 queda como registro de la decisión.
 
 ## 0. Empezar acá (para la sesión nueva)
 
@@ -134,15 +137,37 @@ mapeo → mismo número → alineación.
   - `portfolio_risk_number_from_weights(...)` — conveniencia que compone lo anterior con
     `portfolio_risk_number`.
   - 4 tests nuevos (30 en total en `test_risk_number.py`), suite completa sin regresiones.
-- **Slice 3 — wiring (pendiente).** Exponer en el flujo case-scoped (`/cases/...`) + en el
-  reporte + en la demo guiada. Falta: llamar `portfolio_risk_number_from_weights` desde donde
-  se genera `PortfolioCandidateSet` (`portfolio_layer/generation.py`) adaptando
-  `CovarianceMatrix`/`ReturnEstimate` a las listas planas que pide la función; mover
-  `DOWNSIDE_ANCHORS`/`GAMMA_ANCHORS` a `config/` (hoy son constantes de módulo, documentadas y
-  tuneables por parámetro pero no versionables sin tocar Python); exponer `client_risk_number`
-  desde el KYC ya persistido; card en el frontend. Respetar invariantes: **reports formatean,
-  no recalculan** (I-013/I-020), **AI propone, asesor decide** (I-001/I-016/I-019), **audit
-  chain** intacto (I-021). Leer `docs/INVARIANTS.md` antes.
+- **Slice 3 — wiring API HECHO (2026-07-03); reporte/frontend pendiente.** Expuesto en el
+  flujo case-scoped, respetando I-013/I-020 (formatea, no recalcula) e I-001/I-016/I-019
+  (la IA propone, el asesor decide — este módulo solo informa, ningún endpoint nuevo aprueba
+  ni selecciona nada):
+  - **Cliente** — `POST /cases/{id}/ai/profile-analysis` computa
+    `client_risk_number(kyc_payload)` al lado de `capacity_gap`/`deterministic` (mismo patrón:
+    derivado del KYC, `None` en GET/list, el POST lo incluye). Schema `ClientRiskNumber`
+    (`api_layer/schemas.py`), campo `risk_number` en `AIProfileAnalysisResponse`.
+    `tradeoff_number`/`gamma` quedan `None` — el KYC todavía no tiene la pregunta de trade-off
+    (certainty equivalent); cuando se agregue, alimenta directamente `client_risk_number(...,
+    tradeoff=...)` sin cambios de firma.
+  - **Cartera** — `POST /cases/{id}/portfolio-proposal` computa, por candidato,
+    `portfolio_risk_number_from_weights` (con los `return_estimates`/`covariance_matrix` YA
+    estimados en el paso 6 del endpoint — nada de red/optimizer adicional) → clave
+    `risk_number`; y si el case tiene `current_kyc_submission_id`, `align_numbers` contra el
+    número del cliente → clave `risk_alignment`. Ambas quedan `None` si faltan datos (universo
+    sin cobertura, case sin KYC) — tolerante, no bloquea la generación de la propuesta. Función
+    nueva `_compute_candidate_risk_number` en `api_layer/main.py`, sin schema Pydantic dedicado
+    (candidates ya es `list[dict[str, Any]]`, mismo patrón que `diversification`).
+  - Tests de integración nuevos: `test_risk_number_present` (profile-analysis),
+    `TestCandidateRiskNumber` (portfolio-proposal: presente en todo candidate completed,
+    `risk_alignment.override_required ⟺ status == "over_capacity"`, GROWTH ≥ DEFENSIVE en
+    universo fixture). 104 tests en los dos archivos de integración afectados, suite completa
+    (2486 tests) y smoke check end-to-end sin regresiones.
+  - **Pendiente** (fuera de este slice): sección de Risk Number en `CaseMarkdownReportGenerator`
+    (mismo patrón que `capacity_data` — recomputar del KYC persistido, I-013/I-020 lo permite);
+    card en el frontend (`frontend/js/investor-demo.js`, mismo patrón que
+    `idemoCapacityGapCardHTML`); mover `DOWNSIDE_ANCHORS`/`GAMMA_ANCHORS` a `config/` (hoy son
+    constantes de módulo documentadas y tuneables por parámetro, pero no versionables sin tocar
+    Python); pregunta de trade-off en el KYC (para que `client_risk_number` deje de ser
+    willingness-only).
 
 ## 6. Punteros
 - Teoría + IP: `docs/RISK_SCORING_THEORY.md`

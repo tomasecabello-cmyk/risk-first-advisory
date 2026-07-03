@@ -1456,6 +1456,33 @@ class CapacityGap(BaseModel):
     explanation:       str    # texto en español para mostrar al asesor
 
 
+class ClientRiskNumber(BaseModel):
+    """
+    Risk Number 0-100 del CLIENTE — enfoque propio, diferenciado del método
+    patentado de Nitrogen (docs/RISK_SCORING_THEORY.md §2/§4). Misma escala que
+    el Risk Number de cartera (ver `risk_number` en cada candidato de
+    `POST /cases/{id}/portfolio-proposal`), para poder alinear "tu número es
+    X, esta cartera es Y". Ver ai_layer/risk_number.py::client_risk_number.
+
+    `tradeoff_number`/`gamma` quedan None hasta que el KYC incorpore la
+    pregunta de trade-off (certainty equivalent); hoy el número sale solo de
+    `willingness` (cuestionario Grable-Lytton), sin cross-check de divergencia.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    number:                  float  # 0-100, número combinado (o solo willingness si no hay trade-off)
+    band:                    str    # uno de los 5 perfiles
+    willingness_number:      float  # 0-100, del cuestionario Grable-Lytton
+    tradeoff_number:         float | None = None  # 0-100, si hay pregunta de trade-off
+    gamma:                   float | None = None  # CRRA implícito, si hay trade-off
+    divergence_bands:        int
+    inconsistent:            bool  # True si las dos elicitaciones divergen (señal, no medición)
+    capacity_ceiling_number: float  # 0-100, techo de capacidad financiera (ability)
+    capacity_ceiling_band:   str
+    confirmation_questions:  list[str]
+    explanation:             str
+
+
 class AIProfileAnalysisResponse(BaseModel):
     analysis_id:         str
     case_id:             str
@@ -1476,6 +1503,9 @@ class AIProfileAnalysisResponse(BaseModel):
     # Brecha capacidad-vs-tolerancia para la conversación pre-override.
     # Derivado del KYC; None en GET/list (no recomputa). El POST lo incluye.
     capacity_gap:        CapacityGap | None = None
+    # Risk Number 0-100 del cliente, misma escala que el de cartera.
+    # Derivado del KYC; None en GET/list (no recomputa). El POST lo incluye.
+    risk_number:          ClientRiskNumber | None = None
 
 
 class AIProfileAnalysisListResponse(BaseModel):

@@ -332,6 +332,22 @@ class TestCreateAnalysis:
         assert det["binding_dimension"] in {"willingness", "ability"}
         assert det["gap_level"] in {"low", "medium", "high"}
 
+    def test_risk_number_present(self, client: TestClient, patch_ai_client) -> None:
+        # Risk Number 0-100 del cliente (docs/RISK_NUMBER_DESIGN.md), misma
+        # escala que el de cartera en portfolio-proposal.
+        patch_ai_client()
+        ctx = _full_chain_with_kyc(client)
+        rn = _post_analysis(client, ctx["case"]["case_id"]).json()["risk_number"]
+        assert rn is not None
+        assert 0.0 <= rn["number"] <= 100.0
+        assert rn["band"] in {
+            "conservador", "moderado-defensivo", "moderado",
+            "moderado-agresivo", "agresivo",
+        }
+        assert 0.0 <= rn["capacity_ceiling_number"] <= 100.0
+        assert rn["tradeoff_number"] is None  # KYC hoy no incluye la pregunta de trade-off
+        assert isinstance(rn["inconsistent"], bool)
+
     def test_kyc_submission_id_in_response(
         self, client: TestClient, patch_ai_client
     ) -> None:
