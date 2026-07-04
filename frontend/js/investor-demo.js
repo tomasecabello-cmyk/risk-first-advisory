@@ -135,6 +135,28 @@ function idemoStr(id, fallback) {
   return v || (fallback || "");
 }
 
+// ── Pregunta de trade-off (certainty equivalent) — Slice 4b ────────────
+// G = 10% del patrimonio líquido, L = 5% (docs/RISK_NUMBER_DESIGN.md §5).
+// Opcional: el checkbox "idemo-tradeoff-enabled" decide si se manda al
+// backend; si no, el KYC queda igual que antes (willingness-only).
+function idemoTradeoffBounds() {
+  const liquidNW = idemoNumber("idemo-liquid", 150000);
+  return {
+    gain: Math.round(liquidNW * 0.10),
+    loss: Math.round(liquidNW * 0.05),
+  };
+}
+
+function idemoUpdateTradeoffPreview() {
+  const { gain, loss } = idemoTradeoffBounds();
+  const gainEl = document.getElementById("idemo-tradeoff-gain-label");
+  const lossEl = document.getElementById("idemo-tradeoff-loss-label");
+  const hintEl = document.getElementById("idemo-tradeoff-range-hint");
+  if (gainEl) gainEl.textContent = `$${gain.toLocaleString("es-AR")}`;
+  if (lossEl) lossEl.textContent = `$${loss.toLocaleString("es-AR")}`;
+  if (hintEl) hintEl.textContent = `rango: -${loss.toLocaleString("es-AR")} a ${gain.toLocaleString("es-AR")}`;
+}
+
 function idemoBuildKycPayload() {
   // Mapeos:
   //   liquidity_need (baja/media/alta) → liquidity_need_score (3/5/8)
@@ -151,8 +173,11 @@ function idemoBuildKycPayload() {
   const liquidNW = idemoNumber("idemo-liquid", 150000);
   const tolAnswers = idemoToleranceAnswers();
   const tolEst = idemoEstimatedTolerance();  // 1-10, solo para placeholders coherentes
+  const tradeoffEl = document.getElementById("idemo-tradeoff-enabled");
+  const tradeoffEnabled = tradeoffEl ? tradeoffEl.checked : false;
+  const { gain: tradeoffGain, loss: tradeoffLoss } = idemoTradeoffBounds();
 
-  return {
+  const payload = {
     age:                          idemoInt("idemo-age", 42),
     risk_tolerance_score:         Math.max(1, Math.min(10, Math.round(tolEst))),  // placeholder
     risk_capacity_score:          5,  // placeholder; ver capacity_from_facts
@@ -180,6 +205,14 @@ function idemoBuildKycPayload() {
     open_past_experience:         idemoStr("idemo-open-experience", "") || null,
     open_concerns:                idemoStr("idemo-open-concerns", "") || null,
   };
+  // Pregunta de trade-off — opcional, solo si el checkbox está tildado.
+  // La riqueza (W) es liquid_net_worth de este mismo KYC (no se pregunta de nuevo).
+  if (tradeoffEnabled) {
+    payload.tradeoff_gain_usd = tradeoffGain;
+    payload.tradeoff_loss_usd = tradeoffLoss;
+    payload.tradeoff_certain_amount_usd = idemoNumber("idemo-tradeoff-certain", 0);
+  }
+  return payload;
 }
 
 function idemoBuildPrefsPayload() {
@@ -503,6 +536,30 @@ function idemoRiskNumberCardHTML(rn) {
       `tolera ${tol}/100, pero su situación financiera soporta hasta ${cap}/100 — el número ` +
       `operativo es el menor de los dos.</div>`
     : "";
+  // Segunda elicitación (trade-off / certainty equivalent, Slice 4b): si el
+  // KYC respondió la pregunta, mostrar el cruce cuestionario vs. trade-off y,
+  // si divergen ≥20 puntos, el aviso de inconsistencia con las preguntas de
+  // confirmación para el asesor. Guard: rn.tradeoff_number es null si la
+  // pregunta no se respondió o el motor la descartó (fuera de rango).
+  const hasTradeoff = typeof rn.tradeoff_number === "number";
+  const willingness = (typeof rn.willingness_number === "number") ? Math.round(rn.willingness_number) : null;
+  const tradeoffNum = hasTradeoff ? Math.round(rn.tradeoff_number) : null;
+  const crossCheck = hasTradeoff
+    ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-size:12px;">` +
+        `<div><span style="opacity:.65;">Cuestionario:</span> <strong>${willingness}/100</strong></div>` +
+        `<div><span style="opacity:.65;">Trade-off (monto seguro):</span> <strong>${tradeoffNum}/100</strong></div>` +
+      `</div>`
+    : "";
+  const questions = Array.isArray(rn.confirmation_questions) ? rn.confirmation_questions : [];
+  const inconsistentNote = (rn.inconsistent && questions.length)
+    ? `<div style="font-size:12px;color:#a33;background:#fdf0f0;border:1px solid #edc;border-radius:6px;` +
+      `padding:8px 10px;margin-top:8px;">` +
+        `<strong>Las dos elicitaciones divergen</strong> — confirmar con el cliente antes de usar el número:` +
+        `<ul style="margin:6px 0 0 18px;padding:0;">` +
+          questions.map((q) => `<li>${escapeHTML(q)}</li>`).join("") +
+        `</ul>` +
+      `</div>`
+    : "";
   return (
     `<div style="margin-top:12px;border:1px solid #ddd;border-left:4px solid #1d3557;border-radius:6px;padding:12px;background:#fff;">` +
       `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">` +
@@ -516,6 +573,8 @@ function idemoRiskNumberCardHTML(rn) {
         (cap != null ? `<div><span style="opacity:.65;">Capacidad (lo que soporta):</span> <strong>${cap}/100</strong></div>` : "") +
       `</div>` +
       cappedNote +
+      crossCheck +
+      inconsistentNote +
       `<div style="font-size:11px;opacity:.7;border-top:1px solid #eee;margin-top:8px;padding-top:6px;">` +
         `Misma escala 0–100 que vas a ver por cartera en el paso 5: ahí se compara ` +
         `"tu número es ${num}, esta cartera es Y" para alinear riesgo real admisible y cartera.</div>` +
@@ -1284,7 +1343,7 @@ function idemoUpdateTolerancePreview() {
 // ── Init: render checklist al cargar ──────────────────────────────────
 
 (function () {
-  function _idemoInit() { idemoRenderProgress(); idemoLoadQuestionnaire(); }
+  function _idemoInit() { idemoRenderProgress(); idemoLoadQuestionnaire(); idemoUpdateTradeoffPreview(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", _idemoInit);
   } else {

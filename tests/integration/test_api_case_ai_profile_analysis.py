@@ -352,6 +352,76 @@ class TestCreateAnalysis:
         assert rn["tradeoff_number"] is None  # KYC hoy no incluye la pregunta de trade-off
         assert isinstance(rn["inconsistent"], bool)
 
+    def test_risk_number_with_consistent_tradeoff(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """KYC con la pregunta de trade-off respondida (certainty equivalent):
+        gamma implícito cercano al willingness del cuestionario legacy →
+        cross-check consistente, sin flag de inconsistencia."""
+        patch_ai_client()
+        firm = _create_firm(client)
+        adv = _create_advisor(client, firm["firm_id"], advisor_id="ADV-CPA-001")
+        cli = _create_client(client, firm["firm_id"], adv["advisor_id"])
+        case = _create_case(client, firm["firm_id"], cli["client_id"], adv["advisor_id"])
+        r = _post_kyc(
+            client, case["case_id"],
+            tradeoff_gain_usd=15000.0, tradeoff_loss_usd=7500.0,
+            tradeoff_certain_amount_usd=3000.0,
+        )
+        assert r.status_code == 201, r.text
+        rn = _post_analysis(client, case["case_id"]).json()["risk_number"]
+        assert rn["tradeoff_number"] is not None
+        assert rn["gamma"] is not None
+        assert rn["inconsistent"] is False
+        assert rn["confirmation_questions"] == []
+
+    def test_risk_number_with_inconsistent_tradeoff(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Trade-off que implica mucha más aversión que el willingness declarado
+        (>= 20 puntos de divergencia): el cross-check marca inconsistencia con
+        preguntas de confirmación para el asesor — NO bloquea el análisis."""
+        patch_ai_client()
+        firm = _create_firm(client)
+        adv = _create_advisor(client, firm["firm_id"], advisor_id="ADV-CPA-001")
+        cli = _create_client(client, firm["firm_id"], adv["advisor_id"])
+        case = _create_case(client, firm["firm_id"], cli["client_id"], adv["advisor_id"])
+        r = _post_kyc(
+            client, case["case_id"],
+            tradeoff_gain_usd=15000.0, tradeoff_loss_usd=7500.0,
+            tradeoff_certain_amount_usd=-1000.0,
+        )
+        assert r.status_code == 201, r.text
+        rn = _post_analysis(client, case["case_id"]).json()["risk_number"]
+        assert rn["tradeoff_number"] is not None
+        assert rn["inconsistent"] is True
+        assert abs(rn["willingness_number"] - rn["tradeoff_number"]) >= 20.0
+        assert len(rn["confirmation_questions"]) > 0
+
+    def test_risk_number_with_invalid_tradeoff_falls_back_to_willingness_only(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """certain_amount fuera de rango (-loss, gain) hace que el motor
+        rechace la respuesta (ValueError); el endpoint NUNCA responde 500 —
+        cae a willingness-only, igual que si la pregunta no se hubiera
+        respondido."""
+        patch_ai_client()
+        firm = _create_firm(client)
+        adv = _create_advisor(client, firm["firm_id"], advisor_id="ADV-CPA-001")
+        cli = _create_client(client, firm["firm_id"], adv["advisor_id"])
+        case = _create_case(client, firm["firm_id"], cli["client_id"], adv["advisor_id"])
+        r = _post_kyc(
+            client, case["case_id"],
+            tradeoff_gain_usd=15000.0, tradeoff_loss_usd=7500.0,
+            tradeoff_certain_amount_usd=99999.0,  # >= gain, fuera de rango
+        )
+        assert r.status_code == 201, r.text
+        resp = _post_analysis(client, case["case_id"])
+        assert resp.status_code == 201, resp.text
+        rn = resp.json()["risk_number"]
+        assert rn["tradeoff_number"] is None
+        assert rn["gamma"] is None
+
     def test_kyc_submission_id_in_response(
         self, client: TestClient, patch_ai_client
     ) -> None:

@@ -3734,9 +3734,6 @@ def create_case_profile_analysis(
     # IA = capa rica; motor = base auditable + fallback sin key + cross-check.
     # Ver ai_layer/risk_gap.py::combine_risk_gaps y ai_layer/risk_scoring.py.
     from risk_first_advisory.ai_layer.risk_gap import combine_risk_gaps
-    from risk_first_advisory.ai_layer.risk_number import (
-        client_risk_number as compute_client_risk_number,
-    )
     from risk_first_advisory.ai_layer.risk_scoring import (
         capacity_gap_from_kyc,
         deterministic_assessment,
@@ -3749,7 +3746,7 @@ def create_case_profile_analysis(
     risk_gap_obj = RiskGap(**risk_gap_dict) if risk_gap_dict is not None else None
     det_obj = DeterministicAssessment(**deterministic_assessment(kyc_payload))
     capacity_gap_obj = CapacityGap(**capacity_gap_from_kyc(kyc_payload))
-    risk_number_obj = ClientRiskNumber(**compute_client_risk_number(kyc_payload))
+    risk_number_obj = ClientRiskNumber(**_client_risk_number_tolerant(kyc_payload))
 
     return AIProfileAnalysisResponse(
         **analysis_data,
@@ -4965,6 +4962,54 @@ def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
     }
 
 
+def _tradeoff_from_kyc_payload(kyc_payload: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Arma el dict `tradeoff` para `client_risk_number` desde los campos
+    OPCIONALES de la pregunta de trade-off del KYC (Slice 4b,
+    docs/RISK_NUMBER_DESIGN.md): certainty equivalent de una apuesta 50/50
+    ganar/perder vs. un monto seguro indiferente (framing académico CRRA,
+    docs/RISK_SCORING_THEORY.md §3 — NO el framing patentado de Nitrogen).
+
+    La riqueza W es `liquid_net_worth` del MISMO KYC (I-015: no se pregunta
+    de nuevo, campo estructurado ya existente). None si la pregunta no fue
+    respondida (falta cualquiera de los tres campos) — `client_risk_number`
+    sigue funcionando solo con willingness, como hoy.
+    """
+    gain = kyc_payload.get("tradeoff_gain_usd")
+    loss = kyc_payload.get("tradeoff_loss_usd")
+    certain = kyc_payload.get("tradeoff_certain_amount_usd")
+    if gain is None or loss is None or certain is None:
+        return None
+    return {
+        "wealth": kyc_payload.get("liquid_net_worth"),
+        "gain": gain,
+        "loss": loss,
+        "certain_amount": certain,
+    }
+
+
+def _client_risk_number_tolerant(kyc_payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    `client_risk_number(kyc_payload)` con el trade-off opcional armado desde
+    el mismo KYC, tolerante a respuestas inválidas: una apuesta mal formada
+    (p.ej. certain_amount fuera de (-loss, gain), o wealth <= 0) hace
+    `ValueError` dentro de `crra_gamma_from_certainty_equivalent` — en ese
+    caso se cae a willingness-only (tradeoff=None) en vez de romper el
+    endpoint con un 500. Nunca lanza.
+    """
+    from risk_first_advisory.ai_layer.risk_number import (
+        client_risk_number as compute_client_risk_number,
+    )
+
+    tradeoff = _tradeoff_from_kyc_payload(kyc_payload)
+    if tradeoff is not None:
+        try:
+            return compute_client_risk_number(kyc_payload, tradeoff=tradeoff)
+        except (TypeError, ValueError):
+            pass
+    return compute_client_risk_number(kyc_payload)
+
+
 def _compute_candidate_risk_number(
     portfolio: Any,
     expected_returns: dict[str, float] | None,
@@ -5424,11 +5469,8 @@ def create_case_portfolio_proposal(
     }
     client_number: dict[str, Any] | None = None
     if rn_kyc_payload is not None:
-        from risk_first_advisory.ai_layer.risk_number import (
-            client_risk_number as compute_client_risk_number,
-        )
         try:
-            client_number = compute_client_risk_number(rn_kyc_payload)
+            client_number = _client_risk_number_tolerant(rn_kyc_payload)
         except (TypeError, ValueError):
             client_number = None
         else:
@@ -6196,15 +6238,13 @@ def create_case_report(
                     "capacity_gap": capacity_gap_from_kyc(kyc_payload),
                 }
                 # Risk Number del cliente (docs/RISK_NUMBER_DESIGN.md): mismo
-                # patrón que capacity_data, recomputado del KYC vigente. La
+                # patrón que capacity_data, recomputado del KYC vigente
+                # (incluye el trade-off opcional si el KYC lo respondió). La
                 # cartera SELECCIONADA ya trae su propio risk_number/risk_alignment
                 # persistidos en selected_candidate — el generator los formatea,
                 # no los recalcula (I-013/I-020).
-                from risk_first_advisory.ai_layer.risk_number import (
-                    client_risk_number as compute_client_risk_number,
-                )
                 try:
-                    risk_number_data = {"client": compute_client_risk_number(kyc_payload)}
+                    risk_number_data = {"client": _client_risk_number_tolerant(kyc_payload)}
                 except (TypeError, ValueError):
                     risk_number_data = None
 

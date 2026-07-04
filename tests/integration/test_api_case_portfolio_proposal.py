@@ -302,7 +302,7 @@ def _post_proposal(c: TestClient, case_id: str, **body) -> Any:
     )
 
 
-def _full_setup(c: TestClient, patch_ai_client) -> dict:
+def _full_setup(c: TestClient, patch_ai_client, **kyc_overrides: Any) -> dict:
     """
     Pipeline completo hasta tener universe filter + approved profile listos
     para el portfolio proposal.
@@ -312,7 +312,7 @@ def _full_setup(c: TestClient, patch_ai_client) -> dict:
     adv = _create_advisor(c, firm["firm_id"], advisor_id="ADV-CPP-001")
     cli = _create_client(c, firm["firm_id"], adv["advisor_id"])
     case = _create_case(c, firm["firm_id"], cli["client_id"], adv["advisor_id"])
-    kyc = _post_kyc(c, case["case_id"])
+    kyc = _post_kyc(c, case["case_id"], **kyc_overrides)
     # AI profile analysis (genera preliminary_profile=moderado).
     r_analysis = c.post(
         f"/cases/{case['case_id']}/ai/profile-analysis",
@@ -641,6 +641,44 @@ class TestCandidateRiskNumber:
             growth_rn = by_variant["GROWTH"]["risk_number"]
             if defensive_rn and growth_rn:
                 assert growth_rn["number"] >= defensive_rn["number"]
+
+    def test_risk_alignment_present_with_valid_tradeoff_kyc(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """El KYC con la pregunta de trade-off respondida (Slice 4b) sigue
+        produciendo risk_alignment por candidato — el cross-check declarado
+        vs. trade-off es interno a client_risk_number, invisible aquí salvo
+        por su efecto en el número/alineación."""
+        ctx = _full_setup(
+            client, patch_ai_client,
+            tradeoff_gain_usd=15000.0, tradeoff_loss_usd=7500.0,
+            tradeoff_certain_amount_usd=3000.0,
+        )
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        body = r.json()
+        if body["status"] != "completed":
+            pytest.skip("proposal not completed in this fixture universe run")
+        for c in body["candidates"]:
+            assert c.get("risk_alignment") is not None
+
+    def test_risk_alignment_tolerant_to_invalid_tradeoff_kyc(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """certain_amount fuera de rango (-loss, gain): el motor rechaza el
+        trade-off (ValueError) pero la propuesta NUNCA responde 500 — cae a
+        willingness-only, igual que si la pregunta no se hubiera respondido."""
+        ctx = _full_setup(
+            client, patch_ai_client,
+            tradeoff_gain_usd=15000.0, tradeoff_loss_usd=7500.0,
+            tradeoff_certain_amount_usd=99999.0,
+        )
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201, r.text
+        body = r.json()
+        if body["status"] != "completed":
+            pytest.skip("proposal not completed in this fixture universe run")
+        for c in body["candidates"]:
+            assert c.get("risk_alignment") is not None
 
 
 # ═════════════════════════════════════════════════════════════════════════════

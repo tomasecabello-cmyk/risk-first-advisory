@@ -611,6 +611,23 @@ class TestValidation:
         r = _post_kyc(client, case["case_id"], investment_objective="not_valid")
         assert r.status_code == 422
 
+    def test_tradeoff_gain_zero_returns_422(self, client: TestClient) -> None:
+        # docs/RISK_NUMBER_DESIGN.md: la apuesta necesita una ganancia > 0.
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"], tradeoff_gain_usd=0.0)
+        assert r.status_code == 422
+
+    def test_tradeoff_loss_negative_returns_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"], tradeoff_loss_usd=-100.0)
+        assert r.status_code == 422
+
+    def test_tradeoff_fields_optional_by_default(self, client: TestClient) -> None:
+        # Sin la pregunta de trade-off (comportamiento legacy): 201 igual.
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"])
+        assert r.status_code == 201, r.text
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Persistence (repo direct + payload_hash determinism)

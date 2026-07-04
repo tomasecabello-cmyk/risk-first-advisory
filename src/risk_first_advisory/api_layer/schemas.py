@@ -177,6 +177,22 @@ class KYCDataRequest(BaseModel):
     tolerance_from_questionnaire: bool           = False
     tolerance_answers:            dict[str, str] = Field(default_factory=dict)
 
+    # ── Trade-off (certainty equivalent → γ CRRA) — opcional ──────────────
+    # Segunda elicitación del Risk Number (docs/RISK_NUMBER_DESIGN.md §5,
+    # docs/RISK_SCORING_THEORY.md §3/§4): apuesta 50/50 ganar `tradeoff_gain_usd`
+    # / perder `tradeoff_loss_usd` vs. un monto SEGURO indiferente
+    # (`tradeoff_certain_amount_usd`). La riqueza es `liquid_net_worth` de
+    # este mismo KYC (I-015: no se pregunta de nuevo). Los tres son opcionales
+    # y, si faltan, `client_risk_number` sigue funcionando solo con
+    # willingness (como hoy). Framing académico CRRA — NO el framing
+    # patentado de Nitrogen ("pérdida devastadora/aceptable" en dólares).
+    # Validación de rango (gain>0, loss>=0) aquí; el chequeo relativo a la
+    # riqueza (-loss < certain < gain) lo hace el motor y el endpoint lo
+    # tolera (ValueError → tradeoff ignorado, nunca 500).
+    tradeoff_gain_usd:           float | None = Field(default=None, gt=0.0)
+    tradeoff_loss_usd:           float | None = Field(default=None, ge=0.0)
+    tradeoff_certain_amount_usd: float | None = None
+
     # ESG — opcional. Por defecto se construye un ESGProfile vacío
     # (strictness_level=none, sin exclusions/preferences) que reproduce
     # el comportamiento previo del endpoint.

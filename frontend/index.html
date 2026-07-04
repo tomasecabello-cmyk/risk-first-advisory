@@ -292,7 +292,7 @@
           </div>
           <div class="field">
             <label>Patrimonio líquido estimado (USD)</label>
-            <input type="number" id="idemo-liquid" value="150000" min="0" />
+            <input type="number" id="idemo-liquid" value="150000" min="0" oninput="idemoUpdateTradeoffPreview()" />
           </div>
           <div class="field">
             <label>Horizonte de inversión (años) <span class="hint">&gt; 0</span></label>
@@ -387,6 +387,27 @@
           <div class="field full-span">
             <label>¿Qué preocupaciones o restricciones tenés?</label>
             <textarea id="idemo-open-concerns" rows="2">Volatilidad cambiaria; riesgo de duración en renta fija; preferencia por hard dollar.</textarea>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Pregunta de trade-off <span class="hint">opcional — certainty equivalent, cruza con el cuestionario</span></div>
+        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
+          <strong>Pensá en plata real tuya.</strong> Te ofrecen una apuesta 50/50: ganás
+          <strong id="idemo-tradeoff-gain-label">$15.000</strong> o perdés <strong id="idemo-tradeoff-loss-label">$7.500</strong>.
+          ¿Qué monto <strong>SEGURO</strong> (sin apostar) te resulta indiferente frente a esa apuesta?
+          Es un cruce de control contra el cuestionario de arriba — no la respondas "para quedar bien",
+          sirve para detectar contradicciones entre lo que decís y lo que realmente tolerás.
+        </div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="idemo-tradeoff-enabled" checked style="width:auto;" />
+              Responder la pregunta de trade-off
+            </label>
+          </div>
+          <div class="field">
+            <label>Monto seguro indiferente (USD) <span class="hint" id="idemo-tradeoff-range-hint">rango: -7.500 a 15.000</span></label>
+            <input type="number" id="idemo-tradeoff-certain" value="3000" step="100" />
           </div>
         </div>
 
