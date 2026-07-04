@@ -460,7 +460,7 @@ function idemoDeterministicPanelHTML(aiProfile, aiConfidence, det, agreement) {
 // Guard: si no hay risk_gap (respuesta vieja / null), devuelve "" y no se renderiza.
 // Jerarquía: comparación primero, honesty line como caption, preguntas como cierre.
 // Tono: el escenario aporta info; no se culpa al cliente. Sin rojo ni ⚠.
-function idemoRiskGapCardHTML(rg) {
+function idemoRiskGapCardHTML(rg, afterFollowUp) {
   if (!rg || !rg.gap_level) return "";
   const levelLabel = { low: "Bajo", medium: "Medio", high: "Alto" }[rg.gap_level] || rg.gap_level;
   // Semántica de color: neutral/ámbar, nunca rojo (no es un error del asesor).
@@ -475,6 +475,14 @@ function idemoRiskGapCardHTML(rg) {
     // Alineado: NO hay inconsistencia que confirmar → no se listan preguntas como
     // acción pendiente (eso confundía: parecía que faltaba algo por hacer).
     questions = "";
+  } else if (afterFollowUp) {
+    // Segunda ronda YA respondida: no volver a pedir las mismas preguntas
+    // (el gap puede persistir porque los datos duros del KYC no cambian —
+    // eso se conversa en la aprobación, no se re-pregunta en loop).
+    questions =
+      `<div style="margin-top:10px;font-size:12px;color:#3a7;">` +
+      `✓ Respuestas del cliente registradas (segunda ronda, auditada). ` +
+      `Si la inconsistencia persiste, llevala a la conversación de aprobación (paso 4).</div>`;
   } else if (hasQuestions) {
     // Inconsistencia: el asesor confirma con el cliente y re-analiza (segunda ronda).
     window.idemoState.followUpQuestions = rg.confirmation_questions.slice();
@@ -727,7 +735,7 @@ async function idemoSubmitFollowUp() {
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoCapacityGapCardHTML(res.json.capacity_gap) +
-    idemoRiskGapCardHTML(res.json.risk_gap));
+    idemoRiskGapCardHTML(res.json.risk_gap, /* afterFollowUp */ true));
   // Scrollear al resultado: sin esto el banner re-renderiza arriba y el asesor,
   // que está abajo en el botón, no ve que algo cambió ("no pasa nada").
   const aiCard = document.getElementById("idemo-step-ai");
