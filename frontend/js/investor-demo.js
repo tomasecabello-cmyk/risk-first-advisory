@@ -147,14 +147,50 @@ function idemoTradeoffBounds() {
   };
 }
 
-function idemoUpdateTradeoffPreview() {
+// Estado válido del trade-off, fuente única para el preview y el payload.
+// El motor CRRA exige gain > 0 (Pydantic `gt=0`) y -loss < certain < gain; si
+// algo de eso no se cumple (líquido muy bajo → gain 0, monto vacío, o monto
+// fuera de rango) el trade-off se DESCARTA acá — no se manda al backend para
+// que no reviente el KYC entero (gain 0 → 422) ni fabrique una respuesta
+// espuria (monto vacío → certain 0 → inconsistencia falsa).
+function idemoTradeoffState() {
+  const el = document.getElementById("idemo-tradeoff-enabled");
+  const enabled = el ? el.checked : false;
   const { gain, loss } = idemoTradeoffBounds();
+  const certainEl = document.getElementById("idemo-tradeoff-certain");
+  const raw = certainEl ? (certainEl.value || "").trim() : "";
+  const certain = raw === "" ? null : Number(raw);
+
+  let valid = false;
+  let reason = "";
+  if (!enabled) {
+    reason = "";
+  } else if (gain < 1) {
+    reason = "El patrimonio líquido es muy bajo para plantear la apuesta; la pregunta se omite.";
+  } else if (certain === null || !Number.isFinite(certain)) {
+    reason = "Ingresá un monto seguro para cruzar con el cuestionario.";
+  } else if (!(certain > -loss && certain < gain)) {
+    reason = `El monto seguro debe estar entre -${loss.toLocaleString("es-AR")} y ${gain.toLocaleString("es-AR")}; la pregunta se omite.`;
+  } else {
+    valid = true;
+  }
+  return { enabled, gain, loss, certain, valid, reason };
+}
+
+function idemoUpdateTradeoffPreview() {
+  const { gain, loss, enabled, valid, reason } = idemoTradeoffState();
   const gainEl = document.getElementById("idemo-tradeoff-gain-label");
   const lossEl = document.getElementById("idemo-tradeoff-loss-label");
   const hintEl = document.getElementById("idemo-tradeoff-range-hint");
   if (gainEl) gainEl.textContent = `$${gain.toLocaleString("es-AR")}`;
   if (lossEl) lossEl.textContent = `$${loss.toLocaleString("es-AR")}`;
   if (hintEl) hintEl.textContent = `rango: -${loss.toLocaleString("es-AR")} a ${gain.toLocaleString("es-AR")}`;
+  const warnEl = document.getElementById("idemo-tradeoff-warning");
+  if (warnEl) {
+    const show = enabled && !valid && reason;
+    warnEl.textContent = show ? reason : "";
+    warnEl.style.display = show ? "block" : "none";
+  }
 }
 
 function idemoBuildKycPayload() {
@@ -173,9 +209,7 @@ function idemoBuildKycPayload() {
   const liquidNW = idemoNumber("idemo-liquid", 150000);
   const tolAnswers = idemoToleranceAnswers();
   const tolEst = idemoEstimatedTolerance();  // 1-10, solo para placeholders coherentes
-  const tradeoffEl = document.getElementById("idemo-tradeoff-enabled");
-  const tradeoffEnabled = tradeoffEl ? tradeoffEl.checked : false;
-  const { gain: tradeoffGain, loss: tradeoffLoss } = idemoTradeoffBounds();
+  const tradeoff = idemoTradeoffState();
 
   const payload = {
     age:                          idemoInt("idemo-age", 42),
@@ -205,12 +239,14 @@ function idemoBuildKycPayload() {
     open_past_experience:         idemoStr("idemo-open-experience", "") || null,
     open_concerns:                idemoStr("idemo-open-concerns", "") || null,
   };
-  // Pregunta de trade-off — opcional, solo si el checkbox está tildado.
-  // La riqueza (W) es liquid_net_worth de este mismo KYC (no se pregunta de nuevo).
-  if (tradeoffEnabled) {
-    payload.tradeoff_gain_usd = tradeoffGain;
-    payload.tradeoff_loss_usd = tradeoffLoss;
-    payload.tradeoff_certain_amount_usd = idemoNumber("idemo-tradeoff-certain", 0);
+  // Pregunta de trade-off — opcional, solo si está tildada Y es válida para el
+  // motor (ver idemoTradeoffState). Inválida o vacía → se omite (KYC queda
+  // willingness-only), nunca se manda un dato que el backend descartaría en
+  // silencio o que rompería el KYC entero.
+  if (tradeoff.valid) {
+    payload.tradeoff_gain_usd = tradeoff.gain;
+    payload.tradeoff_loss_usd = tradeoff.loss;
+    payload.tradeoff_certain_amount_usd = tradeoff.certain;
   }
   return payload;
 }

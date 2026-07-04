@@ -401,13 +401,14 @@
         <div class="form-grid cols-3">
           <div class="field">
             <label style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="idemo-tradeoff-enabled" checked style="width:auto;" />
+              <input type="checkbox" id="idemo-tradeoff-enabled" checked style="width:auto;" onchange="idemoUpdateTradeoffPreview()" />
               Responder la pregunta de trade-off
             </label>
           </div>
           <div class="field">
             <label>Monto seguro indiferente (USD) <span class="hint" id="idemo-tradeoff-range-hint">rango: -7.500 a 15.000</span></label>
-            <input type="number" id="idemo-tradeoff-certain" value="3000" step="100" />
+            <input type="number" id="idemo-tradeoff-certain" value="3000" step="100" oninput="idemoUpdateTradeoffPreview()" />
+            <div id="idemo-tradeoff-warning" style="display:none;margin-top:6px;font-size:12px;color:#a33;"></div>
           </div>
         </div>
 

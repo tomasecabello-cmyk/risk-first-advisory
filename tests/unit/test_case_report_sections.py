@@ -69,6 +69,7 @@ def _gen(capacity=True, override=True, risk_number=False, candidate_risk_number=
         over["risk_alignment"] = {
             "status": "over_capacity",
             "explanation": "La cartera excede el techo de capacidad del cliente.",
+            "client_kyc_submission_id": "kyc_submission_000007",
         }
     cand = _candidate(**over)
     md, _ = CaseMarkdownReportGenerator().generate(
@@ -130,6 +131,10 @@ def test_risk_number_section_with_client_and_portfolio():
     assert "68/100" in md
     assert "over_capacity" in md
     assert "Alineación cliente" in md
+    # Nota de trazabilidad: la alineación se computó contra el KYC de la
+    # propuesta; si el número del cliente (KYC vigente) difiere, se avisa.
+    assert "kyc_submission_000007" in md
+    assert "al generar la propuesta" in md
 
 
 def test_risk_number_section_omitted_when_no_data():

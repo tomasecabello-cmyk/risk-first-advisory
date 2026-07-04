@@ -479,6 +479,11 @@ def _section_risk_number(
     candidate (`risk_number`/`risk_alignment`) — el generator NO recalcula
     (I-013/I-020). Tolerante: sin cliente ni cartera, se omite; con solo uno
     de los dos, el otro se marca "no disponible" (proposal legacy).
+
+    OJO con la trazabilidad: el número del cliente sale del KYC VIGENTE, pero
+    la `risk_alignment` fue computada al generar la propuesta contra el KYC de
+    ESE momento (`client_kyc_submission_id`). Si el KYC se re-envió después,
+    los dos pueden diferir — se anota explícitamente para no confundir.
     """
     client = (risk_number_data or {}).get("client")
     portfolio_rn = candidate.get("risk_number")
@@ -526,6 +531,13 @@ def _section_risk_number(
     if isinstance(alignment, dict):
         lines.append(f"- **Alineación cliente ↔ cartera**: `{_safe_str(alignment.get('status'))}`")
         lines.append(f"- **Lectura**: {_safe_str(alignment.get('explanation'))}")
+        kyc_ref = alignment.get("client_kyc_submission_id")
+        if kyc_ref:
+            lines.append(
+                f"- _La alineación se calculó al generar la propuesta, contra el número "
+                f"del cliente de ese momento (KYC `{_safe_str(kyc_ref)}`). Si el KYC se "
+                f"actualizó después, el número del cliente de arriba puede diferir._"
+            )
 
     return "\n".join(lines)
 

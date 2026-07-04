@@ -4991,11 +4991,20 @@ def _tradeoff_from_kyc_payload(kyc_payload: dict[str, Any]) -> dict[str, Any] | 
 def _client_risk_number_tolerant(kyc_payload: dict[str, Any]) -> dict[str, Any]:
     """
     `client_risk_number(kyc_payload)` con el trade-off opcional armado desde
-    el mismo KYC, tolerante a respuestas inválidas: una apuesta mal formada
-    (p.ej. certain_amount fuera de (-loss, gain), o wealth <= 0) hace
+    el mismo KYC, tolerante SOLO a un trade-off inválido: una apuesta mal
+    formada (p.ej. certain_amount fuera de (-loss, gain), o wealth <= 0) hace
     `ValueError` dentro de `crra_gamma_from_certainty_equivalent` — en ese
     caso se cae a willingness-only (tradeoff=None) en vez de romper el
-    endpoint con un 500. Nunca lanza.
+    endpoint con un 500.
+
+    NO tolera un KYC fundamentalmente impuntuable: si la vía willingness-only
+    (`score_stated_profile`) tampoco puede puntuar el payload, la excepción se
+    propaga — mismo comportamiento que `deterministic_assessment` /
+    `capacity_gap_from_kyc`, que se llaman al lado sin envolver. Los callers
+    que tratan el número del cliente como OPCIONAL (portfolio-proposal,
+    reporte) envuelven esta llamada en su propio try/except → None; el de
+    profile-analysis no, y falla junto con sus vecinos si el KYC no es
+    puntuable (all-or-nothing, coherente).
     """
     from risk_first_advisory.ai_layer.risk_number import (
         client_risk_number as compute_client_risk_number,
