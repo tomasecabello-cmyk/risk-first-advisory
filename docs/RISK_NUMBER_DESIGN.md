@@ -1,13 +1,18 @@
-# Risk Number — diseño (enfoque A decidido, Slices 1-3 implementados)
+# Risk Number — diseño (enfoque A decidido, Slices 1-4 implementados)
 
-> **Estado:** ACTIVO. El usuario decidió el **enfoque A** (versión diferenciada,
-> 2026-07-02) y delegó la elección técnica. **Slices 1, 2 y 3 implementados**
-> (2026-07-02/03): `ai_layer/risk_number.py` (módulo puro, sin red) +
-> `tests/unit/test_risk_number.py` (42 tests) + wiring en `POST
-> /cases/{id}/ai/profile-analysis` (`risk_number` del cliente) y `POST
-> /cases/{id}/portfolio-proposal` (`risk_number`/`risk_alignment` por
-> candidato). Pendiente: reporte markdown y demo guiada (frontend) — ver §5,
-> Slice 3 "queda". El §3 queda como registro de la decisión.
+> **Estado:** ACTIVO — feature completa de punta a punta. El usuario decidió el
+> **enfoque A** (versión diferenciada, 2026-07-02) y delegó la elección técnica.
+> **Slices 1, 2, 3 y 4 implementados** (2026-07-02/03): `ai_layer/risk_number.py`
+> (módulo puro, sin red) + wiring en `POST /cases/{id}/ai/profile-analysis`
+> (`risk_number` del cliente), `POST /cases/{id}/portfolio-proposal`
+> (`risk_number`/`risk_alignment` por candidato), sección "## Risk Number" en el
+> reporte markdown, y la pregunta de trade-off (certainty equivalent) en el KYC
+> que activa el cross-check. Frontend guiado (`investor-demo.js`) completo:
+> card del cliente (paso 3, con divergencia + preguntas de confirmación),
+> columna por cartera (paso 5), pregunta de trade-off opcional en el form del
+> KYC (paso 2). Pendiente (opcional, chico): mover `GAMMA_ANCHORS` a
+> `config/` (§5, Tarea C del handoff `docs/NEXT_SESSION_PROMPT.md`). El §3
+> queda como registro de la decisión.
 >
 > **Revisión 2026-07-03 (post code-review, ver DD-012):** 10 hallazgos
 > confirmados y corregidos. Cambios de diseño resultantes: anclajes derivados
@@ -173,13 +178,43 @@ mapeo → mismo número → alineación.
     `risk_alignment.override_required ⟺ status == "over_capacity"`, GROWTH ≥ DEFENSIVE en
     universo fixture). 104 tests en los dos archivos de integración afectados, suite completa
     (2486 tests) y smoke check end-to-end sin regresiones.
-  - **Pendiente** (fuera de este slice): sección de Risk Number en `CaseMarkdownReportGenerator`
-    (mismo patrón que `capacity_data` — recomputar del KYC persistido, I-013/I-020 lo permite);
-    card en el frontend (`frontend/js/investor-demo.js`, mismo patrón que
-    `idemoCapacityGapCardHTML`); mover `DOWNSIDE_ANCHORS`/`GAMMA_ANCHORS` a `config/` (hoy son
-    constantes de módulo documentadas y tuneables por parámetro, pero no versionables sin tocar
-    Python); pregunta de trade-off en el KYC (para que `client_risk_number` deje de ser
-    willingness-only).
+  - Frontend guiado (`investor-demo.js`) hecho en la misma sesión (commit `e341596`): card
+    "Risk Number del cliente" en el paso 3 (barra 0-100, tolerancia vs capacidad) + columna
+    "Nº riesgo" con pill de alineación en la tabla del paso 5.
+- **Slice 4 — HECHO (2026-07-03).** Las dos piezas que quedaban pendientes del Slice 3:
+  - **4a — Reporte markdown.** `CaseMarkdownReportGenerator._section_risk_number` (nueva),
+    sección "## Risk Number" con el número del cliente (operativo + tolerancia + techo) y el
+    número/alineación de la cartera SELECCIONADA. Mismo patrón que `capacity_data`: el endpoint
+    de reporte (`POST /cases/{id}/reports`) recomputa `client_risk_number(kyc_payload)` del KYC
+    vigente (nuevo arg `risk_number_data` en `generate()`); la cartera lee su `risk_number`/
+    `risk_alignment` YA PERSISTIDOS en `selected_candidate` (I-013/I-020: el generator formatea,
+    no recalcula). Tolerante: proposal legacy sin `risk_number` → "no disponible"; case sin KYC
+    → sección omitida si tampoco hay número de cartera. Tests:
+    `tests/unit/test_case_report_sections.py` (5 nuevos) +
+    `tests/integration/test_api_case_reports.py::test_markdown_contains_risk_number_section`.
+  - **4b — Pregunta de trade-off en el KYC.** `KYCDataRequest` (schemas.py) suma tres campos
+    opcionales: `tradeoff_gain_usd` (>0), `tradeoff_loss_usd` (>=0),
+    `tradeoff_certain_amount_usd` (sin constraint de rango — el chequeo relativo a la riqueza
+    `-loss < certain < gain` lo hace el motor). La riqueza W es `liquid_net_worth` del MISMO KYC
+    (I-015: no se pregunta de nuevo). Helpers nuevos en `api_layer/main.py`:
+    `_tradeoff_from_kyc_payload` (arma el dict `tradeoff` desde el KYC persistido, `None` si
+    falta cualquiera de los tres campos) y `_client_risk_number_tolerant` (envuelve
+    `client_risk_number` con el tradeoff armado, catch `(TypeError, ValueError)` → fallback a
+    willingness-only — nunca 500). Wired en los TRES puntos que computan el Risk Number del
+    cliente: profile-analysis, portfolio-proposal (paso 6b) y el reporte (4a). Frontend: pregunta
+    opcional en el form del KYC (paso 2) — ganancia/pérdida propuestas como 10%/5% del
+    patrimonio líquido declarado (checkbox para activarla, tildado por defecto en la demo); la
+    card del cliente (paso 3) ahora muestra el cruce cuestionario-vs-trade-off y, si divergen
+    ≥20 puntos, el aviso de inconsistencia con las preguntas de confirmación
+    (`idemoRiskNumberCardHTML` extendido, sin romper el caso sin trade-off). Tests: integración
+    consistente/inconsistente/inválido en los tres endpoints + unit de los helpers
+    (`tests/unit/test_tradeoff_from_kyc_payload.py`) + validación de rango en el schema
+    (`tests/integration/test_api_case_kyc.py`). Verificado con suite completa (2517 tests) +
+    smoke check + harness Node para los builders del frontend (el daemon de `browse` muere entre
+    llamadas en este sandbox Windows).
+  - **Pendiente** (opcional, chico — Tarea C del handoff): mover `GAMMA_ANCHORS` a `config/`
+    (los anchors de downside YA derivan del YAML desde DD-012; los de γ son la última
+    calibración hardcodeada en el módulo).
 
 ## 6. Punteros
 - Teoría + IP: `docs/RISK_SCORING_THEORY.md`
