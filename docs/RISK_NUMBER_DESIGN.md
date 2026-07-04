@@ -10,9 +10,11 @@
 > que activa el cross-check. Frontend guiado (`investor-demo.js`) completo:
 > card del cliente (paso 3, con divergencia + preguntas de confirmación),
 > columna por cartera (paso 5), pregunta de trade-off opcional en el form del
-> KYC (paso 2). Pendiente (opcional, chico): mover `GAMMA_ANCHORS` a
-> `config/` (§5, Tarea C del handoff `docs/NEXT_SESSION_PROMPT.md`). El §3
-> queda como registro de la decisión.
+> KYC (paso 2). **Toda la calibración vive ahora en `config/`:** los anclajes
+> de downside derivan de `config/risk_profiles.yaml` (DD-012) y los de γ de
+> `config/gamma_anchors.yaml` (Tarea C, cargados vía
+> `config_layer/risk_assumptions.load_gamma_anchors`). No quedan pendientes.
+> El §3 queda como registro de la decisión.
 >
 > **Revisión 2026-07-03 (post code-review, ver DD-012):** 10 hallazgos
 > confirmados y corregidos. Cambios de diseño resultantes: anclajes derivados
@@ -212,9 +214,24 @@ mapeo → mismo número → alineación.
     (`tests/integration/test_api_case_kyc.py`). Verificado con suite completa (2517 tests) +
     smoke check + harness Node para los builders del frontend (el daemon de `browse` muere entre
     llamadas en este sandbox Windows).
-  - **Pendiente** (opcional, chico — Tarea C del handoff): mover `GAMMA_ANCHORS` a `config/`
-    (los anchors de downside YA derivan del YAML desde DD-012; los de γ son la última
-    calibración hardcodeada en el módulo).
+- **Tarea C — HECHO (2026-07-04).** `GAMMA_ANCHORS` externalizado a
+  `config/gamma_anchors.yaml` (antes constante hardcodeada en el módulo). Loader
+  `load_gamma_anchors` + `get_default_gamma_anchors` en
+  `config_layer/risk_assumptions.py` (mismo patrón que
+  `load_achievable_returns`): valida lista de ≥2 pares, `gamma`/`number`
+  numéricos no-bool, `number` en [0, 100] y `gamma` estrictamente creciente
+  (requisito de `_piecewise_linear`). `risk_number.py` hace
+  `GAMMA_ANCHORS = get_default_gamma_anchors()` al importar (igual que
+  `DOWNSIDE_ANCHORS`). Valores sincronizados 100% con los históricos; ~19 tests
+  nuevos en `test_risk_assumptions_config.py` (default + regresión + validación
+  de schema). Con esto NO queda calibración hardcodeada: escala (downside) y
+  aversión (γ) se editan por YAML sin tocar Python.
+
+  Fixes post code-review (2026-07-04, commit tras el review de Slice 4): el form
+  del trade-off en el frontend ahora valida el monto contra los límites reales
+  antes de enviar (líquido bajo → no revienta el KYC con 422; monto vacío o
+  fuera de rango → se omite con aviso visible en vez de mandar un dato que el
+  backend descartaría en silencio), vía el helper único `idemoTradeoffState`.
 
 ## 6. Punteros
 - Teoría + IP: `docs/RISK_SCORING_THEORY.md`

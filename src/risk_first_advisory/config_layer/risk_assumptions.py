@@ -40,6 +40,7 @@ _CONFIG_DIR: Path = _PROJECT_ROOT / "config"
 
 DEFAULT_RISK_PROFILES_PATH: Path = _CONFIG_DIR / "risk_profiles.yaml"
 DEFAULT_ACHIEVABLE_RETURNS_PATH: Path = _CONFIG_DIR / "achievable_returns.yaml"
+DEFAULT_GAMMA_ANCHORS_PATH: Path = _CONFIG_DIR / "gamma_anchors.yaml"
 
 # Perfiles que DEBEN estar en cada archivo de config. Política estricta:
 # el loader rechaza tanto perfiles faltantes como perfiles desconocidos
@@ -315,6 +316,85 @@ def load_achievable_returns(path: Path | None = None) -> dict[str, float]:
     return result
 
 
+def load_gamma_anchors(
+    path: Path | None = None,
+) -> tuple[tuple[float, float], ...]:
+    """
+    Carga `config/gamma_anchors.yaml` y devuelve los anclajes γ→número como
+    tupla de pares `((gamma, number), ...)`, en el mismo formato que consumía
+    la constante `GAMMA_ANCHORS` hardcoded en `ai_layer/risk_number.py`.
+
+    Valida:
+        - documento raíz es mapping con clave `gamma_anchors`.
+        - `gamma_anchors` es una lista de al menos 2 pares (la interpolación
+          lineal a trozos necesita dos puntos como mínimo).
+        - cada item es un mapping con `gamma` y `number` numéricos (NO bool).
+        - `number` está en [0, 100].
+        - `gamma` es ESTRICTAMENTE creciente entre items (requisito de
+          `_piecewise_linear`; si no, la interpolación es ambigua).
+
+    Args:
+        path: ruta al YAML. Si None, usa `DEFAULT_GAMMA_ANCHORS_PATH`.
+
+    Raises:
+        FileNotFoundError: si el archivo no existe.
+        ValueError: si el schema, los tipos o la monotonía son inválidos.
+    """
+    target = path if path is not None else DEFAULT_GAMMA_ANCHORS_PATH
+    data = _load_yaml(target)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{target}: el documento raíz debe ser un mapping."
+        )
+    if "gamma_anchors" not in data:
+        raise ValueError(
+            f"{target}: falta la clave de nivel superior 'gamma_anchors'."
+        )
+
+    anchors_raw = data["gamma_anchors"]
+    if not isinstance(anchors_raw, list):
+        raise ValueError(
+            f"{target}: 'gamma_anchors' debe ser una lista de pares "
+            f"{{gamma, number}}."
+        )
+    if len(anchors_raw) < 2:
+        raise ValueError(
+            f"{target}: 'gamma_anchors' necesita al menos 2 pares para "
+            f"interpolar; tiene {len(anchors_raw)}."
+        )
+
+    result: list[tuple[float, float]] = []
+    prev_gamma: float | None = None
+    for i, item in enumerate(anchors_raw):
+        where = f"{target}: gamma_anchors[{i}]"
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"{where}: cada anclaje debe ser un mapping con 'gamma' y "
+                f"'number'. Recibido: {type(item).__name__}."
+            )
+        for key in ("gamma", "number"):
+            if key not in item:
+                raise ValueError(f"{where}: falta la clave '{key}'.")
+        _assert_number(item["gamma"], f"{where}.gamma")
+        _assert_number(item["number"], f"{where}.number")
+        gamma = float(item["gamma"])
+        number = float(item["number"])
+        if not 0.0 <= number <= 100.0:
+            raise ValueError(
+                f"{where}.number: debe estar en [0, 100]. Recibido: {number}."
+            )
+        if prev_gamma is not None and gamma <= prev_gamma:
+            raise ValueError(
+                f"{where}.gamma: los anclajes deben ser estrictamente "
+                f"crecientes en gamma. {gamma} no es mayor que el anterior "
+                f"{prev_gamma}."
+            )
+        prev_gamma = gamma
+        result.append((gamma, number))
+
+    return tuple(result)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Defaults cacheados — single read en el import del módulo consumidor
 # ─────────────────────────────────────────────────────────────────────────────
@@ -327,6 +407,7 @@ def load_achievable_returns(path: Path | None = None) -> dict[str, float]:
 
 _DEFAULT_RISK_PROFILE_PARAMS_CACHE: dict[str, dict[str, Any]] | None = None
 _DEFAULT_ACHIEVABLE_RETURNS_CACHE: dict[str, float] | None = None
+_DEFAULT_GAMMA_ANCHORS_CACHE: tuple[tuple[float, float], ...] | None = None
 
 
 def get_default_risk_profile_params() -> dict[str, dict[str, Any]]:
@@ -357,3 +438,15 @@ def get_default_achievable_returns() -> dict[str, float]:
         _DEFAULT_ACHIEVABLE_RETURNS_CACHE = load_achievable_returns()
     # Copia para evitar mutación del cache.
     return dict(_DEFAULT_ACHIEVABLE_RETURNS_CACHE)
+
+
+def get_default_gamma_anchors() -> tuple[tuple[float, float], ...]:
+    """
+    Devuelve los anclajes γ→número cargados desde el YAML por defecto.
+    Cacheado. La tupla es inmutable, así que se devuelve el cache directo
+    (no hace falta copiar como en los dicts).
+    """
+    global _DEFAULT_GAMMA_ANCHORS_CACHE
+    if _DEFAULT_GAMMA_ANCHORS_CACHE is None:
+        _DEFAULT_GAMMA_ANCHORS_CACHE = load_gamma_anchors()
+    return _DEFAULT_GAMMA_ANCHORS_CACHE

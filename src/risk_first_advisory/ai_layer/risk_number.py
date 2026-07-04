@@ -45,6 +45,7 @@ from risk_first_advisory.ai_layer.risk_scoring import (
     score_stated_profile,
 )
 from risk_first_advisory.config_layer.risk_assumptions import (
+    get_default_gamma_anchors,
     get_default_risk_profile_params,
 )
 
@@ -102,20 +103,13 @@ def _downside_anchors_from_config() -> tuple[tuple[float, float], ...]:
 
 DOWNSIDE_ANCHORS: tuple[tuple[float, float], ...] = _downside_anchors_from_config()
 
-# Anclajes γ (CRRA) → número. γ alto = más averso al riesgo = número más bajo.
-# Rangos típicos de la literatura: γ≈1 (log) inversor moderado-tolerante,
-# γ 2–4 moderado, γ>8 muy averso, γ≤0 neutral/buscador de riesgo.
-GAMMA_ANCHORS: tuple[tuple[float, float], ...] = (
-    (-2.0, 100.0),
-    (0.0, 95.0),
-    (0.5, 85.0),
-    (1.0, 70.0),
-    (2.0, 55.0),
-    (3.0, 45.0),
-    (5.0, 30.0),
-    (8.0, 15.0),
-    (12.0, 5.0),
-)
+# Anclajes γ (CRRA) → número, DERIVADOS de config/gamma_anchors.yaml (mismo
+# patrón que DOWNSIDE_ANCHORS y que los demás supuestos de config_layer:
+# lectura cacheada, una vez al importar). γ alto = más averso al riesgo =
+# número más bajo. Rangos típicos de la literatura: γ≈1 (log) inversor
+# moderado-tolerante, γ 2–4 moderado, γ>8 muy averso, γ≤0 neutral/buscador
+# de riesgo. Editar el YAML recalibra el mapeo sin tocar Python.
+GAMMA_ANCHORS: tuple[tuple[float, float], ...] = get_default_gamma_anchors()
 
 _GAMMA_MIN: float = -4.0
 _GAMMA_MAX: float = 20.0

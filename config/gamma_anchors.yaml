@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Anclajes γ (CRRA) → número de riesgo 0-100 — DEMO ASSUMPTIONS, NOT productive.
+#
+# Estos valores estaban hardcoded en
+# `src/risk_first_advisory/ai_layer/risk_number.GAMMA_ANCHORS`. Se externalizan
+# para que una firma piloto pueda versionarlos / revisarlos en code review sin
+# tocar Python — cerrando la última calibración hardcodeada del Risk Number
+# (los anclajes de downside ya derivan de config/risk_profiles.yaml, DD-012).
+#
+# Qué son: la pregunta de trade-off (certainty equivalent) implica un coeficiente
+# de aversión relativa al riesgo γ (CRRA). Estos pares (gamma → number) mapean ese
+# γ a la escala propia 0-100 vía interpolación lineal a trozos. γ alto = más averso
+# = número más bajo. Rangos típicos de la literatura: γ≈1 (log) inversor
+# moderado-tolerante, γ 2-4 moderado, γ>8 muy averso, γ≤0 neutral/buscador de riesgo.
+#
+# IMPORTANTE:
+#   - Son supuestos demo. NO reemplazan una calibración conductual formal ni la
+#     decisión de un comité de inversiones.
+#   - El loader (`config_layer/risk_assumptions.load_gamma_anchors`) exige:
+#     lista no vacía de al menos 2 pares; `gamma` y `number` numéricos (no bool);
+#     `number` en [0, 100]; y `gamma` ESTRICTAMENTE creciente (lo requiere la
+#     interpolación a trozos). Cualquier violación → ValueError al importar el
+#     módulo consumidor.
+#   - Sincronizado al 100% con los valores anteriores hardcoded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+disclaimer: >
+  Los anclajes γ→número son supuestos técnicos internos para uso en el demo del
+  MVP. No constituyen una medición conductual del cliente ni una garantía. Deben
+  ser revisados/recalibrados por la firma antes de uso productivo.
+
+gamma_anchors:
+  - gamma: -2.0
+    number: 100.0
+  - gamma: 0.0
+    number: 95.0
+  - gamma: 0.5
+    number: 85.0
+  - gamma: 1.0
+    number: 70.0
+  - gamma: 2.0
+    number: 55.0
+  - gamma: 3.0
+    number: 45.0
+  - gamma: 5.0
+    number: 30.0
+  - gamma: 8.0
+    number: 15.0
+  - gamma: 12.0
+    number: 5.0

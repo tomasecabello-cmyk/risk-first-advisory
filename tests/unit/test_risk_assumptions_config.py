@@ -20,12 +20,15 @@ import pytest
 
 from risk_first_advisory.config_layer.risk_assumptions import (
     DEFAULT_ACHIEVABLE_RETURNS_PATH,
+    DEFAULT_GAMMA_ANCHORS_PATH,
     DEFAULT_RISK_PROFILES_PATH,
     EXPECTED_PROFILES,
     REQUIRED_PROFILE_FIELDS,
     get_default_achievable_returns,
+    get_default_gamma_anchors,
     get_default_risk_profile_params,
     load_achievable_returns,
+    load_gamma_anchors,
     load_risk_profile_params,
 )
 
@@ -582,3 +585,124 @@ class TestConsistencyWithHistoricalConstants:
                 DEFAULT_ACHIEVABLE_RETURNS[profile]
                 == loader_returns[profile]
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# load_gamma_anchors — default file + schema validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _gamma_yaml(body: str) -> str:
+    """Envuelve un bloque `gamma_anchors:` con un disclaimer, para tests."""
+    return "disclaimer: test\ngamma_anchors:\n" + body
+
+
+class TestLoadGammaAnchorsDefault:
+    def test_default_file_loads_without_error(self):
+        anchors = load_gamma_anchors()
+        assert isinstance(anchors, tuple)
+        assert len(anchors) >= 2
+
+    def test_matches_historical_hardcoded_values(self):
+        """Regression contra la constante GAMMA_ANCHORS anterior."""
+        anchors = load_gamma_anchors()
+        assert anchors == (
+            (-2.0, 100.0), (0.0, 95.0), (0.5, 85.0), (1.0, 70.0), (2.0, 55.0),
+            (3.0, 45.0), (5.0, 30.0), (8.0, 15.0), (12.0, 5.0),
+        )
+
+    def test_gamma_strictly_increasing(self):
+        anchors = load_gamma_anchors()
+        gammas = [g for g, _ in anchors]
+        assert gammas == sorted(gammas)
+        assert len(set(gammas)) == len(gammas)
+
+    def test_numbers_within_scale(self):
+        for _, number in load_gamma_anchors():
+            assert 0.0 <= number <= 100.0
+
+    def test_risk_number_module_uses_loader_values(self):
+        """GAMMA_ANCHORS en ai_layer/risk_number.py = valores del loader."""
+        from risk_first_advisory.ai_layer.risk_number import GAMMA_ANCHORS
+        assert GAMMA_ANCHORS == load_gamma_anchors()
+
+    def test_default_path_points_to_config(self):
+        assert DEFAULT_GAMMA_ANCHORS_PATH.name == "gamma_anchors.yaml"
+
+
+class TestGetDefaultGammaAnchorsCache:
+    def test_returns_same_values_across_calls(self):
+        assert get_default_gamma_anchors() == get_default_gamma_anchors()
+
+    def test_matches_load(self):
+        assert get_default_gamma_anchors() == load_gamma_anchors()
+
+
+class TestLoadGammaAnchorsValidation:
+    def test_missing_file_raises_file_not_found(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            load_gamma_anchors(tmp_path / "no_existe.yaml")
+
+    def test_empty_file_raises_value_error(self, tmp_path: Path):
+        path = _write(tmp_path, "empty.yaml", "")
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "vacío" in str(exc_info.value).lower()
+
+    def test_missing_key_raises(self, tmp_path: Path):
+        path = _write(tmp_path, "noroot.yaml", "other: 1\n")
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "gamma_anchors" in str(exc_info.value)
+
+    def test_not_a_list_raises(self, tmp_path: Path):
+        path = _write(tmp_path, "notlist.yaml", "gamma_anchors:\n  gamma: 1.0\n")
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "lista" in str(exc_info.value)
+
+    def test_single_anchor_raises(self, tmp_path: Path):
+        path = _write(tmp_path, "one.yaml", _gamma_yaml("  - gamma: 1.0\n    number: 70.0\n"))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "al menos 2" in str(exc_info.value)
+
+    def test_missing_number_key_raises(self, tmp_path: Path):
+        body = "  - gamma: 1.0\n  - gamma: 2.0\n    number: 55.0\n"
+        path = _write(tmp_path, "nonum.yaml", _gamma_yaml(body))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "number" in str(exc_info.value)
+
+    def test_bool_gamma_raises(self, tmp_path: Path):
+        body = "  - gamma: true\n    number: 70.0\n  - gamma: 2.0\n    number: 55.0\n"
+        path = _write(tmp_path, "boolgamma.yaml", _gamma_yaml(body))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "bool" in str(exc_info.value).lower()
+
+    def test_number_out_of_range_raises(self, tmp_path: Path):
+        body = "  - gamma: 1.0\n    number: 70.0\n  - gamma: 2.0\n    number: 150.0\n"
+        path = _write(tmp_path, "oor.yaml", _gamma_yaml(body))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "[0, 100]" in str(exc_info.value)
+
+    def test_non_increasing_gamma_raises(self, tmp_path: Path):
+        body = "  - gamma: 2.0\n    number: 55.0\n  - gamma: 1.0\n    number: 70.0\n"
+        path = _write(tmp_path, "decr.yaml", _gamma_yaml(body))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "crecientes" in str(exc_info.value)
+
+    def test_duplicate_gamma_raises(self, tmp_path: Path):
+        body = "  - gamma: 1.0\n    number: 55.0\n  - gamma: 1.0\n    number: 70.0\n"
+        path = _write(tmp_path, "dup.yaml", _gamma_yaml(body))
+        with pytest.raises(ValueError) as exc_info:
+            load_gamma_anchors(path)
+        assert "crecientes" in str(exc_info.value)
+
+    def test_valid_custom_file_loads(self, tmp_path: Path):
+        body = "  - gamma: -1.0\n    number: 90.0\n  - gamma: 4.0\n    number: 40.0\n"
+        path = _write(tmp_path, "ok.yaml", _gamma_yaml(body))
+        assert load_gamma_anchors(path) == ((-1.0, 90.0), (4.0, 40.0))
