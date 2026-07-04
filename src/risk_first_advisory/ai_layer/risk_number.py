@@ -16,13 +16,21 @@ Método propio, diferenciado del patentado de Nitrogen/Riskalyze
   - el cross-check declarado-vs-trade-off es una señal de INCONSISTENCIA para
     que el asesor confirme (Risk Gap), no una medición conductual.
 
-Función pura: mismo input → mismo output. No usa OpenAI, no toca DB ni red.
-AI/motor PROPONE, el asesor DECIDE (I-001): nada de este módulo aprueba nada.
+Función pura: mismo input → mismo output. No usa OpenAI, no toca DB ni red
+(la única I/O es la lectura cacheada de config/risk_profiles.yaml al importar,
+mismo patrón que rules_layer/risk_budget_builder). AI/motor PROPONE, el asesor
+DECIDE (I-001): nada de este módulo aprueba nada — la alineación es
+INFORMATIVA; el override formal lo gobiernan los mecanismos existentes
+(profile-approval y metadata.requires_advisor_override en la selección, I-018).
 
-Calibraciones (anchors) = supuestos DEMO, tuneables: los anclajes de downside
-derivan de los max_drawdown de config/risk_profiles.yaml; los de γ, de rangos
-típicos de aversión relativa al riesgo en la literatura CRRA. No reemplazan un
-proceso de CMA ni la decisión de un comité de inversiones.
+Calibración de la escala (DD-012): los anclajes downside se DERIVAN al importar
+del max_volatility por perfil de config/risk_profiles.yaml, transformado con el
+mismo CVaR (α=0.95, 1 año) que mide las carteras. Eso garantiza por
+construcción que una cartera dentro del budget de su perfil (σ ≤ max_volatility,
+μ ≥ 0) nunca banda por encima de ese perfil — la escala y los budgets no pueden
+divergir porque salen del mismo archivo. Los anclajes de γ vienen de rangos
+típicos de aversión relativa al riesgo (CRRA) en la literatura. Supuestos DEMO:
+no reemplazan un proceso de CMA ni la decisión de un comité de inversiones.
 """
 
 from __future__ import annotations
@@ -33,7 +41,11 @@ from typing import Any
 
 from risk_first_advisory.ai_layer.risk_scoring import (
     PROFILES,
+    _profile_from_score,
     score_stated_profile,
+)
+from risk_first_advisory.config_layer.risk_assumptions import (
+    get_default_risk_profile_params,
 )
 
 # ---------------------------------------------------------------------------
@@ -43,18 +55,52 @@ from risk_first_advisory.ai_layer.risk_scoring import (
 SCALE_MIN: float = 0.0
 SCALE_MAX: float = 100.0
 
-# Anclajes downside → número. Derivados de los max_drawdown por perfil en
-# config/risk_profiles.yaml: el tope de cada banda de 20 puntos corresponde a
-# la pérdida máxima tolerada por ese perfil (conservador -7% → 20, ...,
-# agresivo -30% → 100). Pérdida como fracción POSITIVA.
-DOWNSIDE_ANCHORS: tuple[tuple[float, float], ...] = (
-    (0.00, 0.0),
-    (0.07, 20.0),   # conservador: max_drawdown -0.070
-    (0.10, 40.0),   # moderado-defensivo: -0.100
-    (0.15, 60.0),   # moderado: -0.150
-    (0.22, 80.0),   # moderado-agresivo: -0.220
-    (0.30, 100.0),  # agresivo: -0.300
-)
+# Nivel de confianza al que está CALIBRADA la escala (los anchors se computan
+# con este α a horizonte 1 año). portfolio_downside acepta otros α/horizontes,
+# pero el mapeo a 0-100 conserva el significado de la calibración por defecto.
+DEFAULT_ALPHA: float = 0.95
+
+_STD_NORMAL = NormalDist()
+
+
+def _norm_pdf(z: float) -> float:
+    return _STD_NORMAL.pdf(z)
+
+
+def _norm_ppf(p: float) -> float:
+    """Cuantil normal estándar (stdlib statistics.NormalDist)."""
+    if not 0.0 < p < 1.0:
+        raise ValueError(f"p debe estar en (0,1). Recibido: {p}.")
+    return _STD_NORMAL.inv_cdf(p)
+
+
+def _cvar_loss_multiplier(alpha: float) -> float:
+    """k tal que la pérdida CVaR_α de una N(0, σ) es k·σ (≈2.063 para α=0.95)."""
+    z = _norm_ppf(alpha)
+    return _norm_pdf(z) / (1.0 - alpha)
+
+
+def _downside_anchors_from_config() -> tuple[tuple[float, float], ...]:
+    """
+    Anclajes downside → número, DERIVADOS de config/risk_profiles.yaml (DD-012).
+
+    El tope de la banda de cada perfil es la pérdida CVaR(α=0.95, 1 año) de una
+    cartera al max_volatility de ese perfil con μ=0: pérdida = k·max_volatility.
+    Así, una cartera que respeta el budget de su perfil (σ ≤ max_volatility,
+    μ ≥ 0) mapea por construcción dentro de la banda de ese perfil, y editar el
+    YAML recalibra escala y budgets JUNTOS (no pueden divergir en silencio).
+    Pérdida como fracción POSITIVA. Lectura cacheada, una vez al importar.
+    """
+    params = get_default_risk_profile_params()
+    k = _cvar_loss_multiplier(DEFAULT_ALPHA)
+    anchors: list[tuple[float, float]] = [(0.0, 0.0)]
+    for i, profile in enumerate(PROFILES):
+        max_vol = float(params[profile]["max_volatility"])
+        anchors.append((k * max_vol, (i + 1) * 20.0))
+    return tuple(anchors)
+
+
+DOWNSIDE_ANCHORS: tuple[tuple[float, float], ...] = _downside_anchors_from_config()
 
 # Anclajes γ (CRRA) → número. γ alto = más averso al riesgo = número más bajo.
 # Rangos típicos de la literatura: γ≈1 (log) inversor moderado-tolerante,
@@ -80,45 +126,30 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _piecewise_linear(x: float, anchors: tuple[tuple[float, float], ...]) -> float:
-    """Interpola linealmente sobre anchors ordenados por x; clampa en los bordes."""
+    """Interpola linealmente sobre anchors ESTRICTAMENTE crecientes en x;
+    clampa en los bordes."""
     if x <= anchors[0][0]:
         return anchors[0][1]
     if x >= anchors[-1][0]:
         return anchors[-1][1]
     for (x0, y0), (x1, y1) in zip(anchors, anchors[1:], strict=False):
         if x0 <= x <= x1:
-            if x1 == x0:
-                return y1
             return y0 + (x - x0) / (x1 - x0) * (y1 - y0)
-    return anchors[-1][1]  # inalcanzable con anchors ordenados
+    raise ValueError(f"anchors deben estar ordenados crecientes en x: {anchors!r}")
 
 
 def number_to_band(number: float) -> str:
-    """Mapea un número 0–100 a uno de los 5 perfiles por bandas de 20."""
-    idx = int(_clamp(number, SCALE_MIN, SCALE_MAX) // 20)
-    return PROFILES[min(idx, len(PROFILES) - 1)]
-
-
-def _band_index(number: float) -> int:
-    return PROFILES.index(number_to_band(number))
+    """
+    Mapea un número 0–100 a uno de los 5 perfiles. Delegado en
+    risk_scoring._profile_from_score para que exista UNA sola definición de
+    las bandas en todo el motor (cliente y cartera bandan igual por diseño).
+    """
+    return _profile_from_score(_clamp(number, SCALE_MIN, SCALE_MAX))
 
 
 # ---------------------------------------------------------------------------
 # Lado CARTERA — CVaR a horizonte configurable → número
 # ---------------------------------------------------------------------------
-
-_STD_NORMAL = NormalDist()
-
-
-def _norm_pdf(z: float) -> float:
-    return math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
-
-
-def _norm_ppf(p: float) -> float:
-    """Cuantil normal estándar (stdlib statistics.NormalDist)."""
-    if not 0.0 < p < 1.0:
-        raise ValueError(f"p debe estar en (0,1). Recibido: {p}.")
-    return _STD_NORMAL.inv_cdf(p)
 
 
 def portfolio_downside(
@@ -126,7 +157,7 @@ def portfolio_downside(
     sigma_annual: float | None = None,
     returns: list[float] | None = None,
     horizon_years: float = 1.0,
-    alpha: float = 0.95,
+    alpha: float = DEFAULT_ALPHA,
 ) -> dict[str, Any]:
     """
     Downside de la cartera: CVaR/Expected Shortfall al nivel `alpha` sobre un
@@ -150,8 +181,20 @@ def portfolio_downside(
     if horizon_years <= 0:
         raise ValueError(f"horizon_years debe ser > 0. Recibido: {horizon_years}.")
 
-    if returns:
+    # `is not None` (no truthiness): una lista vacía ES un error explícito de
+    # muestra, no un fallback silencioso al método paramétrico.
+    if returns is not None:
         rets = sorted(float(r) for r in returns)
+        if not rets:
+            raise ValueError(
+                "`returns` fue provisto pero está vacío: no hay muestra para "
+                "el CVaR empírico."
+            )
+        if not all(math.isfinite(r) for r in rets):
+            raise ValueError(
+                "`returns` contiene valores no finitos (NaN/inf): datos de "
+                "mercado corruptos — no se computa el downside."
+            )
         # floor con epsilon: evita que 20·0.05 = 1.0000000000000009 arrastre
         # una observación de más a la cola.
         tail_n = max(1, math.floor(len(rets) * (1.0 - alpha) + 1e-9))
@@ -169,6 +212,12 @@ def portfolio_downside(
     if mu_annual is None or sigma_annual is None:
         raise ValueError(
             "Se requiere `returns` o el par `mu_annual` + `sigma_annual`."
+        )
+    # isfinite ANTES del chequeo de signo: NaN < 0 es False y se colaría.
+    if not (math.isfinite(mu_annual) and math.isfinite(sigma_annual)):
+        raise ValueError(
+            f"mu_annual/sigma_annual deben ser finitos (no NaN/inf): datos de "
+            f"mercado corruptos. Recibido: mu={mu_annual}, sigma={sigma_annual}."
         )
     if sigma_annual < 0:
         raise ValueError(f"sigma_annual debe ser >= 0. Recibido: {sigma_annual}.")
@@ -202,7 +251,7 @@ def portfolio_risk_number(
     sigma_annual: float | None = None,
     returns: list[float] | None = None,
     horizon_years: float = 1.0,
-    alpha: float = 0.95,
+    alpha: float = DEFAULT_ALPHA,
 ) -> dict[str, Any]:
     """
     Número de riesgo 0–100 de una cartera, desde su downside (CVaR).
@@ -220,8 +269,10 @@ def portfolio_risk_number(
     horizon_label = (
         f"{horizon_years:g} año" if horizon_years == 1.0 else f"{horizon_years:g} años"
     )
+    # :g y no round(): con α=0.996 la cola es 0.4%, no "0%".
+    tail_pct = f"{(1 - alpha) * 100:g}"
     explanation = (
-        f"En el peor {round((1 - alpha) * 100):d}% de los escenarios a {horizon_label}, "
+        f"En el peor {tail_pct}% de los escenarios a {horizon_label}, "
         f"la pérdida esperada de esta cartera es {pct:.1f}%. En la escala del sistema "
         f"eso es un número de riesgo {number:.0f}/100 (banda «{band}»)."
     )
@@ -321,6 +372,14 @@ def portfolio_moments_from_weights(
         for b in used:
             wb, ib = weights[b], index[b]
             variance += wa * wb * covariance[ia][ib]
+    # ANTES del clamp: max(0.0, nan) devuelve 0.0 y un NaN de datos corruptos
+    # se disfrazaría de cartera sin riesgo (número 0, «conservador»).
+    if not (math.isfinite(mu) and math.isfinite(variance)):
+        raise ValueError(
+            "Retornos/covarianza con valores no finitos (NaN/inf) en los "
+            "tickers con peso: datos de mercado corruptos — no se computa "
+            "el número de la cartera."
+        )
     sigma = math.sqrt(max(0.0, variance))
 
     return {
@@ -338,7 +397,7 @@ def portfolio_risk_number_from_weights(
     tickers: list[str],
     covariance: list[list[float]],
     horizon_years: float = 1.0,
-    alpha: float = 0.95,
+    alpha: float = DEFAULT_ALPHA,
 ) -> dict[str, Any]:
     """
     Conveniencia: pesos + datos de mercado de una cartera candidata real →
@@ -394,6 +453,10 @@ def crra_gamma_from_certainty_equivalent(
     γ se clampa a [-4, 20] (fuera de eso la respuesta ya no discrimina).
     Función pura.
     """
+    for name, v in (("wealth", wealth), ("gain", gain), ("loss", loss),
+                    ("certain_amount", certain_amount)):
+        if not math.isfinite(v):
+            raise ValueError(f"{name} debe ser finito (no NaN/inf). Recibido: {v}.")
     if wealth <= 0:
         raise ValueError(f"wealth debe ser > 0. Recibido: {wealth}.")
     if gain <= 0:
@@ -408,17 +471,24 @@ def crra_gamma_from_certainty_equivalent(
             f"({-loss} < C < {gain}). Recibido: {certain_amount}."
         )
 
+    # CRRA es homotética: escalar (W, G, L, C) por una constante no cambia γ.
+    # Normalizamos a riqueza 1 para que x**(1-γ) no sub/desborde el float con
+    # riquezas grandes (sin esto, wealth ≳ 1e17 crashea en el borde γ=20).
+    gain_n = gain / wealth
+    loss_n = loss / wealth
+    certain_n = certain_amount / wealth
+
     # CE(γ) es decreciente en γ: si ni el extremo más buscador de riesgo alcanza
     # el C declarado, clampamos al borde correspondiente.
-    if _crra_certainty_equivalent(wealth, gain, loss, _GAMMA_MIN) <= certain_amount:
+    if _crra_certainty_equivalent(1.0, gain_n, loss_n, _GAMMA_MIN) <= certain_n:
         return _GAMMA_MIN
-    if _crra_certainty_equivalent(wealth, gain, loss, _GAMMA_MAX) >= certain_amount:
+    if _crra_certainty_equivalent(1.0, gain_n, loss_n, _GAMMA_MAX) >= certain_n:
         return _GAMMA_MAX
 
     lo, hi = _GAMMA_MIN, _GAMMA_MAX
     for _ in range(200):
         mid = 0.5 * (lo + hi)
-        if _crra_certainty_equivalent(wealth, gain, loss, mid) > certain_amount:
+        if _crra_certainty_equivalent(1.0, gain_n, loss_n, mid) > certain_n:
             lo = mid  # el CE todavía es alto → falta aversión → subir γ
         else:
             hi = mid
@@ -464,6 +534,13 @@ _DIVERGENCE_QUESTIONS: tuple[str, ...] = (
 )
 
 
+# Divergencia entre elicitaciones que amerita confirmar con el cliente:
+# una banda entera (20 puntos) de desacuerdo REAL, medido en puntos — no en
+# índices de banda, para que 0.2 puntos cruzando un borde no dispare la señal
+# y 19.9 puntos dentro de una banda no pasen en silencio.
+DIVERGENCE_THRESHOLD_POINTS: float = 20.0
+
+
 def client_risk_number(
     payload: dict[str, Any],
     tradeoff: dict[str, Any] | None = None,
@@ -476,16 +553,19 @@ def client_risk_number(
       - opcional `tradeoff` = {wealth, gain, loss, certain_amount} → número
         vía certainty equivalent → γ CRRA.
 
-    Si ambas existen, el número es el promedio y la DIVERGENCIA entre ambas
-    (en bandas de 20) se expone como señal de inconsistencia con preguntas de
-    confirmación para el asesor — mismo espíritu que el Risk Gap: esto NO es
-    una medición conductual, es una inconsistencia a confirmar.
+    `tolerance_number` combina ambas (promedio si las dos existen); la
+    DIVERGENCIA entre ellas (en puntos) se expone como señal de inconsistencia
+    con preguntas de confirmación para el asesor — mismo espíritu que el Risk
+    Gap: NO es una medición conductual, es una inconsistencia a confirmar.
 
-    También expone el TECHO DE CAPACIDAD (ability) en la misma escala: el
-    número de cartera no debería superarlo sin override explícito del asesor.
+    `number` (el Risk Number) es el OPERATIVO: la capacidad acota la
+    tolerancia — number = min(tolerance_number, capacity_ceiling_number) —
+    con la misma regla que el perfil efectivo del motor (score_stated_profile:
+    effective = min(willingness, ability)). Así este número y el
+    `deterministic.score` que viaja al lado en el análisis no se contradicen.
 
     Returns dict: number, band, willingness_number, tradeoff_number, gamma,
-    divergence_bands, inconsistent, capacity_ceiling_number,
+    tolerance_number, divergence_bands, inconsistent, capacity_ceiling_number,
     capacity_ceiling_band, confirmation_questions, explanation (es).
     """
     stated = score_stated_profile(payload)
@@ -505,30 +585,42 @@ def client_risk_number(
         gamma = t["gamma"]
 
     if tradeoff_number is not None:
-        number = round(0.5 * willingness_number + 0.5 * tradeoff_number, 1)
-        divergence_bands = abs(
-            _band_index(willingness_number) - _band_index(tradeoff_number)
-        )
+        tolerance_number = round(0.5 * willingness_number + 0.5 * tradeoff_number, 1)
+        divergence_points = abs(willingness_number - tradeoff_number)
     else:
-        number = willingness_number
-        divergence_bands = 0
+        tolerance_number = willingness_number
+        divergence_points = 0.0
 
-    inconsistent = divergence_bands >= 1
+    divergence_bands = int(divergence_points // 20)
+    inconsistent = divergence_points >= DIVERGENCE_THRESHOLD_POINTS
+
+    # La capacidad acota: el número operativo nunca supera el techo.
+    number = round(min(tolerance_number, ceiling_number), 1)
     band = number_to_band(number)
+    capacity_bound = tolerance_number > ceiling_number
 
     if inconsistent:
         explanation = (
             f"Las dos elicitaciones divergen: el cuestionario declara "
             f"{willingness_number:.0f}/100 pero la pregunta de trade-off implica "
-            f"{tradeoff_number:.0f}/100 ({divergence_bands} banda(s) de diferencia). "
-            f"Número combinado provisorio: {number:.0f}/100 («{band}»). Confirmar con "
-            "el cliente antes de usarlo — esto es una inconsistencia, no una medición."
+            f"{tradeoff_number:.0f}/100 ({divergence_points:.0f} puntos de "
+            f"diferencia). Número operativo provisorio: {number:.0f}/100 "
+            f"(«{band}»). Confirmar con el cliente antes de usarlo — esto es "
+            "una inconsistencia, no una medición."
+        )
+    elif capacity_bound:
+        explanation = (
+            f"El cliente tolera {tolerance_number:.0f}/100, pero su capacidad "
+            f"financiera soporta hasta {ceiling_number:.0f}/100: su número de "
+            f"riesgo operativo es {number:.0f}/100 («{band}»). La capacidad "
+            "acota la tolerancia — la diferencia es tema de conversación con "
+            "el asesor, no un permiso para asumir más riesgo."
         )
     else:
         explanation = (
-            f"Número de riesgo del cliente: {number:.0f}/100 («{band}»). "
-            f"Su capacidad financiera soporta hasta {ceiling_number:.0f}/100 "
-            f"(«{number_to_band(ceiling_number)}»)."
+            f"Número de riesgo del cliente: {number:.0f}/100 («{band}»), "
+            f"dentro de su capacidad financiera "
+            f"({ceiling_number:.0f}/100, «{number_to_band(ceiling_number)}»)."
         )
 
     return {
@@ -537,6 +629,7 @@ def client_risk_number(
         "willingness_number": willingness_number,
         "tradeoff_number": tradeoff_number,
         "gamma": gamma,
+        "tolerance_number": tolerance_number,
         "divergence_bands": divergence_bands,
         "inconsistent": inconsistent,
         "capacity_ceiling_number": ceiling_number,
@@ -562,57 +655,77 @@ def align_numbers(
 ) -> dict[str, Any]:
     """
     Compara los tres números en la misma escala 0–100 y clasifica la alineación.
+    Todas las comparaciones son POR PUNTOS con la misma holgura (media banda por
+    defecto) — no por índices de banda, que en los bordes disparaban con 0.1
+    puntos de diferencia y callaban con 19.9.
 
     status:
-      - 'over_capacity'   la cartera está en una banda MÁS riesgosa que el techo
-                          de capacidad → requiere override explícito del asesor
-                          (misma semántica de bandas que deterministic_ceiling);
-      - 'over_tolerance'  dentro de capacidad, pero > tolerancia del cliente
+      - 'over_capacity'   la cartera supera el techo de capacidad por más de la
+                          holgura: el cliente asumiría más riesgo del que su
+                          situación financiera soporta — conversación obligada;
+      - 'over_tolerance'  dentro de capacidad, pero > número del cliente
                           + holgura → conversación de ajuste;
       - 'aligned'         dentro de ±holgura del número del cliente;
-      - 'under_tolerance' más conservadora que la tolerancia − holgura → hay
-                          margen para tomar más riesgo si el cliente quiere.
+      - 'under_tolerance' más conservadora que el número del cliente − holgura;
+                          el margen para subir riesgo se informa ACOTADO por el
+                          techo de capacidad, nunca más allá.
 
-    Este módulo INFORMA la conversación; aprobar/elegir sigue siendo del asesor
-    vía los endpoints humanos (I-001/I-016/I-019). Función pura.
+    SEÑAL INFORMATIVA, no de enforcement: este módulo informa la conversación
+    asesor↔cliente. El override formal lo gobiernan los mecanismos existentes —
+    la aprobación de perfil por encima del techo (profile-approval) y
+    metadata.requires_advisor_override en la selección de cartera (I-018).
+    Aprobar/elegir sigue siendo del asesor vía los endpoints humanos
+    (I-001/I-016/I-019). Función pura.
 
-    Returns dict: status, override_required, gap_points (cartera − cliente),
-    capacity_gap_bands (bandas por encima del techo), explanation (es).
+    Returns dict: status, gap_points (cartera − cliente), capacity_gap_points
+    (cartera − techo), explanation (es).
     """
     if tolerance_points < 0:
         raise ValueError(f"tolerance_points debe ser >= 0. Recibido: {tolerance_points}.")
 
     gap_points = round(portfolio_number - client_number, 1)
-    capacity_gap_bands = max(
-        0, _band_index(portfolio_number) - _band_index(capacity_ceiling_number)
-    )
+    capacity_gap_points = round(portfolio_number - capacity_ceiling_number, 1)
 
-    if capacity_gap_bands > 0:
+    if capacity_gap_points > tolerance_points:
         status = "over_capacity"
-        banda = "banda" if capacity_gap_bands == 1 else "bandas"
         explanation = (
-            f"La cartera ({portfolio_number:.0f}/100) está {capacity_gap_bands} {banda} "
-            f"por encima del techo de capacidad del cliente "
-            f"({capacity_ceiling_number:.0f}/100). Elegirla requiere override explícito "
-            "del asesor, firmado y auditado: el cliente asumiría más riesgo del que su "
-            "situación financiera soporta."
+            f"La cartera ({portfolio_number:.0f}/100) queda {capacity_gap_points:.0f} "
+            f"puntos por encima del techo de capacidad del cliente "
+            f"({capacity_ceiling_number:.0f}/100): asumiría más riesgo del que su "
+            "situación financiera soporta. Revisarlo con el cliente antes de "
+            "considerarla; si además excede el presupuesto de riesgo aprobado, "
+            "la selección exige el override formal del asesor."
         )
     elif gap_points > tolerance_points:
         status = "over_tolerance"
         explanation = (
-            f"La cartera ({portfolio_number:.0f}/100) supera la tolerancia del cliente "
+            f"La cartera ({portfolio_number:.0f}/100) supera el número del cliente "
             f"({client_number:.0f}/100) en {gap_points:.0f} puntos, aunque está dentro "
             "de su capacidad. Conviene bajar el riesgo de la cartera o confirmar con el "
             "cliente que acepta la diferencia."
         )
     elif gap_points < -tolerance_points:
         status = "under_tolerance"
-        explanation = (
-            f"La cartera ({portfolio_number:.0f}/100) es más conservadora que la "
-            f"tolerancia del cliente ({client_number:.0f}/100) por "
-            f"{-gap_points:.0f} puntos. Hay margen para tomar más riesgo si el cliente "
-            "lo quiere — o es una elección deliberada de prudencia."
+        # El margen real para subir riesgo termina en el techo de capacidad,
+        # no en la tolerancia declarada.
+        headroom = round(
+            min(client_number, capacity_ceiling_number) - portfolio_number, 1
         )
+        if headroom > tolerance_points:
+            explanation = (
+                f"La cartera ({portfolio_number:.0f}/100) es más conservadora que el "
+                f"número del cliente ({client_number:.0f}/100). Hay margen de "
+                f"{headroom:.0f} puntos para tomar más riesgo sin exceder su capacidad "
+                f"({capacity_ceiling_number:.0f}/100) — o es una elección deliberada "
+                "de prudencia."
+            )
+        else:
+            explanation = (
+                f"La cartera ({portfolio_number:.0f}/100) es más conservadora que el "
+                f"número del cliente ({client_number:.0f}/100), pero el techo de "
+                f"capacidad ({capacity_ceiling_number:.0f}/100) deja poco margen "
+                "adicional: subir el riesgo no es una opción real para este cliente."
+            )
     else:
         status = "aligned"
         explanation = (
@@ -623,9 +736,8 @@ def align_numbers(
 
     return {
         "status": status,
-        "override_required": status == "over_capacity",
         "gap_points": gap_points,
-        "capacity_gap_bands": capacity_gap_bands,
+        "capacity_gap_points": capacity_gap_points,
         "explanation": explanation,
     }
 
@@ -637,7 +749,7 @@ def assess_risk_alignment(
     sigma_annual: float | None = None,
     returns: list[float] | None = None,
     horizon_years: float = 1.0,
-    alpha: float = 0.95,
+    alpha: float = DEFAULT_ALPHA,
     tradeoff: dict[str, Any] | None = None,
     tolerance_points: float = ALIGNMENT_TOLERANCE_POINTS,
 ) -> dict[str, Any]:

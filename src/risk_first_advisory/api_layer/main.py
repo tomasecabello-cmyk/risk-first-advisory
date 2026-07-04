@@ -4980,8 +4980,14 @@ def _compute_candidate_risk_number(
     Puramente derivado de datos ya computados en este mismo request (no
     vuelve a llamar al optimizer ni a ningún proveedor de mercado) —
     consistente con I-013/I-020. Tolerante: si faltan datos de mercado para
-    los tickers con peso (p.ej. universo no cubierto por live data), devuelve
-    (None, None) en vez de romper la generación de la propuesta.
+    los tickers con peso, o si contienen valores no finitos (NaN/inf de un
+    proveedor live degenerado), devuelve (None, None) en vez de romper la
+    generación de la propuesta o de emitir un número confiadamente erróneo.
+
+    La alineación es INFORMATIVA (conversación asesor↔cliente): el override
+    formal lo gobiernan profile-approval y metadata.requires_advisor_override
+    en la selección (I-018) — por eso NO expone ningún flag de override.
+    `client_kyc_submission_id` registra qué KYC produjo el número del cliente.
 
     Returns (risk_number_dict | None, risk_alignment_dict | None).
     """
@@ -5008,6 +5014,7 @@ def _compute_candidate_risk_number(
             capacity_ceiling_number=client_number["capacity_ceiling_number"],
             portfolio_number=rn["number"],
         )
+        alignment["client_kyc_submission_id"] = client_number.get("kyc_submission_id")
     return rn, alignment
 
 
@@ -5271,6 +5278,23 @@ def create_case_portfolio_proposal(
         if adv_repo.get(advisor.advisor_id) is not None:
             created_by_advisor_id = advisor.advisor_id
 
+        # ── 1b. KYC que respalda el Risk Number del cliente ─────────────────
+        # Se prefiere el KYC registrado por la APROBACIÓN usada para el budget
+        # sobre el vigente del case, para que el número del cliente y el budget
+        # describan la misma decisión (un KYC re-enviado después de aprobar no
+        # cambia en silencio contra qué se alinean los candidatos). El id usado
+        # queda registrado por candidato (risk_alignment.client_kyc_submission_id).
+        rn_kyc_submission_id: str | None = (
+            approval_data.get("kyc_submission_id")
+            or case_data.get("current_kyc_submission_id")
+        )
+        rn_kyc_payload: dict[str, Any] | None = None
+        if rn_kyc_submission_id is not None:
+            kyc_row = SQLiteKYCSubmissionRepository(store).get(rn_kyc_submission_id)
+            payload_raw = (kyc_row or {}).get("payload")
+            if isinstance(payload_raw, dict):
+                rn_kyc_payload = payload_raw
+
     # ── 2. Reconstruir instrumentos desde el snapshot del filter run ────────
     eligible_dicts = filter_data["eligible_instruments"]
     eligible_instruments = [_reconstruct_instrument_from_dict(d) for d in eligible_dicts]
@@ -5391,22 +5415,25 @@ def create_case_portfolio_proposal(
 
     # ── 6b. Risk Number: datos planos para el número de cartera + cliente ───
     # docs/RISK_NUMBER_DESIGN.md (Slice 3). Puramente derivado de lo estimado
-    # arriba (nada de red/optimizer adicional) + el KYC vigente del case, si
-    # existe (tolerante: sin KYC, risk_alignment queda None por candidato).
+    # arriba (nada de red/optimizer adicional) + el KYC de la aprobación,
+    # cargado en el paso 1b sin abrir otra conexión. Tolerante: sin KYC o con
+    # un payload que el motor no pueda puntuar (rows legacy pre-tipado), el
+    # número queda None por candidato sin bloquear la propuesta.
     expected_returns_by_ticker = {
         e.ticker: e.adjusted_expected_return_annual for e in return_estimates
     }
     client_number: dict[str, Any] | None = None
-    kyc_id = case_data.get("current_kyc_submission_id")
-    if kyc_id is not None:
+    if rn_kyc_payload is not None:
         from risk_first_advisory.ai_layer.risk_number import (
             client_risk_number as compute_client_risk_number,
         )
-        with SQLiteEntityStore(db_path) as store:
-            kyc_row = SQLiteKYCSubmissionRepository(store).get(kyc_id)
-        kyc_payload_for_rn = (kyc_row or {}).get("payload")
-        if isinstance(kyc_payload_for_rn, dict):
-            client_number = compute_client_risk_number(kyc_payload_for_rn)
+        try:
+            client_number = compute_client_risk_number(rn_kyc_payload)
+        except (TypeError, ValueError):
+            client_number = None
+        else:
+            # Trazabilidad (audit): qué KYC produjo el número del cliente.
+            client_number["kyc_submission_id"] = rn_kyc_submission_id
 
     # ── 7. Generar candidatos ───────────────────────────────────────────────
     try:

@@ -194,3 +194,27 @@ Ver también `docs/TODO_DESIGN_NOTES.md`.
 - La IA queda limitada a interpretación, detección de contradicciones y follow-up acotado.
 - El asesor mantiene la aprobación final del perfil.
 - Las respuestas abiertas (`open_*`) pueden existir en `KYCData` como observaciones para el asesor y la IA, pero no son campos duros que determinen automáticamente el perfil sin revisión.
+
+---
+
+## DD-012 — Risk Number 0-100: escala anclada al max_volatility por perfil (CVaR), número operativo capado por capacidad, alineación informativa
+
+**Estado:** Aceptado
+**Fecha:** 2026-07-03
+**Área:** `ai_layer/risk_number.py`, `api_layer` (profile-analysis, portfolio-proposal)
+
+**Contexto:** El Risk Number (docs/RISK_NUMBER_DESIGN.md, enfoque A — diferenciado del método patentado de Nitrogen) pone al cliente y a cada cartera candidata en una escala común 0-100. La primera implementación ancló la escala de cartera en los `max_drawdown` del YAML (copiados a mano) y comparó capacidad por bandas de 20; la revisión de código confirmó tres defectos sistémicos: (1) una cartera al `max_volatility` de su propio perfil producía un CVaR que excedía el `max_drawdown` de ese perfil → carteras compliant con el budget bandaban un nivel por encima y disparaban `over_capacity` espurio; (2) los cortes por banda disparaban con 0.1 puntos de diferencia en un borde y callaban con 19.9 dentro de una banda; (3) el `override_required` del alignment era una segunda señal de override que ningún endpoint aplica, contradiciendo a `metadata.requires_advisor_override` (I-018) y a `options_framing` en el mismo payload.
+
+**Decisión:**
+- **Escala de cartera:** los anclajes downside→número se DERIVAN al importar desde `config/risk_profiles.yaml`: el tope de la banda de cada perfil = pérdida CVaR(α=0.95, 1 año) de una cartera al `max_volatility` de ese perfil con μ=0 (`k·max_volatility`, k≈2.063). Garantía por construcción: una cartera dentro del budget de su perfil (σ ≤ max_volatility, μ ≥ 0) nunca banda por encima de ese perfil, y editar el YAML recalibra escala y budgets juntos.
+- **Número del cliente:** `number = min(tolerance_number, capacity_ceiling_number)` — la capacidad acota la tolerancia, misma regla que el perfil efectivo del motor (`score_stated_profile`), así `risk_number.number` y `deterministic.score` no se contradicen en la misma respuesta. La tolerancia combinada (G-L + trade-off) y el techo viajan como campos separados.
+- **Alineación:** comparaciones POR PUNTOS con holgura simétrica (media banda), nunca por índices de banda. La divergencia entre elicitaciones también es por puntos (≥20 = señal). El margen de "podés tomar más riesgo" se informa acotado por el techo de capacidad.
+- **Señal informativa, no de enforcement:** `risk_alignment` NO expone flag de override; el override formal lo gobiernan `profile-approval` y `metadata.requires_advisor_override` en la selección (I-018). Cada alignment persiste `client_kyc_submission_id` (el KYC de la APROBACIÓN usada para el budget, no el vigente del case) para trazabilidad de auditoría.
+- **Robustez:** NaN/inf en datos de mercado es `ValueError` explícito (nunca "riesgo 0"); el solver CRRA normaliza por riqueza (homoteticidad) para no desbordar con riquezas grandes; lista de retornos vacía es error explícito.
+
+**Alternativas descartadas:** (a) anclar en `max_drawdown` (medida distinta a la que produce el optimizador → descalibración sistemática); (b) hacer del alignment una señal de enforcement (duplicaría I-018 con una fórmula distinta — dos verdades de compliance para la misma decisión); (c) exponer solo el número de willingness (contradice el score efectivo del motor y sugiere riesgo que la capacidad no soporta).
+
+**Consecuencias:**
+- Calibraciones = supuestos DEMO (α=0.95, horizonte 1 año, anchors de γ de literatura CRRA); no reemplazan un proceso de CMA ni la decisión de un comité de inversiones.
+- `GAMMA_ANCHORS` (γ→número) sigue siendo constante de módulo tuneable por parámetro; los anchors downside ya no pueden divergir del YAML.
+- Las bandas 0-100 tienen UNA definición (delegada en `risk_scoring._profile_from_score`).

@@ -610,7 +610,7 @@ class TestCandidateRiskNumber:
         self, client: TestClient, patch_ai_client
     ) -> None:
         # _full_setup ya postea KYC, así que el case tiene current_kyc_submission_id.
-        _, cands = _completed_candidates(client, patch_ai_client)
+        ctx_body, cands = _completed_candidates(client, patch_ai_client)
         for c in cands:
             al = c.get("risk_alignment")
             assert al is not None, (
@@ -620,9 +620,13 @@ class TestCandidateRiskNumber:
             assert al["status"] in {
                 "aligned", "over_tolerance", "under_tolerance", "over_capacity",
             }
-            assert isinstance(al["override_required"], bool)
-            # override_required solo puede ser True cuando el status es over_capacity.
-            assert al["override_required"] == (al["status"] == "over_capacity")
+            assert isinstance(al["gap_points"], (int, float))
+            assert isinstance(al["capacity_gap_points"], (int, float))
+            # Señal INFORMATIVA: el flag de override lo gobierna únicamente
+            # metadata.requires_advisor_override (I-018) — acá no debe existir.
+            assert "override_required" not in al
+            # Trazabilidad: qué KYC produjo el número del cliente.
+            assert str(al["client_kyc_submission_id"]).startswith("kyc_submission_")
 
     def test_growth_variant_is_riskiest_or_tied(
         self, client: TestClient, patch_ai_client

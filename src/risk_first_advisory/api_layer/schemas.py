@@ -1464,19 +1464,24 @@ class ClientRiskNumber(BaseModel):
     `POST /cases/{id}/portfolio-proposal`), para poder alinear "tu número es
     X, esta cartera es Y". Ver ai_layer/risk_number.py::client_risk_number.
 
+    `number` es el OPERATIVO: min(tolerance_number, capacity_ceiling_number) —
+    la capacidad acota la tolerancia, misma regla que el perfil efectivo del
+    motor (deterministic.score), así ambos scores del análisis coinciden.
+
     `tradeoff_number`/`gamma` quedan None hasta que el KYC incorpore la
-    pregunta de trade-off (certainty equivalent); hoy el número sale solo de
-    `willingness` (cuestionario Grable-Lytton), sin cross-check de divergencia.
+    pregunta de trade-off (certainty equivalent); hoy la tolerancia sale solo
+    de `willingness` (cuestionario Grable-Lytton), sin cross-check de divergencia.
     """
     model_config = ConfigDict(extra="forbid")
 
-    number:                  float  # 0-100, número combinado (o solo willingness si no hay trade-off)
+    number:                  float  # 0-100, OPERATIVO = min(tolerancia, capacidad)
     band:                    str    # uno de los 5 perfiles
     willingness_number:      float  # 0-100, del cuestionario Grable-Lytton
     tradeoff_number:         float | None = None  # 0-100, si hay pregunta de trade-off
     gamma:                   float | None = None  # CRRA implícito, si hay trade-off
-    divergence_bands:        int
-    inconsistent:            bool  # True si las dos elicitaciones divergen (señal, no medición)
+    tolerance_number:        float  # 0-100, tolerancia combinada (G-L + trade-off si existe)
+    divergence_bands:        int    # floor(|willingness − tradeoff| / 20)
+    inconsistent:            bool  # divergencia ≥ 20 puntos entre elicitaciones (señal, no medición)
     capacity_ceiling_number: float  # 0-100, techo de capacidad financiera (ability)
     capacity_ceiling_band:   str
     confirmation_questions:  list[str]

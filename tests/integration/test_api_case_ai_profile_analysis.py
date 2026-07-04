@@ -345,6 +345,10 @@ class TestCreateAnalysis:
             "moderado-agresivo", "agresivo",
         }
         assert 0.0 <= rn["capacity_ceiling_number"] <= 100.0
+        # El número operativo: la capacidad acota la tolerancia (así no se
+        # contradice con deterministic.score, que usa la misma regla min()).
+        assert rn["number"] == pytest.approx(
+            min(rn["tolerance_number"], rn["capacity_ceiling_number"]), abs=0.1)
         assert rn["tradeoff_number"] is None  # KYC hoy no incluye la pregunta de trade-off
         assert isinstance(rn["inconsistent"], bool)
 

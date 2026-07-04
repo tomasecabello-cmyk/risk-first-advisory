@@ -3,11 +3,23 @@
 > **Estado:** ACTIVO. El usuario decidió el **enfoque A** (versión diferenciada,
 > 2026-07-02) y delegó la elección técnica. **Slices 1, 2 y 3 implementados**
 > (2026-07-02/03): `ai_layer/risk_number.py` (módulo puro, sin red) +
-> `tests/unit/test_risk_number.py` (30 tests) + wiring en `POST
+> `tests/unit/test_risk_number.py` (42 tests) + wiring en `POST
 > /cases/{id}/ai/profile-analysis` (`risk_number` del cliente) y `POST
 > /cases/{id}/portfolio-proposal` (`risk_number`/`risk_alignment` por
 > candidato). Pendiente: reporte markdown y demo guiada (frontend) — ver §5,
 > Slice 3 "queda". El §3 queda como registro de la decisión.
+>
+> **Revisión 2026-07-03 (post code-review, ver DD-012):** 10 hallazgos
+> confirmados y corregidos. Cambios de diseño resultantes: anclajes derivados
+> del `max_volatility` del YAML vía CVaR (garantía: cartera compliant con su
+> budget nunca banda por encima de su perfil; ya no hay copia hardcodeada);
+> número del cliente = OPERATIVO `min(tolerancia, capacidad)` (coincide con
+> `deterministic.score`); alineación y divergencia POR PUNTOS (no por bordes
+> de banda); `risk_alignment` es señal informativa SIN flag de override (el
+> override lo gobiernan profile-approval y `metadata.requires_advisor_override`,
+> I-018) y registra `client_kyc_submission_id` (el KYC de la aprobación) para
+> el audit; NaN/inf → error explícito (nunca "riesgo 0"); solver CRRA
+> normalizado por riqueza (sin crash con riquezas grandes).
 
 ## 0. Empezar acá (para la sesión nueva)
 

@@ -48,14 +48,42 @@ def _kyc(**over):
 # ── downside_to_number / bandas ───────────────────────────────────────────────
 
 
-def test_anchors_match_profile_drawdowns_exactly():
-    # Los anclajes son los max_drawdown de config/risk_profiles.yaml → topes de banda.
-    assert downside_to_number(0.00) == 0.0
-    assert downside_to_number(0.07) == 20.0   # conservador
-    assert downside_to_number(0.10) == 40.0   # moderado-defensivo
-    assert downside_to_number(0.15) == 60.0   # moderado
-    assert downside_to_number(0.22) == 80.0   # moderado-agresivo
-    assert downside_to_number(0.30) == 100.0  # agresivo
+def test_anchors_derive_from_config_max_volatility():
+    # DD-012: los anclajes se DERIVAN del YAML (k·max_volatility por perfil),
+    # no son copia a mano — si una firma edita el YAML, la escala lo sigue.
+    from risk_first_advisory.ai_layer.risk_number import (
+        DEFAULT_ALPHA,
+        _cvar_loss_multiplier,
+    )
+    from risk_first_advisory.ai_layer.risk_scoring import PROFILES
+    from risk_first_advisory.config_layer.risk_assumptions import (
+        get_default_risk_profile_params,
+    )
+
+    params = get_default_risk_profile_params()
+    k = _cvar_loss_multiplier(DEFAULT_ALPHA)
+    assert DOWNSIDE_ANCHORS[0] == (0.0, 0.0)
+    for i, profile in enumerate(PROFILES):
+        x, y = DOWNSIDE_ANCHORS[i + 1]
+        assert x == pytest.approx(k * params[profile]["max_volatility"], rel=1e-9)
+        assert y == (i + 1) * 20.0
+
+
+def test_budget_compliant_portfolio_never_bands_above_its_profile():
+    # Garantía de la calibración: una cartera al tope de vol de su perfil
+    # (mu >= 0) nunca banda por encima de ese perfil.
+    from risk_first_advisory.ai_layer.risk_scoring import PROFILES
+    from risk_first_advisory.config_layer.risk_assumptions import (
+        get_default_risk_profile_params,
+    )
+
+    params = get_default_risk_profile_params()
+    for i, profile in enumerate(PROFILES):
+        max_vol = params[profile]["max_volatility"]
+        at_cap = portfolio_risk_number(mu_annual=0.0, sigma_annual=max_vol)
+        assert at_cap["number"] <= (i + 1) * 20.0
+        with_mu = portfolio_risk_number(mu_annual=0.03, sigma_annual=max_vol)
+        assert with_mu["number"] < (i + 1) * 20.0
 
 
 def test_downside_number_is_monotonic_and_clamped():
@@ -125,12 +153,51 @@ def test_portfolio_downside_validations():
         portfolio_downside()  # ni returns ni (μ,σ)
 
 
+def test_empty_returns_is_an_explicit_error():
+    # Lista vacía provista NO es "ausente": error claro, sin fallback
+    # silencioso al método paramétrico aunque haya (μ,σ) disponibles.
+    with pytest.raises(ValueError, match="vacío"):
+        portfolio_downside(returns=[], mu_annual=0.05, sigma_annual=0.1)
+    with pytest.raises(ValueError, match="vacío"):
+        portfolio_downside(returns=[])
+
+
+def test_non_finite_inputs_raise_instead_of_reading_as_safe():
+    # NaN/inf de un proveedor corrupto debe ser ERROR, no "riesgo 0 conservador".
+    nan = float("nan")
+    with pytest.raises(ValueError, match="finito"):
+        portfolio_downside(mu_annual=nan, sigma_annual=0.10)
+    with pytest.raises(ValueError, match="finito"):
+        portfolio_downside(mu_annual=0.05, sigma_annual=float("inf"))
+    with pytest.raises(ValueError, match="finitos"):
+        portfolio_downside(returns=[0.01, nan, -0.05])
+
+
+def test_nan_in_covariance_raises_instead_of_zero_risk():
+    nan_cov = [
+        [float("nan"), 0.0, 0.0],
+        [0.0, 0.12 ** 2, 0.0],
+        [0.0, 0.0, 0.01 ** 2],
+    ]
+    with pytest.raises(ValueError, match="no finitos"):
+        portfolio_moments_from_weights(
+            {"SPY": 0.6, "AL30": 0.3, "CASH": 0.1}, _RETURNS, _TICKERS, nan_cov)
+
+
 def test_portfolio_risk_number_lands_in_expected_band():
-    # loss ≈ 0.2063 → interpolación entre (0.15,60) y (0.22,80) ≈ 76.
-    r = portfolio_risk_number(mu_annual=0.0, sigma_annual=0.10)
-    assert 75.0 <= r["number"] <= 77.0
-    assert r["band"] == "moderado-agresivo"
+    # σ=8%, μ=4%: loss = 0.08·2.0627 − 0.04 ≈ 0.1250 → entre el tope de
+    # conservador (0.1031→20) y el de moderado-defensivo (0.1547→40) ≈ 28.5.
+    r = portfolio_risk_number(mu_annual=0.04, sigma_annual=0.08)
+    assert 27.5 <= r["number"] <= 29.5
+    assert r["band"] == "moderado-defensivo"
     assert "peor 5%" in r["explanation"]
+
+
+def test_explanation_tail_pct_never_reads_zero():
+    # α=0.996 → cola 0.4%: el texto debe decir "0.4%", no "0%".
+    r = portfolio_risk_number(mu_annual=0.0, sigma_annual=0.10, alpha=0.996)
+    assert "peor 0%" not in r["explanation"]
+    assert "peor 0.4%" in r["explanation"]
 
 
 # ── portfolio_moments_from_weights / portfolio_risk_number_from_weights ──────
@@ -179,14 +246,16 @@ def test_portfolio_moments_validations():
         portfolio_moments_from_weights({"GLD": 1.0}, _RETURNS, _TICKERS, _COV_DIAG)
 
 
-def test_portfolio_risk_number_from_weights_matches_manual_composition():
+def test_portfolio_risk_number_from_weights_hand_computed():
+    # Valores calculados A MANO (no vía las mismas funciones de producción):
+    # μ = 0.6·0.09 + 0.3·0.06 + 0.1·0.02 = 0.074
+    # σ = √(0.6²·0.18² + 0.3²·0.12² + 0.1²·0.01²) = √0.012961 ≈ 0.113846
+    # loss = σ·2.06271 − μ ≈ 0.23483 − 0.074 = 0.16083
+    # → entre tope mod-def (0.15470→40) y tope moderado (0.20627→60) ≈ 42.4
     weights = {"SPY": 0.6, "AL30": 0.3, "CASH": 0.1}
     r = portfolio_risk_number_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
-    moments = portfolio_moments_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
-    manual = portfolio_risk_number(
-        mu_annual=moments["mu_annual"], sigma_annual=moments["sigma_annual"])
-    assert r["number"] == manual["number"]
-    assert r["band"] == manual["band"]
+    assert r["number"] == pytest.approx(42.4, abs=0.2)
+    assert r["band"] == "moderado"
     assert r["missing_tickers"] == []
     assert r["invested_weight_used"] == pytest.approx(1.0)
 
@@ -222,6 +291,21 @@ def test_gamma_clamps_at_extremes():
     assert crra_gamma_from_certainty_equivalent(10000, 1000, 1000, -999.0) == 20.0
 
 
+def test_gamma_is_scale_invariant_and_survives_huge_wealth():
+    # CRRA es homotética: γ(W,G,L,C) == γ(sW,sG,sL,sC). Antes, riquezas
+    # ≳1e17 crasheaban con ZeroDivisionError en el borde γ=20.
+    g_small = crra_gamma_from_certainty_equivalent(10_000, 1_000, 500, 100)
+    g_huge = crra_gamma_from_certainty_equivalent(1e18, 1e17, 5e16, 1e16)
+    assert g_huge == pytest.approx(g_small, abs=1e-3)
+
+
+def test_gamma_rejects_non_finite_inputs():
+    with pytest.raises(ValueError, match="finito"):
+        crra_gamma_from_certainty_equivalent(float("nan"), 1000, 500, 100)
+    with pytest.raises(ValueError, match="finito"):
+        crra_gamma_from_certainty_equivalent(10000, 1000, 500, float("inf"))
+
+
 def test_gamma_validations():
     with pytest.raises(ValueError):
         crra_gamma_from_certainty_equivalent(0, 1000, 1000, 0)      # wealth <= 0
@@ -249,14 +333,31 @@ def test_tradeoff_risk_number_conservative_answer():
 # ── client_risk_number ────────────────────────────────────────────────────────
 
 
-def test_client_number_without_tradeoff_is_willingness():
+def test_client_number_without_tradeoff_within_capacity():
+    # Base moderada: tolerancia < capacidad → el operativo ES la tolerancia.
     c = client_risk_number(_kyc())
+    assert c["tolerance_number"] == c["willingness_number"]
+    assert c["number"] == min(c["tolerance_number"], c["capacity_ceiling_number"])
     assert c["number"] == c["willingness_number"]
     assert c["tradeoff_number"] is None
     assert c["divergence_bands"] == 0
     assert not c["inconsistent"]
     assert c["confirmation_questions"] == []
     assert 0.0 <= c["capacity_ceiling_number"] <= 100.0
+
+
+def test_client_number_is_capacity_capped():
+    # Cliente ability-bound: quiere 100 pero su situación soporta mucho menos
+    # → el número OPERATIVO es el techo (misma regla que deterministic.score).
+    payload = _kyc(
+        risk_tolerance_score=10, investment_objective="aggressive_growth",
+        risk_capacity_score=1, investment_horizon_years=1,
+        liquidity_need_score=8, investment_experience="ninguna")
+    c = client_risk_number(payload)
+    assert c["willingness_number"] == 100.0
+    assert c["number"] == c["capacity_ceiling_number"]
+    assert c["number"] < c["willingness_number"]
+    assert "capacidad" in c["explanation"]
 
 
 def test_client_number_divergence_flags_inconsistency():
@@ -271,39 +372,74 @@ def test_client_number_divergence_flags_inconsistency():
     assert c["inconsistent"]
     assert len(c["confirmation_questions"]) == 2
     assert "divergen" in c["explanation"]
-    # El combinado promedia las dos elicitaciones.
+    # La tolerancia combinada promedia las dos elicitaciones; el operativo
+    # además queda acotado por la capacidad.
     esperado = round(0.5 * (c["willingness_number"] + c["tradeoff_number"]), 1)
-    assert c["number"] == esperado
+    assert c["tolerance_number"] == esperado
+    assert c["number"] == round(
+        min(esperado, c["capacity_ceiling_number"]), 1)
 
 
 def test_client_number_consistent_elicitations():
-    # Ambas elicitaciones moderadas → sin flag.
+    # Ambas elicitaciones cercanas (16.7 puntos < 20) → sin flag.
     payload = _kyc(risk_tolerance_score=6)
     ce = math.sqrt(11000 * 9000) - 10000  # γ≈1 → número ~70 (moderado-agresivo)
     c = client_risk_number(
         payload, tradeoff={"wealth": 10000, "gain": 1000, "loss": 1000,
                            "certain_amount": ce})
     assert c["tradeoff_number"] == pytest.approx(70.0, abs=1.0)
-    assert isinstance(c["inconsistent"], bool)
+    assert not c["inconsistent"]
+
+
+def test_divergence_needs_real_distance_not_a_band_edge():
+    # 5.5 puntos de diferencia que CRUZAN un borde de banda (60.5 vs 55.0)
+    # NO son inconsistencia; antes el corte por índices de banda la marcaba.
+    payload = _kyc(risk_tolerance_score=7.075)  # willingness ≈ 60.5
+    c = client_risk_number(
+        payload, tradeoff={"wealth": 10000, "gain": 1000, "loss": 1000,
+                           "certain_amount": -100.0})  # γ≈2 → 55.0
+    assert c["willingness_number"] == pytest.approx(60.5, abs=0.3)
+    assert c["tradeoff_number"] == pytest.approx(55.0, abs=0.5)
+    assert abs(c["willingness_number"] - c["tradeoff_number"]) < 20.0
+    assert not c["inconsistent"]
+    assert c["divergence_bands"] == 0
 
 
 # ── align_numbers ─────────────────────────────────────────────────────────────
 
 
-def test_alignment_over_capacity_requires_override():
-    a = align_numbers(client_number=90.0, capacity_ceiling_number=35.0,
+def test_alignment_over_capacity_is_point_based():
+    a = align_numbers(client_number=35.0, capacity_ceiling_number=35.0,
                       portfolio_number=75.0)
     assert a["status"] == "over_capacity"
-    assert a["override_required"]
-    assert a["capacity_gap_bands"] == 2
-    assert "override" in a["explanation"]
+    assert a["capacity_gap_points"] == 40.0
+    assert "techo de capacidad" in a["explanation"]
+    # La señal es informativa: el flag de override lo gobierna metadata (I-018).
+    assert "override_required" not in a
+    assert "capacity_gap_bands" not in a
+
+
+def test_alignment_no_false_positive_at_band_edge():
+    # 0.1 puntos por encima del techo, cruzando un borde de banda: antes
+    # disparaba over_capacity; ahora queda dentro de la holgura.
+    a = align_numbers(client_number=59.9, capacity_ceiling_number=59.9,
+                      portfolio_number=60.0)
+    assert a["status"] == "aligned"
+
+
+def test_alignment_catches_within_band_excess():
+    # 18.9 puntos por encima del techo DENTRO de la misma banda: antes se
+    # reportaba "aligned"; ahora es over_capacity.
+    a = align_numbers(client_number=61.0, capacity_ceiling_number=61.0,
+                      portfolio_number=79.9)
+    assert a["status"] == "over_capacity"
+    assert a["capacity_gap_points"] == pytest.approx(18.9)
 
 
 def test_alignment_over_tolerance_within_capacity():
     a = align_numbers(client_number=40.0, capacity_ceiling_number=90.0,
                       portfolio_number=55.0)
     assert a["status"] == "over_tolerance"
-    assert not a["override_required"]
     assert a["gap_points"] == 15.0
 
 
@@ -311,14 +447,23 @@ def test_alignment_aligned_within_tolerance():
     a = align_numbers(client_number=62.0, capacity_ceiling_number=75.0,
                       portfolio_number=68.0)
     assert a["status"] == "aligned"
-    assert not a["override_required"]
 
 
-def test_alignment_under_tolerance():
+def test_alignment_under_tolerance_headroom_capped_by_ceiling():
     a = align_numbers(client_number=70.0, capacity_ceiling_number=75.0,
                       portfolio_number=30.0)
     assert a["status"] == "under_tolerance"
     assert a["gap_points"] == -40.0
+    # El margen informado termina en min(cliente, techo) = 70 → 40 puntos.
+    assert "40 puntos" in a["explanation"]
+
+
+def test_alignment_under_tolerance_without_real_headroom():
+    # La cartera está apenas bajo el techo: no debe invitar a subir riesgo.
+    a = align_numbers(client_number=50.0, capacity_ceiling_number=32.0,
+                      portfolio_number=30.0)
+    assert a["status"] == "under_tolerance"
+    assert "poco margen" in a["explanation"]
 
 
 # ── assess_risk_alignment (end-to-end puro) ───────────────────────────────────
@@ -340,14 +485,14 @@ def test_assess_risk_alignment_shape_and_consistency():
 
 
 def test_assess_risk_alignment_low_capacity_client_risky_portfolio():
-    # Cliente sin capacidad + cartera volátil → over_capacity con override.
+    # Cliente sin capacidad + cartera volátil → over_capacity (informativo).
     payload = _kyc(
         risk_tolerance_score=10, risk_capacity_score=1, investment_horizon_years=1,
         liquidity_need_score=8, investment_experience="ninguna",
         investment_objective="aggressive_growth")
     out = assess_risk_alignment(payload, mu_annual=0.0, sigma_annual=0.15)
     assert out["alignment"]["status"] == "over_capacity"
-    assert out["alignment"]["override_required"]
+    assert out["alignment"]["capacity_gap_points"] > 0
 
 
 def test_anchor_table_is_sorted():
