@@ -44,6 +44,7 @@ window.idemoState = window.idemoState || {
   aiAnalysisId:       null,
   aiProposedProfile:  null,
   aiSkipped:          false,        // true si el AI step se saltó por falta de OPENAI_API_KEY
+  clientRiskNumber:   null,         // risk_number del cliente (paso 3), misma escala que el de cartera
   approvalId:         null,
   approvedProfile:    null,
   preferenceId:       null,
@@ -64,7 +65,7 @@ window.idemoState = window.idemoState || {
 function idemoReset() {
   Object.assign(window.idemoState, {
     caseId: null, kycSubmissionId: null, aiAnalysisId: null,
-    aiProposedProfile: null, aiSkipped: false,
+    aiProposedProfile: null, aiSkipped: false, clientRiskNumber: null,
     approvalId: null, approvedProfile: null,
     preferenceId: null, filterRunId: null,
     proposalId: null, candidates: [],
@@ -472,6 +473,56 @@ function idemoCapacityGapCardHTML(cg) {
   );
 }
 
+// Card "Risk Number del cliente": número operativo 0-100 en la MISMA escala
+// que el número de cada cartera candidata del paso 5 ("tu número es X, esta
+// cartera es Y"). Operativo = min(tolerancia, capacidad): la capacidad acota
+// la tolerancia (DD-012), igual que el perfil efectivo del motor.
+// Guard: si no hay risk_number (respuesta vieja / null), devuelve "".
+function idemoRiskNumberCardHTML(rn) {
+  if (!rn || typeof rn.number !== "number") return "";
+  const num = Math.round(rn.number);
+  const tol = (typeof rn.tolerance_number === "number") ? Math.round(rn.tolerance_number) : null;
+  const cap = (typeof rn.capacity_ceiling_number === "number") ? Math.round(rn.capacity_ceiling_number) : null;
+  const capped = tol != null && cap != null && tol > cap;
+  // Barra 0-100 con el número del cliente (punto) y el techo de capacidad (tick).
+  const capTick = (cap != null && Math.abs(cap - num) >= 1)
+    ? `<div title="Techo de capacidad: ${cap}/100" style="position:absolute;left:${cap}%;top:-4px;width:2px;height:18px;background:#555;"></div>`
+    : "";
+  const bar =
+    `<div style="position:relative;height:10px;border-radius:5px;margin:16px 10px 8px 10px;` +
+      `background:linear-gradient(90deg,#7fb069 0%,#e8c547 55%,#d0654a 100%);">` +
+      capTick +
+      `<div title="Número del cliente: ${num}/100" style="position:absolute;left:${num}%;top:-5px;` +
+        `transform:translateX(-50%);width:20px;height:20px;border-radius:50%;background:#1d3557;` +
+        `border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);"></div>` +
+    `</div>` +
+    `<div style="display:flex;justify-content:space-between;font-size:10px;opacity:.55;margin:0 10px;">` +
+      `<span>0 · conservador</span><span>100 · agresivo</span></div>`;
+  const cappedNote = capped
+    ? `<div style="font-size:12px;color:#c90;margin-top:6px;">La capacidad acota: el cliente ` +
+      `tolera ${tol}/100, pero su situación financiera soporta hasta ${cap}/100 — el número ` +
+      `operativo es el menor de los dos.</div>`
+    : "";
+  return (
+    `<div style="margin-top:12px;border:1px solid #ddd;border-left:4px solid #1d3557;border-radius:6px;padding:12px;background:#fff;">` +
+      `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">` +
+        `<div style="font-weight:600;">Risk Number del cliente</div>` +
+        `<div style="font-size:26px;font-weight:700;color:#1d3557;line-height:1;">${num}<span style="font-size:13px;font-weight:500;opacity:.6;">/100</span></div>` +
+        `<code>${escapeHTML(rn.band || "")}</code>` +
+      `</div>` +
+      bar +
+      `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px;">` +
+        (tol != null ? `<div><span style="opacity:.65;">Tolerancia (lo que quiere):</span> <strong>${tol}/100</strong></div>` : "") +
+        (cap != null ? `<div><span style="opacity:.65;">Capacidad (lo que soporta):</span> <strong>${cap}/100</strong></div>` : "") +
+      `</div>` +
+      cappedNote +
+      `<div style="font-size:11px;opacity:.7;border-top:1px solid #eee;margin-top:8px;padding-top:6px;">` +
+        `Misma escala 0–100 que vas a ver por cartera en el paso 5: ahí se compara ` +
+        `"tu número es ${num}, esta cartera es Y" para alinear riesgo real admisible y cartera.</div>` +
+    `</div>`
+  );
+}
+
 async function idemoRunAiProfile() {
   if (!window.idemoState.caseId || !window.idemoState.kycSubmissionId) {
     idemoStepResult("ai", "warn", "Primero ejecutá los pasos 1 (preparar caso) y 2 (enviar KYC).");
@@ -514,11 +565,13 @@ async function idemoRunAiProfile() {
   const aiResult = res.json.result || {};
   const contraN = Array.isArray(aiResult.contradictions) ? aiResult.contradictions.length : 0;
   const fuN = Array.isArray(aiResult.follow_up_questions) ? aiResult.follow_up_questions.length : 0;
+  window.idemoState.clientRiskNumber = res.json.risk_number || null;
   idemoStepResult("ai", "ok",
     `<strong>Análisis listo.</strong> Perfil preliminar sugerido por la IA: ` +
     `<code>${escapeHTML(window.idemoState.aiProposedProfile)}</code> · ` +
     `${contraN} contradicción(es) detectada(s) · ${fuN} pregunta(s) de seguimiento. ` +
     `<em>Recordá: la IA propone, el asesor decide en el paso 4.</em>` +
+    idemoRiskNumberCardHTML(res.json.risk_number) +
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoCapacityGapCardHTML(res.json.capacity_gap) +
@@ -569,11 +622,13 @@ async function idemoSubmitFollowUp() {
   const changeBadge = changed
     ? `<span class="pill pill-orange">perfil ajustado: ${escapeHTML(prevProfile)} → ${escapeHTML(window.idemoState.aiProposedProfile)}</span>`
     : `<span class="pill pill-green">perfil confirmado (sin cambios)</span>`;
+  window.idemoState.clientRiskNumber = res.json.risk_number || window.idemoState.clientRiskNumber;
   idemoStepResult("ai", "ok",
     `<strong>Re-análisis listo (segunda ronda).</strong> ${changeBadge} ` +
     `Perfil revisado por la IA: <code>${escapeHTML(window.idemoState.aiProposedProfile)}</code>. ` +
     (reason ? `<div style="font-size:12px;margin:4px 0;">${escapeHTML(reason)}</div>` : "") +
     `<em>La IA propone; el asesor aprueba en el paso 4.</em>` +
+    idemoRiskNumberCardHTML(res.json.risk_number) +
     idemoDeterministicPanelHTML(window.idemoState.aiProposedProfile, res.json.confidence,
       res.json.deterministic, (res.json.risk_gap || {}).agreement) +
     idemoCapacityGapCardHTML(res.json.capacity_gap) +
@@ -715,9 +770,14 @@ async function idemoGenerateProposal() {
   idemoSetStep("propose", "done");
 
   // Render inline (banner + tabla comparativa + cards por variante con holdings).
+  const clientNum = idemoClientNumberForBanner(window.idemoState.candidates);
   const banner = `<strong>Propuesta generada.</strong> Universo filtrado: ` +
     `<strong>${eligibleN}</strong> instrumentos elegibles (${excludedN} excluidos). ` +
-    `Variantes propuestas: <strong>${window.idemoState.candidates.length}</strong>.`;
+    `Variantes propuestas: <strong>${window.idemoState.candidates.length}</strong>.` +
+    (clientNum != null
+      ? ` Número del cliente: <strong>${clientNum}/100</strong> — comparalo con el ` +
+        `<em>Nº riesgo</em> de cada variante en la tabla.`
+      : "");
   idemoStepResultRich("propose", "ok", banner,
     idemoOptionsFramingHTML(r3.json.options_framing) +
     idemoBuildPortfolioComparisonHtml(window.idemoState.candidates));
@@ -984,6 +1044,42 @@ async function idemoRunGuidedDemo() {
 
 // ── Builders: cada uno devuelve HTML para inyectar inline en el step ──
 
+// Etiquetas de alineación cliente↔cartera (señal INFORMATIVA, para la
+// conversación — el override formal lo marca la columna "Presupuesto de riesgo").
+const IDEMO_ALIGNMENT_PILL = {
+  aligned:         { cls: "pill-green",  label: "alineada" },
+  under_tolerance: { cls: "pill-blue",   label: "más conservadora" },
+  over_tolerance:  { cls: "pill-orange", label: "sobre el número" },
+  over_capacity:   { cls: "pill-orange", label: "sobre la capacidad" },
+};
+
+// Celda "Nº riesgo" de una cartera candidata: número 0-100 (misma escala que
+// el Risk Number del cliente del paso 3) + pill de alineación con tooltip.
+// Guard: si el backend no mandó risk_number (respuesta vieja / datos live
+// incompletos), devuelve "—" sin romper la tabla.
+function idemoCandidateRiskNumberCellHTML(c) {
+  const rn = c.risk_number || null;
+  if (!rn || typeof rn.number !== "number") return "—";
+  const al = c.risk_alignment || null;
+  const pillDef = al ? IDEMO_ALIGNMENT_PILL[al.status] : null;
+  const pill = pillDef
+    ? `<br><span class="pill ${pillDef.cls}" title="${escapeHTML(al.explanation || "")}">${pillDef.label}</span>`
+    : "";
+  return `<span style="font-weight:600;" title="${escapeHTML(rn.explanation || "")}">${Math.round(rn.number)}/100</span>${pill}`;
+}
+
+// Número del cliente en la misma escala, para el banner del paso 5. Se toma
+// del análisis (paso 3) si está; si el paso 3 se salteó, se deriva del
+// alignment de cualquier candidata (número − gap = cliente).
+function idemoClientNumberForBanner(candidates) {
+  const st = window.idemoState.clientRiskNumber;
+  if (st && typeof st.number === "number") return Math.round(st.number);
+  const c = (candidates || []).find(c => c.risk_number && c.risk_alignment
+    && typeof c.risk_alignment.gap_points === "number");
+  if (!c) return null;
+  return Math.round(c.risk_number.number - c.risk_alignment.gap_points);
+}
+
 function idemoBuildPortfolioComparisonHtml(candidates) {
   if (!candidates.length) {
     return `<div class="msg msg-info" style="margin-top:10px;">Sin variantes generadas.</div>`;
@@ -1006,12 +1102,16 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
       `<span style="color:${dvColor};font-weight:600;">${Math.round(dvScore)}/100</span>` +
       ` <span style="font-size:11px;opacity:.7;">${escapeHTML(dv.concentration_band || "")}</span>` +
       (dvFlags ? ` <span class="pill pill-orange" title="${escapeHTML((dv.flags || []).join(', '))}">${dvFlags} flag${dvFlags > 1 ? 's' : ''}</span>` : "");
+    // Risk Number de ESTA cartera + alineación con el número del cliente
+    // (informativa: el override formal sigue siendo el de "Presupuesto de riesgo").
+    const rnCell = idemoCandidateRiskNumberCellHTML(c);
     const btnLabel = meta.requires_advisor_override ? "Seleccionar (override)" : "Seleccionar";
     return `<tr>
       <td style="padding:10px 12px;"><strong>${escapeHTML(c.variant || "?")}</strong></td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.expected_return_annual !== undefined ? (c.expected_return_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;font-variant-numeric:tabular-nums;text-align:right;">${c.volatility_annual !== undefined ? (c.volatility_annual * 100).toFixed(2) + "%" : "—"}</td>
       <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;">${n}</td>
+      <td style="padding:10px 12px;text-align:right;">${rnCell}</td>
       <td style="padding:10px 12px;text-align:right;">${dvCell}</td>
       <td style="padding:10px 12px;">${ovr}</td>
       <td style="padding:10px 12px;text-align:right;">
@@ -1027,6 +1127,7 @@ function idemoBuildPortfolioComparisonHtml(candidates) {
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Retorno esperado</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Volatilidad</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;"># Instrumentos</th>
+        <th style="padding:10px 12px;font-size:11px;text-align:right;">Nº riesgo</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Diversificación</th>
         <th style="padding:10px 12px;font-size:11px;text-align:left;">Presupuesto de riesgo</th>
         <th style="padding:10px 12px;font-size:11px;text-align:right;">Acción del asesor</th>
@@ -1067,14 +1168,20 @@ function idemoBuildSelectedPortfolioHtml(selectionResp) {
     ? (cand.expected_return_annual * 100).toFixed(2) + "%" : "—";
   const vol = (cand.volatility_annual !== undefined)
     ? (cand.volatility_annual * 100).toFixed(2) + "%" : "—";
+  const rnTxt = (cand.risk_number && typeof cand.risk_number.number === "number")
+    ? ` · Nº riesgo <strong>${Math.round(cand.risk_number.number)}/100</strong>` : "";
+  const alDef = (cand.risk_alignment && IDEMO_ALIGNMENT_PILL[cand.risk_alignment.status]) || null;
+  const alPill = alDef
+    ? ` <span class="pill ${alDef.cls}" title="${escapeHTML(cand.risk_alignment.explanation || "")}">${alDef.label}</span>`
+    : "";
 
   return `
     <div class="portfolio-card" style="margin-top:12px;">
       <div class="portfolio-card-header">
         <span class="variant-name">${escapeHTML(selectionResp.selected_variant || "?")}</span>
-        ${ovr}
+        ${ovr}${alPill}
         <span style="margin-left:auto;font-size:11px;color:var(--rf-text-muted);">
-          Retorno esperado <strong>${eret}</strong> · Volatilidad <strong>${vol}</strong> · ${holdings.length} instrumento(s)
+          Retorno esperado <strong>${eret}</strong> · Volatilidad <strong>${vol}</strong>${rnTxt} · ${holdings.length} instrumento(s)
         </span>
       </div>
       <div class="portfolio-card-body">
