@@ -328,6 +328,24 @@ class TestCreate:
         assert "| Moneda |" in md
         assert "| Peso |" in md
 
+    def test_markdown_contains_risk_number_section(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """docs/RISK_NUMBER_DESIGN.md: el reporte debe tener una sección
+        '## Risk Number' con el número del cliente (recomputado del KYC
+        vigente) y el número de la cartera seleccionada (leído del snapshot
+        persistido en selected_candidate)."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        r = _post_report(client, ctx["case"]["case_id"])
+        md = r.json()["markdown"]
+        assert "## Risk Number" in md
+        assert "Número del cliente (operativo)" in md
+        assert "Número de la cartera seleccionada" in md
+        cand = ctx["selection"]["selected_candidate"]
+        rn = cand.get("risk_number")
+        assert rn is not None, "fixture pipeline should produce a candidate risk_number"
+        assert f"{rn['number']:.0f}/100" in md
+
     def test_markdown_contains_holdings_with_ticker_and_weight(
         self, client: TestClient, patch_ai_client
     ) -> None:

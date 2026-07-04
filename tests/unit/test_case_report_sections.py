@@ -5,6 +5,7 @@ capacidad vs. tolerancia, y diversificación en métricas.
 
 from __future__ import annotations
 
+from risk_first_advisory.ai_layer.risk_number import client_risk_number
 from risk_first_advisory.ai_layer.risk_scoring import (
     capacity_gap_from_kyc,
     deterministic_assessment,
@@ -51,7 +52,7 @@ def _candidate(**over):
     return cand
 
 
-def _gen(capacity=True, override=True):
+def _gen(capacity=True, override=True, risk_number=False, candidate_risk_number=False):
     kyc = _low_capacity_kyc()
     cap = None
     if capacity:
@@ -59,7 +60,17 @@ def _gen(capacity=True, override=True):
             "deterministic": deterministic_assessment(kyc),
             "capacity_gap": capacity_gap_from_kyc(kyc),
         }
-    cand = _candidate()
+    rn_data = None
+    if risk_number:
+        rn_data = {"client": client_risk_number(kyc)}
+    over = {}
+    if candidate_risk_number:
+        over["risk_number"] = {"number": 68.0, "band": "agresivo"}
+        over["risk_alignment"] = {
+            "status": "over_capacity",
+            "explanation": "La cartera excede el techo de capacidad del cliente.",
+        }
+    cand = _candidate(**over)
     md, _ = CaseMarkdownReportGenerator().generate(
         case_data={"case_id": "c1", "title": "Juan Pérez", "status": "PORTFOLIO_SELECTED"},
         selection_data={"selected_variant": "GROWTH", "selected_candidate": cand,
@@ -68,6 +79,7 @@ def _gen(capacity=True, override=True):
         approval_data={"approved_profile": "moderado-agresivo", "decision": "modify"},
         override_data={"override_approval_id": "o1"} if override else None,
         capacity_data=cap,
+        risk_number_data=rn_data,
         generated_at_utc="2026-06-15T12:00:00Z",
     )
     return md
@@ -108,3 +120,39 @@ def test_diversification_in_metrics():
 def test_override_mentioned_in_summary():
     md = _gen(override=True)
     assert "override" in md.lower()
+
+
+def test_risk_number_section_with_client_and_portfolio():
+    md = _gen(risk_number=True, candidate_risk_number=True)
+    assert "## Risk Number" in md
+    assert "Número del cliente (operativo)" in md
+    assert "Número de la cartera seleccionada" in md
+    assert "68/100" in md
+    assert "over_capacity" in md
+    assert "Alineación cliente" in md
+
+
+def test_risk_number_section_omitted_when_no_data():
+    md = _gen(risk_number=False, candidate_risk_number=False)
+    assert "## Risk Number" not in md
+    # El resto del reporte sigue armándose.
+    assert "## Resumen ejecutivo" in md
+
+
+def test_risk_number_section_client_only_no_legacy_break():
+    """Proposal viejo sin risk_number persistido: la cartera se marca
+    'no disponible' pero el reporte no rompe y sigue mostrando al cliente."""
+    md = _gen(risk_number=True, candidate_risk_number=False)
+    assert "## Risk Number" in md
+    assert "Número del cliente (operativo)" in md
+    assert "no disponible" in md
+
+
+def test_risk_number_section_no_kyc_but_candidate_has_number():
+    """Case sin KYC vigente (risk_number_data=None) pero el candidate SÍ trae
+    risk_number persistido: la sección se muestra igual, cliente 'no disponible'."""
+    md = _gen(risk_number=False, candidate_risk_number=True)
+    assert "## Risk Number" in md
+    assert "Número del cliente" in md
+    assert "no disponible" in md
+    assert "68/100" in md

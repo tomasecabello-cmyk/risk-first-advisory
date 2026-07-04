@@ -468,6 +468,68 @@ def _section_capacity(capacity_data: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+def _section_risk_number(
+    candidate: dict[str, Any],
+    risk_number_data: dict[str, Any] | None,
+) -> str:
+    """
+    Risk Number 0-100 (docs/RISK_NUMBER_DESIGN.md): número del cliente
+    (recomputado del KYC vigente, mismo patrón que capacity_data) + número
+    de la cartera SELECCIONADA, leído del snapshot ya persistido en el
+    candidate (`risk_number`/`risk_alignment`) — el generator NO recalcula
+    (I-013/I-020). Tolerante: sin cliente ni cartera, se omite; con solo uno
+    de los dos, el otro se marca "no disponible" (proposal legacy).
+    """
+    client = (risk_number_data or {}).get("client")
+    portfolio_rn = candidate.get("risk_number")
+    alignment = candidate.get("risk_alignment")
+
+    if not isinstance(client, dict) and not isinstance(portfolio_rn, dict):
+        return ""
+
+    lines = ["## Risk Number", ""]
+    lines.append(
+        "_Escala propia 0-100 (bandas de 20 = los 5 perfiles), ancla en riesgo "
+        "de downside (CVaR). Señal informativa: el override formal sigue "
+        "gobernado por profile-approval y metadata.requires_advisor_override._"
+    )
+    lines.append("")
+    if isinstance(client, dict):
+        lines.append(
+            f"- **Número del cliente (operativo)**: {_decimal(client.get('number'), 0)}/100 "
+            f"(«{_safe_str(client.get('band'))}»)"
+        )
+        lines.append(
+            f"- **Tolerancia declarada**: {_decimal(client.get('tolerance_number'), 0)}/100 · "
+            f"**Techo de capacidad**: {_decimal(client.get('capacity_ceiling_number'), 0)}/100 "
+            f"(«{_safe_str(client.get('capacity_ceiling_band'))}»)"
+        )
+        if client.get("inconsistent"):
+            lines.append(
+                "- **Atención**: el cuestionario y la pregunta de trade-off "
+                "divergen — confirmar el número con el cliente antes de usarlo."
+            )
+    else:
+        lines.append("- **Número del cliente**: no disponible (sin KYC vigente para este caso).")
+
+    if isinstance(portfolio_rn, dict):
+        lines.append(
+            f"- **Número de la cartera seleccionada**: "
+            f"{_decimal(portfolio_rn.get('number'), 0)}/100 («{_safe_str(portfolio_rn.get('band'))}»)"
+        )
+    else:
+        lines.append(
+            "- **Número de la cartera seleccionada**: no disponible "
+            "(proposal generado antes de esta funcionalidad, o sin datos de mercado)."
+        )
+
+    if isinstance(alignment, dict):
+        lines.append(f"- **Alineación cliente ↔ cartera**: `{_safe_str(alignment.get('status'))}`")
+        lines.append(f"- **Lectura**: {_safe_str(alignment.get('explanation'))}")
+
+    return "\n".join(lines)
+
+
 def _section_disclaimers() -> str:
     lines = ["## Disclaimers", ""]
     for d in _DISCLAIMERS:
@@ -510,6 +572,7 @@ class CaseMarkdownReportGenerator:
         override_data: dict[str, Any] | None = None,
         analysis_data: dict[str, Any] | None = None,
         capacity_data: dict[str, Any] | None = None,
+        risk_number_data: dict[str, Any] | None = None,
         generated_at_utc: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -541,6 +604,9 @@ class CaseMarkdownReportGenerator:
         capacity_section = _section_capacity(capacity_data)
         if capacity_section:
             sections.extend([capacity_section, ""])
+        risk_number_section = _section_risk_number(candidate, risk_number_data)
+        if risk_number_section:
+            sections.extend([risk_number_section, ""])
         risk_gap_section = _section_risk_gap(analysis_data)
         if risk_gap_section:
             sections.extend([risk_gap_section, ""])

@@ -6181,6 +6181,7 @@ def create_case_report(
         # acota tolerancia) + el capacity gap, para la sección de capacidad y el
         # resumen ejecutivo del reporte. Tolerante: si no hay KYC, queda None.
         capacity_data: dict[str, Any] | None = None
+        risk_number_data: dict[str, Any] | None = None
         kyc_id = case_data.get("current_kyc_submission_id")
         if kyc_id is not None:
             kyc_row = SQLiteKYCSubmissionRepository(store).get(kyc_id)
@@ -6194,6 +6195,18 @@ def create_case_report(
                     "deterministic": deterministic_assessment(kyc_payload),
                     "capacity_gap": capacity_gap_from_kyc(kyc_payload),
                 }
+                # Risk Number del cliente (docs/RISK_NUMBER_DESIGN.md): mismo
+                # patrón que capacity_data, recomputado del KYC vigente. La
+                # cartera SELECCIONADA ya trae su propio risk_number/risk_alignment
+                # persistidos en selected_candidate — el generator los formatea,
+                # no los recalcula (I-013/I-020).
+                from risk_first_advisory.ai_layer.risk_number import (
+                    client_risk_number as compute_client_risk_number,
+                )
+                try:
+                    risk_number_data = {"client": compute_client_risk_number(kyc_payload)}
+                except (TypeError, ValueError):
+                    risk_number_data = None
 
         # ── 5. generar markdown ───────────────────────────────────────────
         try:
@@ -6205,6 +6218,7 @@ def create_case_report(
                 override_data=override_data,
                 analysis_data=latest_analysis_data,
                 capacity_data=capacity_data,
+                risk_number_data=risk_number_data,
             )
         except Exception as exc:
             raise HTTPException(
