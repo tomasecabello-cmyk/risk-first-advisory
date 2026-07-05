@@ -240,6 +240,77 @@ def downside_to_number(
     return round(_piecewise_linear(loss_fraction, anchors), 1)
 
 
+def risk_scoring_downside(
+    sigma_annual: float | None = None,
+    returns: list[float] | None = None,
+    horizon_years: float = 1.0,
+    alpha: float = DEFAULT_ALPHA,
+) -> dict[str, Any]:
+    """
+    Downside de SCORING (μ=0): la pérdida de cola SIN restar el retorno esperado.
+
+    Distinto de `portfolio_downside` (que sí incluye el drift μ como Expected
+    Shortfall honesto): para el NÚMERO de riesgo 0-100 medimos dispersión pura,
+    porque (a) los anclajes DOWNSIDE_ANCHORS se derivan a μ=0 (DD-012) — usar el
+    μ real acá haría que el número y la escala no calcen — y (b) un puntaje de
+    riesgo no debe "descontar" un retorno esperado optimista: un retorno trailing
+    inflado NO reduce el riesgo real de la cartera el año que viene. Así el número
+    es monótono en la volatilidad (más vol ⇒ número más alto), como debe ser.
+
+    - paramétrico: pérdida = k(α)·σ·√h, con k(α)=φ(z_α)/(1−α) (≈2.063 a α=0.95).
+    - empírico: se CENTRAN los retornos (r − media) antes de tomar la cola, para
+      medir dispersión y no drift.
+
+    Returns dict: loss (fracción positiva), method ('normal'|'empirical'),
+    horizon_years, alpha, sample_size.
+    """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha debe estar en (0,1). Recibido: {alpha}.")
+    if horizon_years <= 0:
+        raise ValueError(f"horizon_years debe ser > 0. Recibido: {horizon_years}.")
+
+    if returns is not None:
+        rets = [float(r) for r in returns]
+        if not rets:
+            raise ValueError(
+                "`returns` fue provisto pero está vacío: no hay muestra."
+            )
+        if not all(math.isfinite(r) for r in rets):
+            raise ValueError(
+                "`returns` contiene valores no finitos (NaN/inf): datos corruptos."
+            )
+        mean = sum(rets) / len(rets)
+        centered = sorted(r - mean for r in rets)  # dispersión, sin drift
+        tail_n = max(1, math.floor(len(centered) * (1.0 - alpha) + 1e-9))
+        tail_mean = sum(centered[:tail_n]) / tail_n
+        return {
+            "loss": max(0.0, -tail_mean),
+            "method": "empirical",
+            "horizon_years": horizon_years,
+            "alpha": alpha,
+            "sample_size": len(rets),
+        }
+
+    if sigma_annual is None:
+        raise ValueError("Se requiere `returns` o `sigma_annual`.")
+    if not math.isfinite(sigma_annual):
+        raise ValueError(
+            f"sigma_annual debe ser finito (no NaN/inf). Recibido: {sigma_annual}."
+        )
+    if sigma_annual < 0:
+        raise ValueError(f"sigma_annual debe ser >= 0. Recibido: {sigma_annual}.")
+
+    sigma_h = float(sigma_annual) * math.sqrt(horizon_years)
+    loss = _cvar_loss_multiplier(alpha) * sigma_h
+    return {
+        "loss": max(0.0, loss),
+        "method": "normal",
+        "horizon_years": horizon_years,
+        "alpha": alpha,
+        "sample_size": 0,
+    }
+
+
 def portfolio_risk_number(
     mu_annual: float | None = None,
     sigma_annual: float | None = None,
@@ -248,33 +319,36 @@ def portfolio_risk_number(
     alpha: float = DEFAULT_ALPHA,
 ) -> dict[str, Any]:
     """
-    Número de riesgo 0–100 de una cartera, desde su downside (CVaR).
+    Número de riesgo 0–100 de una cartera, desde su downside de SCORING (μ=0,
+    dispersión pura — ver `risk_scoring_downside`). `mu_annual` se acepta por
+    compatibilidad de firma pero NO entra al número (un retorno esperado alto no
+    baja el riesgo del puntaje); el retorno esperado se muestra por separado.
 
-    Returns dict: number, band (perfil equivalente), downside_loss, cvar,
-    method, horizon_years, alpha, explanation (es).
+    Returns dict: number, band (perfil equivalente), downside_loss, method,
+    horizon_years, alpha, explanation (es).
     """
-    d = portfolio_downside(
-        mu_annual=mu_annual, sigma_annual=sigma_annual, returns=returns,
+    d = risk_scoring_downside(
+        sigma_annual=sigma_annual, returns=returns,
         horizon_years=horizon_years, alpha=alpha,
     )
-    number = downside_to_number(d["downside_loss"])
+    number = downside_to_number(d["loss"])
     band = number_to_band(number)
-    pct = d["downside_loss"] * 100.0
+    pct = d["loss"] * 100.0
     horizon_label = (
         f"{horizon_years:g} año" if horizon_years == 1.0 else f"{horizon_years:g} años"
     )
     # :g y no round(): con α=0.996 la cola es 0.4%, no "0%".
     tail_pct = f"{(1 - alpha) * 100:g}"
     explanation = (
-        f"En el peor {tail_pct}% de los escenarios a {horizon_label}, "
-        f"la pérdida esperada de esta cartera es {pct:.1f}%. En la escala del sistema "
-        f"eso es un número de riesgo {number:.0f}/100 (banda «{band}»)."
+        f"En un año malo (el peor {tail_pct}% de los escenarios a {horizon_label}), "
+        f"una cartera con esta volatilidad podría caer alrededor de {pct:.1f}%. "
+        f"En la escala del sistema eso es un número de riesgo {number:.0f}/100 "
+        f"(banda «{band}»)."
     )
     return {
         "number": number,
         "band": band,
-        "downside_loss": round(d["downside_loss"], 4),
-        "cvar": round(d["cvar"], 4),
+        "downside_loss": round(d["loss"], 4),
         "method": d["method"],
         "horizon_years": horizon_years,
         "alpha": alpha,

@@ -16,6 +16,19 @@
 > `config_layer/risk_assumptions.load_gamma_anchors`). No quedan pendientes.
 > El §3 queda como registro de la decisión.
 >
+> **Revisión 2026-07-04 (universo en vivo + calibración μ=0, DD-013):** al
+> ampliar el universo demo (24 → 52 instrumentos, ver abajo) y correrlo con
+> datos en vivo se destapó un bug de calibración: `portfolio_risk_number`
+> restaba el retorno esperado (μ) del downside, pero los anclajes se derivan a
+> μ=0. Con retornos *trailing* de 3 años inflados (post-2022), el μ "cancelaba"
+> el riesgo: una cartera de 25% de volatilidad marcaba número ~20. **Fix:** el
+> número de cartera ahora mide **dispersión pura (μ=0)** vía
+> `risk_scoring_downside` (paramétrico k·σ; empírico centra los retornos), como
+> los anclajes — un puntaje de riesgo no se descuenta por un retorno esperado
+> optimista. Monótono en volatilidad. El retorno esperado se muestra en su
+> propia columna. `portfolio_downside` (Expected Shortfall con drift) se
+> mantiene para referencia pero ya no alimenta el número.
+>
 > **Revisión 2026-07-03 (post code-review, ver DD-012):** 10 hallazgos
 > confirmados y corregidos. Cambios de diseño resultantes: anclajes derivados
 > del `max_volatility` del YAML vía CVaR (garantía: cartera compliant con su

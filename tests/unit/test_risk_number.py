@@ -70,8 +70,9 @@ def test_anchors_derive_from_config_max_volatility():
 
 
 def test_budget_compliant_portfolio_never_bands_above_its_profile():
-    # Garantía de la calibración: una cartera al tope de vol de su perfil
-    # (mu >= 0) nunca banda por encima de ese perfil.
+    # Garantía de la calibración (DD-012): una cartera al tope de vol de su
+    # perfil mapea EXACTO al tope de su banda; por debajo, estrictamente menos.
+    # El número es dispersión pura (μ=0), así que no depende del retorno esperado.
     from risk_first_advisory.ai_layer.risk_scoring import PROFILES
     from risk_first_advisory.config_layer.risk_assumptions import (
         get_default_risk_profile_params,
@@ -80,10 +81,13 @@ def test_budget_compliant_portfolio_never_bands_above_its_profile():
     params = get_default_risk_profile_params()
     for i, profile in enumerate(PROFILES):
         max_vol = params[profile]["max_volatility"]
-        at_cap = portfolio_risk_number(mu_annual=0.0, sigma_annual=max_vol)
-        assert at_cap["number"] <= (i + 1) * 20.0
-        with_mu = portfolio_risk_number(mu_annual=0.03, sigma_annual=max_vol)
-        assert with_mu["number"] < (i + 1) * 20.0
+        at_cap = portfolio_risk_number(sigma_annual=max_vol)
+        assert at_cap["number"] == pytest.approx((i + 1) * 20.0, abs=0.1)
+        below = portfolio_risk_number(sigma_annual=max_vol * 0.9)
+        assert below["number"] < (i + 1) * 20.0
+        # el retorno esperado NO cambia el número (puntaje de riesgo, no de Sharpe)
+        with_mu = portfolio_risk_number(mu_annual=0.30, sigma_annual=max_vol)
+        assert with_mu["number"] == at_cap["number"]
 
 
 def test_downside_number_is_monotonic_and_clamped():
@@ -185,12 +189,23 @@ def test_nan_in_covariance_raises_instead_of_zero_risk():
 
 
 def test_portfolio_risk_number_lands_in_expected_band():
-    # σ=8%, μ=4%: loss = 0.08·2.0627 − 0.04 ≈ 0.1250 → entre el tope de
-    # conservador (0.1031→20) y el de moderado-defensivo (0.1547→40) ≈ 28.5.
+    # σ=8% (μ ignorado): loss = 0.08·2.0627 ≈ 0.1650 → entre el tope de
+    # moderado-defensivo (0.1547→40) y el de moderado (0.2063→60) ≈ 44.
     r = portfolio_risk_number(mu_annual=0.04, sigma_annual=0.08)
-    assert 27.5 <= r["number"] <= 29.5
-    assert r["band"] == "moderado-defensivo"
+    assert 42.0 <= r["number"] <= 46.0
+    assert r["band"] == "moderado"
     assert "peor 5%" in r["explanation"]
+
+
+def test_expected_return_does_not_lower_risk_number():
+    # Un retorno trailing inflado NO debe bajar el puntaje de riesgo
+    # (regresión del bug destapado por datos en vivo: 25% vol daba RN ~20).
+    high_vol = portfolio_risk_number(mu_annual=0.41, sigma_annual=0.25)
+    assert high_vol["number"] >= 95.0  # 0.25·2.0627 ≈ 0.516 → tope de escala
+    assert high_vol["band"] == "agresivo"
+    # mismo σ, retorno modesto → mismo número
+    same = portfolio_risk_number(mu_annual=0.02, sigma_annual=0.25)
+    assert same["number"] == high_vol["number"]
 
 
 def test_explanation_tail_pct_never_reads_zero():
@@ -248,14 +263,13 @@ def test_portfolio_moments_validations():
 
 def test_portfolio_risk_number_from_weights_hand_computed():
     # Valores calculados A MANO (no vía las mismas funciones de producción):
-    # μ = 0.6·0.09 + 0.3·0.06 + 0.1·0.02 = 0.074
     # σ = √(0.6²·0.18² + 0.3²·0.12² + 0.1²·0.01²) = √0.012961 ≈ 0.113846
-    # loss = σ·2.06271 − μ ≈ 0.23483 − 0.074 = 0.16083
-    # → entre tope mod-def (0.15470→40) y tope moderado (0.20627→60) ≈ 42.4
+    # loss (μ=0) = σ·2.06271 ≈ 0.23483
+    # → entre tope moderado (0.20627→60) y tope mod-agresivo (0.28878→80) ≈ 66.9
     weights = {"SPY": 0.6, "AL30": 0.3, "CASH": 0.1}
     r = portfolio_risk_number_from_weights(weights, _RETURNS, _TICKERS, _COV_DIAG)
-    assert r["number"] == pytest.approx(42.4, abs=0.2)
-    assert r["band"] == "moderado"
+    assert r["number"] == pytest.approx(66.9, abs=0.3)
+    assert r["band"] == "moderado-agresivo"
     assert r["missing_tickers"] == []
     assert r["invested_weight_used"] == pytest.approx(1.0)
 

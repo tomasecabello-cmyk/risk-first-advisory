@@ -218,3 +218,28 @@ Ver también `docs/TODO_DESIGN_NOTES.md`.
 - Calibraciones = supuestos DEMO (α=0.95, horizonte 1 año, anchors de γ de literatura CRRA); no reemplazan un proceso de CMA ni la decisión de un comité de inversiones.
 - `GAMMA_ANCHORS` (γ→número) sigue siendo constante de módulo tuneable por parámetro; los anchors downside ya no pueden divergir del YAML.
 - Las bandas 0-100 tienen UNA definición (delegada en `risk_scoring._profile_from_score`).
+
+---
+
+## DD-013 — Risk Number de cartera mide dispersión pura (μ=0), no Expected Shortfall con drift
+
+**Estado:** Aceptado
+**Fecha:** 2026-07-04
+**Área:** `ai_layer/risk_number.py`, universo demo
+
+**Contexto:** Al ampliar el universo demo (`tests/fixtures/universe/live_instrument_universe.csv`, 24 → 52 instrumentos: US ETFs sectoriales/regionales/factor, commodities, high yield, más CEDEARs y soberanos ARG) y correrlo con `RFA_LIVE_DATA=1`, se destapó un bug de calibración en `portfolio_risk_number`. El número mapeaba sobre `portfolio_downside`, que resta el retorno esperado μ del downside (Expected Shortfall: `ES = μ − k·σ`). Pero los anclajes `DOWNSIDE_ANCHORS` se derivan a μ=0 (DD-012: `k·max_volatility`). Con retornos *trailing* de 3 años inflados (rally post-2022), μ "cancelaba" el riesgo: una cartera de 25% de volatilidad marcaba número ~20 y quedaba "under_tolerance" — obviamente incorrecto. Un conservador con cartera de 2.2% vol daba número 0.
+
+**Decisión:** El **número de riesgo 0-100 de una cartera mide dispersión pura (μ=0)**, consistente con la derivación de los anclajes. Nueva función `risk_scoring_downside`:
+- paramétrico: `pérdida = k(α)·σ·√h` (sin término μ);
+- empírico: **centra** los retornos (`r − media`) antes de tomar la cola, midiendo dispersión y no drift.
+
+`portfolio_risk_number` usa esta pérdida para el número; `mu_annual` se acepta en la firma por compatibilidad pero NO entra al número. El retorno esperado de la cartera se muestra en su propia columna (no se mezcla con el riesgo). `portfolio_downside` (ES honesto con drift) se conserva como función pura para referencia/otros usos, pero ya no alimenta el número.
+
+**Justificación:** (1) Consistencia: escala y medición ahora usan la misma convención μ=0, así una cartera dentro del budget de su perfil nunca banda por encima (garantía de DD-012 preservada). (2) Correcto conceptualmente: un **puntaje de riesgo** describe cuánto podés perder en un mal escenario; un retorno esperado optimista (y encima estimado de trailing, poco confiable como forward) no reduce el riesgo real del año que viene. Es como lo hace Nitrogen (banda de downside, no Sharpe). (3) Monotonicidad: más volatilidad ⇒ número más alto, siempre.
+
+**Alternativa descartada:** Mantener el ES con drift y "arreglar" los μ inflados (capar, usar risk-free, CMA forward). Descartada: mete un problema de estimación de retornos esperados (difícil, poco confiable) dentro de un puntaje de riesgo que no lo necesita; μ=0 es más simple y más honesto.
+
+**Consecuencias:**
+- El número de cartera es función monótona de la volatilidad (a horizonte/α fijos).
+- Cambió el valor esperado en los tests unitarios (recalibrados a mano) — ningún cambio de contrato en la API (mismas claves salvo que el número ya no expone `cvar`).
+- El universo demo ampliado sólo rinde con `RFA_LIVE_DATA=1` (equities/ETF necesitan precios reales; sin la env var el adapter sólo cubre renta fija). La demo debe correrse con datos en vivo.
