@@ -98,11 +98,26 @@ Lecturas:
   trabajo de frontend + un mínimo de sesión por token.
 
 ### Fase UX-3 — universo dinámico (engancha con Fase 3 de producto)
-- Universo generado desde las APIs (data912 + yfinance) en vez del CSV/lista
-  fija; concepto de "bróker" como filtro de disponibilidad; el pipeline de
-  data quality decide qué entra. Esto destapa la escala completa del Risk
-  Number para perfiles agresivos y arregla el infeasible de conservadores
-  incluso sin curar listas a mano.
+- **PRIMER PASO HECHO (2026-07-04):** `scripts/build_arg_universe.py` — generador
+  reproducible que arma el universo ARG líquido desde data912 (dedup de sufijos
+  C/D, filtro de liquidez por volumen, metadata curada + fallback) + núcleo de
+  ETFs US, y precalienta el caché (`--warm`). Genera 97 instrumentos: 26 ETF US,
+  11 soberanos hard-dollar, 40 CEDEARs líquidos, 20 acciones ARG (Merval/panel).
+  Escribe `tests/fixtures/universe/live_instrument_universe.csv`. **Decisión de
+  alcance:** "completo" ≠ los ~900 tickers listados (la mayoría sin liquidez; los
+  ONs corp ni tienen histórico en data912 → 404). "Completo útil" = el mercado
+  ARG efectivamente invertible. El marco es USD/CCL, así que se priorizan
+  soberanos hard-dollar sobre bonos peso (Lecaps/CER, que agregan ruido de
+  devaluación — quedan como extensión futura).
+- **Falta para el universo dinámico pleno:** generarlo on-demand por request (no
+  desde CSV pre-generado), "bróker" como filtro de disponibilidad
+  (`available_entities` ya está en el schema), bonos peso ARS-nativos, y correlaciones
+  reales (hoy `CovarianceEngine` usa correlaciones mock por asset_class).
+- **Costo operativo:** cada instrumento ARG tarda ~1.5s en bajar histórico
+  (data912, secuencial); 97 en frío ≈ 2-3 min. El caché en disco (24h TTL) lo
+  amortiza. Correr `build_arg_universe.py --warm` antes de la demo deja todo
+  instantáneo. **La demo DEBE correrse con `RFA_LIVE_DATA=1`** (equities/CEDEARs/
+  ETF solo tienen precio vía live; el adapter CSV solo cubre renta fija).
 
 ## Cómo correr la demo HOY para que luzca (mientras tanto)
 
