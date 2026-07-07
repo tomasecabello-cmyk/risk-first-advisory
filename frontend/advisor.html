@@ -59,6 +59,37 @@
     </div>
   </div>
 
+  <!-- ── Revisión del asesor: respuestas del cliente + informe propio ─────── -->
+  <div class="card" id="advisor-review-card" style="display:none;">
+    <div class="card-header">
+      <h2>Revisión del asesor</h2>
+      <div class="pill-cluster">
+        <span class="pill pill-blue">respuestas del cliente</span>
+        <span class="pill pill-violet">tu informe, auditado</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="section-label" style="margin-bottom:12px;">Lo que respondió el cliente</div>
+      <div id="advisor-client-answers"><div class="sub">Abrí un caso de la bandeja para ver las respuestas.</div></div>
+
+      <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Tu informe del asesor
+        <span class="hint">editable a voluntad · cada guardado queda auditado como una versión nueva</span>
+      </div>
+      <div class="sub" style="margin-bottom:10px;">
+        Leé las respuestas y el análisis de la IA (paso 3), y escribí tu propia lectura. Podés
+        corregirla las veces que quieras: cada "Guardar" agrega una versión a la cadena de auditoría
+        (no se pisa la anterior).
+      </div>
+      <textarea id="advisor-report-text" rows="6" style="width:100%;box-sizing:border-box;"
+        placeholder="Tu evaluación del cliente: perfil recomendado, por qué, qué conversaste, qué observaste…"></textarea>
+      <div class="actions" style="margin-top:10px;">
+        <button class="btn-primary" onclick="advisorSaveNote()">Guardar informe (auditado)</button>
+        <span id="advisor-report-status" style="font-size:12px;margin-left:10px;"></span>
+      </div>
+      <div id="advisor-report-history" style="margin-top:14px;"></div>
+    </div>
+  </div>
+
   <!-- ═════════════════════════════════════════════════════════════════════ -->
   <!-- Flujo del caso (mismo motor que la demo original, reencuadrado)        -->
   <!-- ═════════════════════════════════════════════════════════════════════ -->

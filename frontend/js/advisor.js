@@ -142,9 +142,127 @@ async function advisorOpenCase(rowJson) {
         `Para ver el detalle (Risk Number, Risk Gap, capacidad) volvé a correr <em>"Analizar perfil con IA"</em>.`
       : `Este caso todavía no tiene análisis. Corré <em>"Analizar perfil con IA"</em>.`);
 
+  // mostrar la card de revisión (respuestas + informe) y poblarla
+  const reviewCard = document.getElementById("advisor-review-card");
+  if (reviewCard) reviewCard.style.display = "";
+  advisorRenderClientAnswers(c.case_id);
+  advisorLoadNotes(c.case_id);
+
   advisorSetDecision("approve");
   const card = document.getElementById("idemo-step-approve");
   if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// ── Respuestas crudas del cliente (KYC + cuestionario mapeado) ─────────────
+let _advisorQuestionnaire = null;
+
+async function advisorRenderClientAnswers(caseId) {
+  const box = document.getElementById("advisor-client-answers");
+  if (!box) return;
+  box.innerHTML = `<div class="sub">Cargando respuestas…</div>`;
+
+  // cuestionario (textos de los ítems) — cacheado
+  if (!_advisorQuestionnaire) {
+    const q = await idemoApi("GET", "/kyc/tolerance-questionnaire");
+    _advisorQuestionnaire = (q.ok && q.json && q.json.items) ? q.json.items : [];
+  }
+  // KYC vigente del caso
+  const k = await idemoApi("GET", `/cases/${encodeURIComponent(caseId)}/kyc`);
+  const subs = (k.ok && k.json && (k.json.submissions || k.json.kyc_submissions)) || [];
+  const payload = subs.length ? (subs[subs.length - 1].payload || {}) : ((k.ok && k.json && k.json.payload) || {});
+
+  // datos clave
+  const fin = [
+    ["Edad", payload.age], ["Horizonte (años)", payload.investment_horizon_years],
+    ["Ingreso anual USD", payload.annual_income_usd], ["Patrimonio líquido USD", payload.liquid_net_worth],
+    ["Objetivo", payload.investment_objective], ["Experiencia", payload.investment_experience],
+    ["Estabilidad ingreso", payload.income_stability], ["Dependientes", payload.dependents_count],
+  ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+  const finHtml = fin.map(([k2, v]) =>
+    `<div><span style="opacity:.65;">${escapeHTML(k2)}:</span> <strong>${escapeHTML(String(v))}</strong></div>`).join("");
+
+  // cuestionario: qN -> letra elegida -> texto de la opción
+  const answers = payload.tolerance_answers || {};
+  let qHtml = "";
+  if (Object.keys(answers).length && _advisorQuestionnaire.length) {
+    qHtml = _advisorQuestionnaire.map(item => {
+      const chosen = answers[item.id];
+      if (!chosen) return "";
+      const opt = (item.options || []).find(o => o.key === chosen);
+      const txt = opt ? opt.text : `(${chosen})`;
+      return `<div style="margin:6px 0;padding:8px 10px;background:var(--rf-bg-subtle,#fafbfc);border-radius:6px;">` +
+        `<div style="font-size:12px;opacity:.7;">${escapeHTML(item.text)}</div>` +
+        `<div style="font-weight:600;">→ ${escapeHTML(txt)}</div></div>`;
+    }).join("");
+  } else {
+    qHtml = `<div class="sub">Este KYC no trae respuestas del cuestionario (o es un perfil legacy con score directo).</div>`;
+  }
+
+  // preguntas abiertas
+  const open = [
+    ["Objetivo (texto libre)", payload.open_investment_goal || payload.open_goal],
+    ["Reacción a una caída del 30%", payload.open_risk_reaction],
+    ["Experiencia (texto libre)", payload.open_experience],
+    ["Preocupaciones / restricciones", payload.open_concerns],
+  ].filter(([, v]) => v);
+  const openHtml = open.map(([k2, v]) =>
+    `<div style="margin:6px 0;"><span style="opacity:.65;">${escapeHTML(k2)}:</span> ${escapeHTML(String(v))}</div>`).join("");
+
+  box.innerHTML =
+    `<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin-bottom:12px;">${finHtml}</div>` +
+    `<div class="section-label" style="margin:8px 0;">Cuestionario de tolerancia (respuestas)</div>${qHtml}` +
+    (openHtml ? `<div class="section-label" style="margin:14px 0 6px;">Respuestas abiertas</div><div style="font-size:13px;">${openHtml}</div>` : "");
+}
+
+// ── Informe del asesor: editable, guardado como evento auditado (versionado) ─
+async function advisorSaveNote() {
+  const caseId = window.idemoState.caseId;
+  const ta = document.getElementById("advisor-report-text");
+  const status = document.getElementById("advisor-report-status");
+  if (!caseId) { if (status) status.textContent = "Abrí un caso primero."; return; }
+  const text = (ta && ta.value.trim()) || "";
+  if (!text) { if (status) status.textContent = "El informe no puede estar vacío."; return; }
+  if (status) status.textContent = "Guardando…";
+
+  // versión = notas previas + 1
+  const prev = await advisorFetchNotes(caseId);
+  const version = prev.length + 1;
+  const res = await idemoApi("POST", `/cases/${encodeURIComponent(caseId)}/audit-events`, {
+    event_type: "advisor_note",
+    actor_role: "advisor",
+    payload: { text, version, at: new Date().toISOString() },
+  });
+  if (!res.ok) {
+    if (status) status.textContent = `No se pudo guardar (HTTP ${res.status}).`;
+    return;
+  }
+  if (status) status.innerHTML = `<span style="color:var(--rf-emerald-700);">✓ Informe v${version} guardado y auditado.</span>`;
+  advisorLoadNotes(caseId);
+}
+
+async function advisorFetchNotes(caseId) {
+  const a = await idemoApi("GET", `/cases/${encodeURIComponent(caseId)}/audit`);
+  const evs = (a.ok && a.json && (a.json.events || a.json.audit_events)) || [];
+  return evs.filter(e => e.event_type === "advisor_note");
+}
+
+async function advisorLoadNotes(caseId) {
+  const box = document.getElementById("advisor-report-history");
+  if (!box) return;
+  const notes = await advisorFetchNotes(caseId);
+  if (!notes.length) { box.innerHTML = ""; return; }
+  // la última al textarea (para seguir editando), el historial abajo
+  const ta = document.getElementById("advisor-report-text");
+  const last = notes[notes.length - 1];
+  if (ta && !ta.value.trim()) ta.value = (last.payload && last.payload.text) || "";
+  const rows = notes.slice().reverse().map(n => {
+    const p = n.payload || {};
+    const when = (p.at || n.created_at_utc || "").slice(0, 16).replace("T", " ");
+    return `<div style="border-left:3px solid var(--rf-violet-700);padding:8px 12px;margin:6px 0;background:var(--rf-bg-subtle,#fafbfc);border-radius:0 6px 6px 0;">` +
+      `<div style="font-size:11px;opacity:.65;">Versión ${escapeHTML(String(p.version || "?"))} · ${escapeHTML(when)} · auditado</div>` +
+      `<div style="font-size:13px;margin-top:2px;white-space:pre-wrap;">${escapeHTML(p.text || "")}</div></div>`;
+  }).join("");
+  box.innerHTML = `<div class="section-label" style="margin:8px 0;">Historial del informe (auditado, append-only)</div>${rows}`;
 }
 
 // ── Segmento de decisión approve / modify / reject ──────────────────────────
