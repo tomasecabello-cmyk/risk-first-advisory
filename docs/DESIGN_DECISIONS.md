@@ -170,9 +170,7 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 - `PortfolioVariantMetadata` implementado en `portfolio_layer/generation.py`.
 - `PortfolioCandidateSet` incluye campo `metadata: dict[PortfolioVariant, PortfolioVariantMetadata]`.
 - El reporte Markdown expone la metadata por variante (visible para el asesor).
-- **Pendiente:** el override del asesor no es todavía una acción persistida/firmada. No existe endpoint ni UI donde el asesor confirme explícitamente que acepta `GROWTH` fuera del budget. Eso queda para la capa de workflow/UI futura (firma de override, trazabilidad en audit trail).
-
-Ver también `docs/TODO_DESIGN_NOTES.md`.
+- El override del asesor es una acción persistida y auditada: `POST /cases/{id}/override-approval` (case-scoped, con AuditEvent) y `POST /advisor/override-approval` (legacy, record SQLite). Pendientes menores (validación cruzada de records, firma digital) en `docs/ROADMAP.md`.
 
 ---
 

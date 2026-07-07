@@ -49,9 +49,9 @@ El optimizador recibe únicamente los tickers del universo final ya filtrado y v
 
 La variante BALANCED usa el `RiskBudget` aprobado sin modificar. Es la recomendación base dentro del perfil aprobado.
 
-## I-011 — `GROWTH` con exceso de riesgo requiere advisor override explícito (pendiente M2)
+## I-011 — `GROWTH` con exceso de riesgo requiere advisor override explícito
 
-En M1, `GROWTH` también opera dentro del `RiskBudget` aprobado. En M2, `GROWTH` podrá exceder parcialmente el `RiskBudget`, pero debe marcarse con `requires_advisor_override = True`, `risk_budget_exceeded = True`, y el reason code `PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`. No puede presentarse como recomendación base si excede el `RiskBudget`. Ver `docs/TODO_DESIGN_NOTES.md` y DD-010.
+`GROWTH` puede exceder parcialmente el `RiskBudget` aprobado (budget derivado con `max_volatility` relajado), pero cuando lo hace debe marcarse con `requires_advisor_override = True`, `risk_budget_exceeded = True` y el reason code `PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET`, registrando qué restricciones se excedieron. No puede presentarse como recomendación base si excede el `RiskBudget`, y su selección requiere un override aprobado del asesor (`POST /cases/{id}/override-approval`). Ver DD-010.
 
 ## I-012 — `AuditTrail` es append-only y se cierra al final de sesión
 

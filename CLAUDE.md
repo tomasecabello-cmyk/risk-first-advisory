@@ -15,11 +15,11 @@ Windows PowerShell. Use the venv at `.venv`.
 ```powershell
 .\.venv\Scripts\Activate.ps1          # activate (create once: python -m venv .venv; pip install -e ".[dev]")
 
-python -m pytest -q                    # full suite (~3100 tests)
+python -m pytest -q                    # full suite (~2540 tests)
 python -m pytest tests/unit/test_risk_gap.py -q              # one file
 python -m pytest tests/unit/test_risk_gap.py::test_name -q   # one test
-ruff check src tests scripts           # lint (large pre-existing backlog — see note below)
-mypy src                               # types (strict=false; ~5 pre-existing errors)
+ruff check src tests scripts           # lint — passing gate, must stay at 0 findings
+mypy src                               # types (strict=false) — passing gate, must stay at 0 errors
 
 python scripts/bootstrap_local_demo.py            # migrate + seed + validate (idempotent, no API key)
 python scripts/migrate.py                          # apply migrations only
@@ -30,7 +30,7 @@ python -m uvicorn risk_first_advisory.api_layer.main:app --reload   # backend on
 python -m http.server 5500 -d frontend                              # static frontend on :5500
 ```
 
-- **`ruff` / `mypy` have a large pre-existing backlog** (hundreds of ruff findings, ~5 mypy). They are configured (`pyproject.toml`) but not a passing gate. New code should be clean; do not try to fix the whole backlog in an unrelated change.
+- **`ruff` and `mypy` are passing gates** (backlog cleaned 2026-07): run both before committing Python and keep them at zero. FastAPI's `Depends(...)`-in-defaults idiom is allowlisted via `extend-immutable-calls` in `pyproject.toml`.
 - **`OPENAI_API_KEY`** is required only for the real `/ai/*` and `/cases/{id}/ai/profile-analysis` paths. Tests and the smoke check use deterministic mocks.
 - **`RFA_DEMO_MODE=1`** before uvicorn activates a deterministic, key-free profile client so the guided demo (incl. the Risk Gap step) runs without `OPENAI_API_KEY`. Without the env var the case AI endpoint still requires a real key.
 - Frontend API base is hardcoded to `http://127.0.0.1:8000` in `frontend/js/common.js`. Run the backend on 8000.
@@ -41,7 +41,9 @@ Layered package `src/risk_first_advisory/`. Data flows through layers in a fixed
 order is compliance-significant, not incidental.
 
 - **`kyc/`** — `KYCData`, `FinancialGoal`, `ESGProfile` (the standardized client inputs).
-- **`ai_layer/`** — `OpenAIProfileClient` (real OpenAI; interprets KYC, flags contradictions, proposes a *preliminary* profile — never approves), `MockAIClient` (scripted, for tests/smoke), `risk_gap.py` (pure deterministic mapper: contradictions → Risk Gap flag).
+- **`ai_layer/`** — `OpenAIProfileClient` (real OpenAI; interprets KYC, flags contradictions, proposes a *preliminary* profile — never approves), `MockAIClient` (scripted, for tests/smoke), `risk_gap.py` (pure deterministic mapper: contradictions → Risk Gap flag), `risk_number.py` (0-100 client↔portfolio score), `grable_lytton.py` + `risk_scoring.py` (questionnaire scoring).
+- **`data_layer/`** — market data providers (YAML fixtures, CSV adapter, live ARG+US via data912/yfinance in `providers.py`/`live_market_data.py`), `covariance.py`, `return_estimator.py`, `data_quality.py`.
+- **`models/`** — shared dataclasses (`portfolio.py`, `risk_budget.py`).
 - **`rules_layer/`** — governance, instrument suitability, ESG, `goal_feasibility`, `risk_budget`, `reason_codes`.
 - **`universe_layer/`** — preference + eligibility filters over the instrument universe.
 - **`portfolio_layer/`** — feasibility checker then optimizer (the optimizer only sees the already-filtered tickers; it makes no governance/ESG/suitability decisions).
@@ -76,10 +78,13 @@ tests may not catch. The highest-stakes ones:
 
 The `docs/` folder is the source of truth, keep it in sync when you change behavior:
 `INVARIANTS.md` (I-NNN), `DESIGN_DECISIONS.md` (DD-NNN), `REASON_CODES.md`, `ARCHITECTURE.md`,
-`COMPLIANCE_NOTES.md` (limits/disclaimers), `PROMPT_DESIGN.md`.
+`COMPLIANCE_NOTES.md` (limits/disclaimers), `PROMPT_DESIGN.md`, `RISK_NUMBER_DESIGN.md` /
+`RISK_SCORING_THEORY.md` / `METHODOLOGY_NOTES.md` (risk methodology), `ROADMAP.md` (the only
+living backlog — pending work goes there, not in new TODO docs).
 
 ## Conventions
 
 - **Bilingual by design:** user-facing UI copy is Spanish; technical identifiers stay English (`case_id`, `firm_id`, endpoint paths, role names, JSON keys, `reason_codes`, profile enums like `moderado`). Do not translate identifiers.
 - **Risk Gap** (`ai_layer/risk_gap.py` + `RiskGap` schema): a *flag of inconsistency* between the declared profile and stress-scenario answers, with confirmation questions for the advisor. It is explicitly NOT a measured "behavioral profile" — keep that framing (see `docs/METHODOLOGY_NOTES.md`).
-- SQLite only (`data/demo_api.db`, gitignored). No production market-data provider — the universe is a CSV fixture (`tests/fixtures/universe/`). No remote configured; work happens on `master`.
+- SQLite only (`data/demo_api.db`, gitignored). No production market-data provider — the universe is a CSV fixture (`tests/fixtures/universe/`) regenerated by `scripts/build_arg_universe.py` (run with `--warm` once before a live demo, ~2-3 min). `RFA_LIVE_DATA=1` enables the live ARG+US provider for the proposal path. No remote configured; work happens on `master`.
+- Commits in Spanish, message via file (`git commit -F <file>` in the scratchpad).

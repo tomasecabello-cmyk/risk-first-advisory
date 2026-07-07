@@ -18,7 +18,7 @@ El cierre de Fase 3 habilita demos operables en una máquina dev. Lo que sigue s
 
 ## 0. Capacidades de compliance ya implementadas en Fase 2
 
-Fase 2 entregó un conjunto concreto de mecanismos auditables. Lo que sigue es lo que **ya funciona hoy** en el backend (ver `docs/TODO_DESIGN_NOTES.md` para los commits que cierran cada bloque):
+Fase 2 entregó un conjunto concreto de mecanismos auditables. Lo que sigue es lo que **ya funciona hoy** en el backend (la historia de los commits que cierran cada bloque está en el log de git):
 
 - **AuditEvent hash chain por `case_id`** (`POST/GET /cases/{id}/audit*`):
   - Cada evento (case_created, kyc_submitted, ai_profile_analyzed, advisor_profile_approved/_modified/_rejected, investment_preferences_recorded, universe_filtered, portfolio_proposal_generated, advisor_override_approved/_rejected, portfolio_selected, report_generated) queda encadenado vía `previous_hash` + `event_hash` (SHA-256 sobre payload canonical).
@@ -226,9 +226,9 @@ Esta metadata se almacena en `PortfolioCandidateSet.metadata` y se muestra en el
 
 - La decisión de override no está todavía integrada en el `AuditTrail` del workflow principal — solo vive como record SQLite independiente. Para auditoría completa: propagar a `AuditTrail` con evento `advisor_override_approval`.
 - No hay firma digital del asesor (el `rationale` es texto libre sin firma criptográfica ni identificación verificada por IdP).
-- El endpoint no valida todavía que la variante `candidate_variant` exista realmente en el `ai_filtered_portfolio_NNNNNN` apuntado por `related_record_id`, ni que `requires_advisor_override=True`. La validación cruzada queda para Fase 2.
-- No hay RBAC: cualquier token demo (advisor o compliance) puede registrar el override. Fase 2: restringir a `roles=["advisor"]`.
-- Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/TODO_DESIGN_NOTES.md`.
+- El endpoint no valida todavía que la variante `candidate_variant` exista realmente en el `ai_filtered_portfolio_NNNNNN` apuntado por `related_record_id`, ni que `requires_advisor_override=True`. La validación cruzada sigue pendiente (ver `docs/ROADMAP.md`).
+- RBAC aplicado: los tres `/advisor/*` requieren `require_roles("advisor", "admin")`; compliance/viewer reciben 403. (El flujo case-scoped `/cases/*` tiene además su propio RBAC + AuditEvent por mutación.)
+- Ver `docs/DESIGN_DECISIONS.md` DD-010 y `docs/ROADMAP.md`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Architecture — risk-first-advisory
 
-**Estado:** M1 completo. Fase 2 cerrada como workflow case-scoped backend (ver sección "Fase 2 — case-scoped entities y workflow" al final). Fase 3 **cerrada como local/demo plug-and-play** ✅: Case Dashboard + Case Workbench (15 paneles end-to-end) + frontend separado en `frontend/index.html` + `frontend/css/base.css` + `frontend/js/{common,legacy-demo,case-dashboard,case-workbench}.js` (scripts clásicos, sin build step) + `scripts/bootstrap_local_demo.py` como entrypoint dev/demo (migrate + seed + check + imprime URLs / tokens / comandos). **Esto NO significa production-ready ni piloto B2B vendible** — ver `README.md` → "Phase 3 local demo readiness" para scope exacto. **Fase 4 próxima**: pilot readiness / hardening (market data, PDF, firm-level access, production auth, backup/restore, `/health/full` runtime, deployment productivo).
+**Estado:** M1 completo. Fase 2 cerrada como workflow case-scoped backend (ver sección "Fase 2 — case-scoped entities y workflow" al final). Fase 3 cerrada como demo local plug-and-play con **frontend por roles** (`index` hub / `client` wizard / `advisor` bandeja+decisiones / `compliance` auditoría / `methodology` / `advanced` dev — ver `frontend/README.md`), Risk Number 0-100 end-to-end y universo ARG+US generado (`scripts/build_arg_universe.py`). `scripts/bootstrap_local_demo.py` es el entrypoint dev/demo (migrate + seed + check). **Esto NO significa production-ready ni piloto B2B vendible.** Pendientes: `docs/ROADMAP.md`.
 
 ---
 
@@ -152,17 +152,9 @@ AdvisoryWorkflowResult (COMPLETED / COMPLETED_WITH_WARNINGS)
 
 ---
 
-## `run_demo.py` vs `AdvisoryWorkflowCoordinator`
+## `AdvisoryWorkflowCoordinator` como fuente única de verdad
 
-| | `run_demo.py` | `AdvisoryWorkflowCoordinator` |
-|---|---|---|
-| **Rol** | Script de consola para demostración | Fachada productiva del negocio |
-| **Responsabilidad** | Cargar fixtures, invocar el coordinator, imprimir resultado, generar reporte | Orquestar el flujo completo |
-| **Ajustes al RiskBudget** | Ninguno (eliminado) | Ninguno (política productiva) |
-| **Reimplementa pipeline** | No — delega 100% al coordinator | Es el pipeline |
-| **Bloques bloqueados** | Muestra diagnóstico legible | Devuelve `AdvisoryWorkflowStatus` bloqueado con `reason_codes` |
-
-**Por qué el workflow es la fuente única de verdad:** cualquier otro consumidor (FastAPI, notebook, batch job, report generator) que reimplemente el orden de filtros corre el riesgo de producir resultados inconsistentes con el criterio de compliance aprobado. El coordinator es el único punto donde governance → suitability → ESG → data quality → feasibility → portfolio se aplican en el orden correcto y con la política de bloqueo correcta.
+**Por qué el workflow es la fuente única de verdad:** cualquier otro consumidor (FastAPI, notebook, batch job, report generator) que reimplemente el orden de filtros corre el riesgo de producir resultados inconsistentes con el criterio de compliance aprobado. El coordinator es el único punto donde governance → suitability → ESG → data quality → feasibility → portfolio se aplican en el orden correcto y con la política de bloqueo correcta. Los consumidores (endpoints legacy, smoke checks) delegan en él; nunca reimplementan el pipeline.
 
 ---
 
