@@ -9,39 +9,92 @@ const ADVISOR_PROFILES = [
   "conservador", "moderado-defensivo", "moderado", "moderado-agresivo", "agresivo",
 ];
 
-// ── Bandeja de casos ────────────────────────────────────────────────────────
+// ── Bandeja de casos, AGRUPADA POR CLIENTE ─────────────────────────────────
+// En vez de una lista plana de casos (se acumulan decenas en la demo), se
+// agrupa por cliente: una fila por cliente con su caso más reciente + un
+// desplegable con el historial. Así el asesor ve su cartera de clientes.
+let _advisorClientNames = {};
+
 async function advisorLoadBandeja() {
   const box = document.getElementById("advisor-bandeja");
   if (!box) return;
-  box.innerHTML = `<div style="opacity:.7;font-size:13px;">Cargando casos…</div>`;
+  box.innerHTML = `<div style="opacity:.7;font-size:13px;">Cargando clientes…</div>`;
+
+  // nombres de clientes (client_id -> display_name / external_ref)
+  const cliRes = await idemoApi("GET", "/clients");
+  _advisorClientNames = {};
+  if (cliRes.ok && cliRes.json && Array.isArray(cliRes.json.clients)) {
+    cliRes.json.clients.forEach(c => {
+      _advisorClientNames[c.client_id] = { name: c.display_name || c.client_id, ref: c.external_ref || "" };
+    });
+  }
+
   const res = await idemoApi("GET", `/firms/${encodeURIComponent(ADVISOR_FIRM_ID)}/cases`);
   if (!res.ok) {
     box.innerHTML = `<div class="msg msg-error">No se pudo cargar la bandeja. ${escapeHTML(res.detail || "")} (HTTP ${res.status})</div>`;
     return;
   }
   const cases = (res.json && res.json.cases) || [];
-  // más nuevos primero (por created_at_utc; fallback por case_id)
-  cases.sort((a, b) => String(b.created_at_utc || b.case_id).localeCompare(String(a.created_at_utc || a.case_id)));
-  const lastCaseId = (() => { try { return localStorage.getItem("rfaLastCaseId"); } catch (e) { return null; } })();
-  const top = cases.slice(0, 30);
-  if (!top.length) {
-    box.innerHTML = `<div class="msg msg-info">No hay casos todavía. Cargá un perfil abajo, o pedile a un cliente que complete su perfil en la vista Cliente.</div>`;
-    return;
+  box.innerHTML = advisorRenderGrouped(cases);
+}
+
+// agrupa cases por client_id y devuelve el HTML (una fila por cliente)
+function advisorRenderGrouped(cases) {
+  if (!cases.length) {
+    return `<div class="msg msg-info">No hay casos todavía. Cargá un perfil abajo, o pedile a un cliente que complete su perfil en la vista Cliente.</div>`;
   }
-  box.innerHTML = top.map(c => {
-    const stage = advisorStageLabel(c);
-    const highlight = (c.case_id === lastCaseId) ? " is-selected" : "";
-    return (
-      `<div class="bandeja-row${highlight}" onclick='advisorOpenCase(${JSON.stringify(JSON.stringify(c))})'>` +
-        `<div style="flex:1;min-width:220px;">` +
-          `<div class="b-title">${escapeHTML(c.title || "(sin título)")}</div>` +
-          `<div class="b-id">${escapeHTML(c.case_id)}</div>` +
-        `</div>` +
+  const byClient = {};
+  cases.forEach(c => {
+    const cid = c.client_id || "—";
+    (byClient[cid] = byClient[cid] || []).push(c);
+  });
+  const lastCaseId = (() => { try { return localStorage.getItem("rfaLastCaseId"); } catch (e) { return null; } })();
+
+  // orden de clientes: por el caso más reciente de cada uno
+  const groups = Object.keys(byClient).map(cid => {
+    const list = byClient[cid].sort((a, b) =>
+      String(b.created_at_utc || b.case_id).localeCompare(String(a.created_at_utc || a.case_id)));
+    return { cid, list, latest: list[0] };
+  }).sort((a, b) =>
+    String(b.latest.created_at_utc || b.latest.case_id).localeCompare(String(a.latest.created_at_utc || a.latest.case_id)));
+
+  return groups.map(g => {
+    const meta = _advisorClientNames[g.cid] || { name: g.cid, ref: "" };
+    const n = g.list.length;
+    const latest = g.latest;
+    const hl = (latest.case_id === lastCaseId) ? " is-selected" : "";
+    const refTag = meta.ref ? ` · <span class="b-id">#${escapeHTML(meta.ref)}</span>` : "";
+    const historyId = `adv-hist-${g.cid.replace(/[^a-zA-Z0-9_]/g, "")}`;
+    const historyRows = n > 1 ? g.list.slice(1).map(c =>
+      `<div class="bandeja-row" style="margin-left:20px;" onclick='advisorOpenCase(${JSON.stringify(JSON.stringify(c))})'>` +
+        `<div style="flex:1;min-width:200px;"><span class="b-id">${escapeHTML(c.case_id)}</span></div>` +
         `<div class="b-meta">${escapeHTML(c.created_at_utc || "").slice(0, 16).replace("T", " ")}</div>` +
-        stage +
+        advisorStageLabel(c) +
+      `</div>`).join("") : "";
+    const toggle = n > 1
+      ? `<button type="button" class="btn-secondary btn-sm" onclick="event.stopPropagation();advisorToggleHistory('${historyId}')">▸ ${n - 1} caso(s) anterior(es)</button>`
+      : "";
+    return (
+      `<div style="margin-bottom:6px;">` +
+        `<div class="bandeja-row${hl}" onclick='advisorOpenCase(${JSON.stringify(JSON.stringify(latest))})'>` +
+          `<div style="flex:1;min-width:220px;">` +
+            `<div class="b-title">${escapeHTML(meta.name)}${refTag}</div>` +
+            `<div class="b-id">último: ${escapeHTML(latest.case_id)}</div>` +
+          `</div>` +
+          `<div class="b-meta">${escapeHTML(latest.created_at_utc || "").slice(0, 16).replace("T", " ")}</div>` +
+          advisorStageLabel(latest) +
+          (n > 1 ? `<span class="pill pill-grey">${n} casos</span>` : "") +
+        `</div>` +
+        (toggle ? `<div style="margin:4px 0 0 20px;">${toggle}</div>` : "") +
+        `<div id="${historyId}" class="bandeja-history" style="display:none;margin-top:4px;">${historyRows}</div>` +
       `</div>`
     );
   }).join("");
+}
+
+function advisorToggleHistory(id) {
+  const box = document.getElementById(id);
+  if (box) box.style.display = (box.style.display === "none") ? "grid" : "none";
 }
 
 function advisorStageLabel(c) {

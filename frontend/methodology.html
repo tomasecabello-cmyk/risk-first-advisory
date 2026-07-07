@@ -17,7 +17,6 @@
     <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
     <a href="compliance.html" class="nav-item is-compliance">Compliance</a>
     <a href="methodology.html" class="nav-item is-active">Metodología</a>
-    <a href="advanced.html" class="nav-item nav-item-muted">Modo dev &rarr;</a>
   </div>
 </nav>
 
@@ -72,9 +71,52 @@
     </div>
   </div>
 
-  <!-- ── Fórmulas del motor ─────────────────────────────────────────────── -->
+  <!-- ── Ejemplo concreto ───────────────────────────────────────────────── -->
   <div class="section-band">
     <span class="num">02</span>
+    <div>
+      <h2>Un ejemplo concreto</h2>
+      <div class="sub">Cómo se ve el Risk Gap en un cliente real.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="sub" style="margin-bottom:14px;">
+        Un cliente completa el cuestionario como <strong>agresivo</strong> (dice que aguanta
+        cualquier caída). Pero en la pregunta de plata concreta —"¿preferís perder $8.000 seguro o
+        jugarte una apuesta?"— responde como <strong>ultra-conservador</strong>, y en el escenario
+        de estrés escribe <em>"si cae 30% vendo todo, me da pánico"</em>. El motor cruza las tres
+        señales:
+      </p>
+      <div class="method-cols">
+        <div class="method-col is-avoid">
+          <div class="method-col-head">Lo que declara</div>
+          <ul>
+            <li>Cuestionario: tolerancia alta → número <strong>79/100</strong></li>
+            <li>Objetivo: crecimiento agresivo</li>
+          </ul>
+        </div>
+        <div class="method-col is-take">
+          <div class="method-col-head">Lo que revela</div>
+          <ul>
+            <li>Trade-off (plata real): número <strong>5/100</strong></li>
+            <li>Bajo estrés: vendería todo (pánico)</li>
+          </ul>
+        </div>
+      </div>
+      <p class="sub" style="margin-top:14px;">
+        <strong>Resultado:</strong> Risk Gap <span class="pill pill-orange">alto</span> — las dos
+        elicitaciones divergen 74 puntos. El sistema no decide nada: le entrega al asesor la
+        inconsistencia y las preguntas para confirmarla con el cliente. <strong>Sin esta señal, a
+        este cliente le armás una cartera agresiva y te vende todo en el primer susto</strong> —
+        y después dice que lo asesoraste mal. Detectarlo antes es el valor central.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Fórmulas del motor ─────────────────────────────────────────────── -->
+  <div class="section-band">
+    <span class="num">03</span>
     <div>
       <h2>Rúbrica del perfil declarado (willingness vs ability)</h2>
       <div class="sub">Las fórmulas del motor determinístico. Misma entrada → misma salida.</div>
@@ -106,7 +148,7 @@ gap_level       = bandas(max(gap_revelado, gap_interno))  # 1→low, 2→medium,
 
   <!-- ── Risk Number ────────────────────────────────────────────────────── -->
   <div class="section-band">
-    <span class="num">03</span>
+    <span class="num">04</span>
     <div>
       <h2>El Risk Number — cliente y cartera en la misma escala 0-100</h2>
       <div class="sub">Un número comparable: "tu número es 62, esta cartera es 68". Enfoque propio (DD-012 / DD-013).</div>

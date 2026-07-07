@@ -8,10 +8,21 @@
 
 const COMPLIANCE_FIRM_ID = "firm_demo_local";
 
+let _complianceClientNames = {};
+
 async function complianceLoadBandeja() {
   const box = document.getElementById("compliance-bandeja");
   if (!box) return;
-  box.innerHTML = `<div style="opacity:.7;font-size:13px;">Cargando casos…</div>`;
+  box.innerHTML = `<div style="opacity:.7;font-size:13px;">Cargando clientes…</div>`;
+
+  const cliRes = await cdApiFetch("/clients", { headers: cdAuthHeaders() });
+  _complianceClientNames = {};
+  if (cliRes.ok && cliRes.json && Array.isArray(cliRes.json.clients)) {
+    cliRes.json.clients.forEach(c => {
+      _complianceClientNames[c.client_id] = { name: c.display_name || c.client_id, ref: c.external_ref || "" };
+    });
+  }
+
   const res = await cdApiFetch(`/firms/${encodeURIComponent(COMPLIANCE_FIRM_ID)}/cases`, {
     headers: cdAuthHeaders(),
   });
@@ -20,27 +31,52 @@ async function complianceLoadBandeja() {
     return;
   }
   const cases = (res.json && res.json.cases) || [];
-  cases.sort((a, b) => String(b.created_at_utc || b.case_id).localeCompare(String(a.created_at_utc || a.case_id)));
+  box.innerHTML = complianceRenderGrouped(cases);
+}
+
+function complianceRenderGrouped(cases) {
+  if (!cases.length) return `<div class="msg msg-info">No hay casos todavía.</div>`;
+  const byClient = {};
+  cases.forEach(c => { const cid = c.client_id || "—"; (byClient[cid] = byClient[cid] || []).push(c); });
   const selected = (el("cw-case-id") && el("cw-case-id").value.trim()) || null;
-  const top = cases.slice(0, 30);
-  if (!top.length) {
-    box.innerHTML = `<div class="msg msg-info">No hay casos todavía.</div>`;
-    return;
-  }
-  box.innerHTML = top.map(c => {
-    const stage = complianceStage(c);
-    const hl = (c.case_id === selected) ? " is-selected" : "";
-    return (
-      `<div class="bandeja-row${hl}" onclick="complianceSelectCase('${escapeHTML(c.case_id)}')">` +
-        `<div style="flex:1;min-width:220px;">` +
-          `<div class="b-title">${escapeHTML(c.title || "(sin título)")}</div>` +
-          `<div class="b-id">${escapeHTML(c.case_id)}</div>` +
+
+  const groups = Object.keys(byClient).map(cid => {
+    const list = byClient[cid].sort((a, b) =>
+      String(b.created_at_utc || b.case_id).localeCompare(String(a.created_at_utc || a.case_id)));
+    return { cid, list, latest: list[0] };
+  }).sort((a, b) =>
+    String(b.latest.created_at_utc || b.latest.case_id).localeCompare(String(a.latest.created_at_utc || a.latest.case_id)));
+
+  return groups.map(g => {
+    const meta = _complianceClientNames[g.cid] || { name: g.cid, ref: "" };
+    const n = g.list.length;
+    const refTag = meta.ref ? ` · <span class="b-id">#${escapeHTML(meta.ref)}</span>` : "";
+    const historyId = `cmp-hist-${g.cid.replace(/[^a-zA-Z0-9_]/g, "")}`;
+    const rows = g.list.map((c, i) => {
+      const hl = (c.case_id === selected) ? " is-selected" : "";
+      const indent = i === 0 ? "" : "margin-left:20px;";
+      return `<div class="bandeja-row${hl}" style="${indent}${i > 0 ? "" : ""}" onclick="complianceSelectCase('${escapeHTML(c.case_id)}')">` +
+        `<div style="flex:1;min-width:200px;">` +
+          (i === 0 ? `<div class="b-title">${escapeHTML(meta.name)}${refTag}</div>` : "") +
+          `<span class="b-id">${escapeHTML(c.case_id)}</span>` +
         `</div>` +
         `<div class="b-meta">${escapeHTML(c.created_at_utc || "").slice(0, 16).replace("T", " ")}</div>` +
-        stage +
-      `</div>`
-    );
+        complianceStage(c) +
+      `</div>`;
+    });
+    const head = rows[0];
+    const rest = rows.slice(1).join("");
+    const toggle = n > 1
+      ? `<div style="margin:4px 0 0 20px;"><button type="button" class="btn-secondary btn-sm" onclick="complianceToggleHistory('${historyId}')">▸ ${n - 1} caso(s) anterior(es)</button></div>`
+      : "";
+    return `<div style="margin-bottom:6px;">${head}${toggle}` +
+      `<div id="${historyId}" class="bandeja-history" style="display:none;margin-top:4px;">${rest}</div></div>`;
   }).join("");
+}
+
+function complianceToggleHistory(id) {
+  const box = document.getElementById(id);
+  if (box) box.style.display = (box.style.display === "none") ? "grid" : "none";
 }
 
 function complianceStage(c) {
