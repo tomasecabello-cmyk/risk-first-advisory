@@ -1,5 +1,5 @@
 // Risk-First Advisory — common helpers
-// Loaded first; everything else (legacy demo / dashboard / workbench)
+// Loaded first; everything else (dashboard / workbench / demo por rol)
 // depends on these globals. Classic script, no modules.
 
 const API = "http://127.0.0.1:8000";
@@ -10,8 +10,8 @@ let lastAIProfileResponse       = null;
 
 // ── utilities ────────────────────────────────────────────────
 
-// Shared HTML-escape. Vive acá (no en legacy-demo.js) porque investor-demo.js,
-// case-workbench.js y case-dashboard.js lo reusan y no siempre cargan legacy.
+// Shared HTML-escape. Vive acá porque investor-demo.js, case-workbench.js y
+// case-dashboard.js lo reusan en todas las páginas.
 // Null-safe: escapeHTML(null) -> "".
 function escapeHTML(str) {
   return String(str == null ? "" : str)
@@ -73,8 +73,6 @@ function setButtonLoading(btnId, loading) {
 // ── tiny JSON details wrapper (used by cw*/cd* renderers) ─────────────
 // Renders a `<details>` collapsible with the raw JSON inside a <pre>.
 // Keeps executive summaries above the fold; technical JSON below.
-// `escapeHTML` is defined in legacy-demo.js and loaded by the time these
-// run, so we reference it lazily.
 function rfaJsonDetails(data, label) {
   const heading = label || "Respuesta cruda de la API (JSON técnico)";
   const safeJson = (typeof escapeHTML === "function")

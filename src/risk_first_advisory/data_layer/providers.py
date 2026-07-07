@@ -10,7 +10,6 @@ Fuentes (sin API key, salvo PPI opcional):
   - Acciones / CEDEARs ARG               → data912 (fallback yfinance .BA)
   - Bonos soberanos ARG (AL30, GD30)     → data912
   - Obligaciones Negociables (ONs)       → Rava Bursátil (PPI fallback con creds)
-  - Info en vivo de ONs                  → BYMA open data
   - Tipo de cambio ARS→USD (CCL/MEP)     → argentinadatos
 
 Las series salen en moneda nativa; la normalización a USD (para μ/Σ) la hace la
@@ -34,7 +33,6 @@ import yfinance as yf
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DATA912_BASE = "https://data912.com"
-BYMA_BASE = "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free"
 PPI_BASE = "https://clientapi.portfoliopersonal.com"
 ARGENTINADATOS_BASE = "https://api.argentinadatos.com/v1/cotizaciones/dolares"
 RAVA_BASE = "https://www.rava.com"
@@ -112,26 +110,6 @@ def data912_history(symbol: str, category: str, period: str) -> pd.Series:
     if cut is not None:
         s = s[s.index >= pd.Timestamp(cut)]
     return s[s > 0]
-
-
-_live_cache: dict[str, tuple[float, list]] = {}
-_LIVE_TTL = 120
-
-
-def data912_live(category: str) -> list[dict]:
-    """Snapshot en vivo de una categoría (metadatos/liquidez), cacheado 2 min."""
-    cached = _live_cache.get(category)
-    if cached and (time.time() - cached[0]) < _LIVE_TTL:
-        return cached[1]
-    url = f"{DATA912_BASE}/live/{category}"
-    try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_HTTP_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json() or []
-    except requests.RequestException:
-        data = []
-    _live_cache[category] = (time.time(), data)
-    return data
 
 
 # ---------------------------------------------------------------------------
@@ -352,52 +330,6 @@ def fetch_series_cached(
     except Exception:  # noqa: BLE001 — sin cache, igual devolvemos la serie
         pass
     return ps
-
-
-# ---------------------------------------------------------------------------
-# BYMA open data — snapshot de ONs
-# ---------------------------------------------------------------------------
-
-_byma_cache: dict[str, tuple[float, dict]] = {}
-_BYMA_TTL = 300
-
-
-def _byma_corp_snapshot() -> dict[str, dict]:
-    """Snapshot de ONs de BYMA, cacheado: {symbol -> record}."""
-    cached = _byma_cache.get("corp")
-    if cached and (time.time() - cached[0]) < _BYMA_TTL:
-        return cached[1]
-    try:
-        resp = requests.post(
-            f"{BYMA_BASE}/negociable-obligations",
-            headers={**_HEADERS, "Content-Type": "application/json", "Accept": "application/json"},
-            json={"excludeZeroPxAndQty": False, "T2": True, "T1": True, "T0": True},
-            timeout=_HTTP_TIMEOUT, verify=False,
-        )
-        resp.raise_for_status()
-        data = {r["symbol"]: r for r in resp.json() if r.get("symbol")}
-    except (requests.RequestException, ValueError, KeyError):
-        data = {}
-    _byma_cache["corp"] = (time.time(), data)
-    return data
-
-
-def byma_on_info(symbol: str) -> dict | None:
-    """Info en vivo de una ON desde BYMA (precio, vencimiento, volumen, moneda)."""
-    rec = _byma_corp_snapshot().get(symbol.strip().upper())
-    if not rec:
-        return None
-    last = rec.get("closingPrice") or rec.get("trade") or rec.get("previousClosingPrice")
-    return {
-        "symbol": rec.get("symbol"),
-        "last_price": last,
-        "previous_close": rec.get("previousClosingPrice"),
-        "currency": rec.get("denominationCcy", "ARS"),
-        "maturity_date": rec.get("maturityDate"),
-        "days_to_maturity": rec.get("daysToMaturity"),
-        "trade_volume": rec.get("tradeVolume"),
-        "market": rec.get("market", "BYMA"),
-    }
 
 
 # ---------------------------------------------------------------------------

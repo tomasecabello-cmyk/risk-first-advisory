@@ -472,13 +472,3 @@ class Reason:
             "context": self.context,
             "custom_note": self.custom_note,
         }
-
-
-def get_catalog_entry(code: ReasonCode) -> dict[str, Any]:
-    """Devuelve la entrada completa del catálogo para un código dado."""
-    return REASON_CODE_CATALOG[code]
-
-
-def is_catalog_complete() -> bool:
-    """Verifica que todo ReasonCode tenga entrada en el catálogo."""
-    return all(code in REASON_CODE_CATALOG for code in ReasonCode)

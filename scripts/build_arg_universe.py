@@ -20,8 +20,8 @@ El script:
   7. (--warm) precalienta el caché de LiveMarketDataProvider para que la primera
      propuesta de la demo no espere ~1.5s por instrumento.
 
-Reproducible y extensible: es la semilla del "universo dinámico" (Fase UX-3 en
-docs/UX_REDESIGN_PLAN.md). No corre en el request path; se ejecuta a mano cuando
+Reproducible y extensible: es la semilla del "universo dinámico" (ver
+docs/ROADMAP.md). No corre en el request path; se ejecuta a mano cuando
 se quiere refrescar el universo demo.
 
 Uso:
