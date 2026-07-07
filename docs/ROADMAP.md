@@ -5,21 +5,6 @@
 > limpieza 2026-07; su historia está en git). Lo cerrado no se lista: eso ya lo cuentan
 > `DESIGN_DECISIONS.md` y el log de commits.
 
-## Corto plazo — cerrar el loop con el cliente (frontend)
-
-1. **El cliente ve las opciones y el reporte final** (hoy envía su perfil y queda ciego).
-   En `client.html`: estado "esperando a tu asesor" tras enviar (con
-   `localStorage.rfaLastCaseId`), y una vista read-only del caso: reporte
-   (`GET /cases/{id}/reports`) y/u opciones elegidas por el asesor
-   (`GET /cases/{id}/portfolio-proposal` + `/portfolio-selection`), reusando
-   `idemoBuildReportPreviewHtml` / `idemoBuildPortfolioComparisonHtml`.
-   Sin auth de cliente real: es un reencuadre de demo (mismo token por detrás).
-2. **El informe del asesor alimenta el reporte al cliente**: la última nota
-   `advisor_note` (auditada, versionada) visible como "comentario del asesor" en la
-   vista del cliente.
-3. **Export PDF del reporte**: client-side, sin libs externas (`window.print()` con CSS
-   de impresión o render del markdown).
-
 ## Universo dinámico pleno (Fase 3 de producto)
 
 - Generación on-demand por request (hoy: CSV pre-generado por `scripts/build_arg_universe.py`).
@@ -55,3 +40,9 @@
 - **Cache de extracción de preferencias OpenAI** (`hash(texto)` + TTL) para no re-llamar
   con texto idéntico.
 - **Firma digital** del rationale del asesor (hoy texto libre sin identidad verificada).
+- **`next_recommended_action` queda en `review_override`** si el proposal tiene alguna
+  variante que requiere override pero el asesor seleccionó una que NO lo requiere:
+  `has_override_requirement` se computa a nivel proposal, no a nivel selection, así que
+  `completion_ratio` nunca llega a 1.0 en ese path (el smoke check lo esquiva
+  seleccionando la variante con override). Sin impacto en la vista del cliente (solo usa
+  el copy de progreso antes de la selección), pero es confuso para quien lea el summary.

@@ -6,6 +6,18 @@
   <title>Tu perfil de inversor — Risk-First Advisory</title>
   <meta name="description" content="Completá tu perfil de riesgo en unos pasos. El sistema lo analiza y tu asesor lo revisa antes de presentarte opciones." />
   <link rel="stylesheet" href="css/base.css">
+  <!-- Export PDF client-side (window.print). Scoped a esta página; no toca base.css. -->
+  <style media="print">
+    .top-nav, .site-footer, .role-hero, .client-note,
+    #client-case-banner, #client-print-btn { display: none !important; }
+    /* Con la vista del caso abierta, se imprime SOLO el caso (no el wizard). */
+    body.client-case-open .card-hero { display: none !important; }
+    body { background: #fff; }
+    #client-case-card { border: none !important; box-shadow: none !important; margin: 0 !important; }
+    #client-case-card pre {
+      max-height: none !important; overflow: visible !important; white-space: pre-wrap !important;
+    }
+  </style>
 </head>
 <body>
 
@@ -180,9 +192,16 @@
   <!-- vista read-only del caso: qué decidió el asesor + reporte final -->
   <div class="card" id="client-case-card" style="display:none;margin-top:18px;">
     <div class="card-body">
-      <div class="wizard-step-title">El estado de tu caso</div>
-      <div class="wizard-step-sub">
-        Esta vista es solo de lectura: las decisiones las toma tu asesor y quedan auditadas.
+      <div style="display:flex;align-items:flex-start;gap:12px;">
+        <div style="flex:1;">
+          <div class="wizard-step-title">El estado de tu caso</div>
+          <div class="wizard-step-sub">
+            Esta vista es solo de lectura: las decisiones las toma tu asesor y quedan auditadas.
+          </div>
+        </div>
+        <button class="btn-secondary" id="client-print-btn" onclick="clientPrintCase()"
+                title="Imprimí o guardá como PDF desde el diálogo del navegador"
+                style="white-space:nowrap;">Descargar PDF</button>
       </div>
       <div id="client-case-view"></div>
     </div>

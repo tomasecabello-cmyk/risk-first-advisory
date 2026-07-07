@@ -211,8 +211,18 @@ function clientAdvisorNoteBlock(note) {
 function clientOpenCaseView() {
   const card = document.getElementById("client-case-card");
   if (card) card.style.display = "";
+  // Con la vista abierta, imprimir/PDF muestra solo el caso (ver <style media="print">).
+  if (document.body && document.body.classList) document.body.classList.add("client-case-open");
   clientLoadCase();
   if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Export PDF client-side: los <details> cerrados no imprimen su contenido,
+// se abren antes de invocar el diálogo de impresión del navegador.
+function clientPrintCase() {
+  const view = document.getElementById("client-case-view");
+  if (view) view.querySelectorAll("details").forEach(d => { d.open = true; });
+  window.print();
 }
 
 async function clientLoadCase() {
