@@ -21,6 +21,7 @@ Política sobre score_adjustment cuando hay hard exclusion:
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -43,8 +44,6 @@ REASON_SOFT_AVOID_TAG = "ESG_SOFT_AVOID_TAG"
 
 
 # ── Enum de estado ────────────────────────────────────────────────────────
-
-from enum import Enum
 
 
 class ESGComplianceStatus(str, Enum):

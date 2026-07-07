@@ -213,20 +213,20 @@ class PortfolioCandidateSet:
                 )
 
         # Validar metadata provista (o la auto-completada).
-        for k, v in self.metadata.items():
-            if not isinstance(k, PortfolioVariant):
+        for mk, mv in self.metadata.items():
+            if not isinstance(mk, PortfolioVariant):
                 raise ValueError(
                     f"metadata keys deben ser PortfolioVariant. "
-                    f"Encontrado: {type(k).__name__}."
+                    f"Encontrado: {type(mk).__name__}."
                 )
-            if not isinstance(v, PortfolioVariantMetadata):
+            if not isinstance(mv, PortfolioVariantMetadata):
                 raise ValueError(
                     f"metadata values deben ser PortfolioVariantMetadata. "
-                    f"Encontrado: {type(v).__name__}."
+                    f"Encontrado: {type(mv).__name__}."
                 )
-            if k not in self.candidates:
+            if mk not in self.candidates:
                 raise ValueError(
-                    f"metadata refiere a variante {k!r} no presente en candidates."
+                    f"metadata refiere a variante {mk!r} no presente en candidates."
                 )
 
     # ── Accesores ──────────────────────────────────────────────────────────

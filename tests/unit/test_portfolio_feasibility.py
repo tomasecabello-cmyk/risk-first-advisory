@@ -643,7 +643,7 @@ class TestInmutabilidad:
 
         # Comparación campo a campo
         assert len(estimates) == len(estimates_snapshot)
-        for e_after, e_before in zip(estimates, estimates_snapshot):
+        for e_after, e_before in zip(estimates, estimates_snapshot, strict=True):
             assert e_after.ticker == e_before.ticker
             assert (
                 e_after.raw_expected_return_annual

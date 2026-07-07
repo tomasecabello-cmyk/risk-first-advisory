@@ -424,7 +424,7 @@ class TestLoadAchievableReturnsDefault:
 
     def test_values_are_floats_not_bool(self):
         returns = load_achievable_returns()
-        for profile, value in returns.items():
+        for value in returns.values():
             assert isinstance(value, float)
             assert not isinstance(value, bool)
 

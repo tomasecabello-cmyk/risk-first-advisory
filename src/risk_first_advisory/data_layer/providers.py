@@ -24,6 +24,7 @@ import datetime as _dt
 import os
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 import requests
@@ -336,7 +337,9 @@ def fetch_series_cached(
     key = _hashlib.sha256(f"{symbol.strip().upper()}|{source}|{period}".encode()).hexdigest()[:16]
     fpath = cdir / f"{key}.pkl"
     try:
-        if fpath.exists() and (time.time() - fpath.stat().st_mtime) < ttl:
+        # ttl <= 0 significa "no usar cache". El guard explícito evita el falso hit
+        # en Windows cuando el mtime queda un tick adelante del reloj (edad negativa).
+        if ttl > 0 and fpath.exists() and (time.time() - fpath.stat().st_mtime) < ttl:
             with open(fpath, "rb") as fh:
                 return _pickle.load(fh)
     except Exception:  # noqa: BLE001 — cache corrupto → re-fetch
@@ -402,7 +405,7 @@ def byma_on_info(symbol: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 _PPI_CLIENT = {"AuthorizedClient": "API_CLI", "ClientKey": "pp_client"}
-_ppi_token: dict[str, object] = {"token": None, "exp": 0.0}
+_ppi_token: dict[str, Any] = {"token": None, "exp": 0.0}
 
 
 def ppi_credentials_present() -> bool:

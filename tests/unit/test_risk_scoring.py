@@ -10,8 +10,8 @@ from __future__ import annotations
 from risk_first_advisory.ai_layer.risk_scoring import (
     PROFILES,
     assess_revealed_signal,
-    compute_capacity_score,
     capacity_gap_from_kyc,
+    compute_capacity_score,
     compute_risk_gap,
     compute_tolerance_score,
     explain_capacity_gap,

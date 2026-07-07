@@ -372,10 +372,10 @@ class PreferenceFilterEngine:
         if min_liq is not None:
             try:
                 liq_f = float(min_liq)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as err:
                 raise ValueError(
                     f"preferences['min_liquidity_score'] must be numeric, got {min_liq!r}."
-                )
+                ) from err
             if not 0.0 <= liq_f <= 1.0:
                 raise ValueError(
                     f"preferences['min_liquidity_score'] must be in [0.0, 1.0], "

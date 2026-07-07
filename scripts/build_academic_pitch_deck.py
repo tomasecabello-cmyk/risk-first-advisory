@@ -89,7 +89,8 @@ def add_slide(bg=BG_LIGHT):
     s = prs.slides.add_slide(BLANK)
     r = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0,
                            prs.slide_width, prs.slide_height)
-    r.fill.solid(); r.fill.fore_color.rgb = bg
+    r.fill.solid()
+    r.fill.fore_color.rgb = bg
     r.line.fill.background()
     r.shadow.inherit = False
     return s
@@ -98,9 +99,11 @@ def add_slide(bg=BG_LIGHT):
 def rect(slide, x, y, w, h, *, fill=WHITE, line=None, line_w=0.75):
     s = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
                                 Inches(x), Inches(y), Inches(w), Inches(h))
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(line_w)
+        s.line.color.rgb = line
+        s.line.width = Pt(line_w)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -111,9 +114,11 @@ def round_rect(slide, x, y, w, h, *, fill=WHITE, line=None, line_w=0.5, radius=0
     s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
                                 Inches(x), Inches(y), Inches(w), Inches(h))
     s.adjustments[0] = radius
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(line_w)
+        s.line.color.rgb = line
+        s.line.width = Pt(line_w)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -124,9 +129,11 @@ def oval(slide, x, y, d, *, fill, line=None, h=None):
     H = h if h is not None else d
     s = slide.shapes.add_shape(MSO_SHAPE.OVAL,
                                 Inches(x), Inches(y), Inches(d), Inches(H))
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(0.75)
+        s.line.color.rgb = line
+        s.line.width = Pt(0.75)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -186,7 +193,8 @@ def text(slide, x, y, w, h, body, *, size=14, color=TEXT_BODY, bold=False,
             f.italic = seg_opts.get("italic", italic)
             f.color.rgb = seg_opts.get("color", color)
             cs = seg_opts.get("charspace", charspace)
-            if cs: _set_char_spacing(r_, cs)
+            if cs:
+                _set_char_spacing(r_, cs)
     else:
         r_ = p.add_run()
         r_.text = body
@@ -196,7 +204,8 @@ def text(slide, x, y, w, h, body, *, size=14, color=TEXT_BODY, bold=False,
         f.bold   = bold
         f.italic = italic
         f.color.rgb = color
-        if charspace: _set_char_spacing(r_, charspace)
+        if charspace:
+            _set_char_spacing(r_, charspace)
     return tb
 
 
@@ -358,9 +367,11 @@ def slide_2_problema():
         ("La IA puede amplificar estos problemas",
          "Si no está supervisada y registrada, traslada los huecos a otra capa."),
     ]
-    cols = 3; rows = 2
-    pad_x = 0.85; pad_top = 2.55
-    gap_x = 0.30; gap_y = 0.30
+    cols = 3
+    pad_x = 0.85
+    pad_top = 2.55
+    gap_x = 0.30
+    gap_y = 0.30
     cw = (SW - 2 * pad_x - (cols - 1) * gap_x) / cols
     ch = 1.85
 
@@ -1072,11 +1083,11 @@ def slide_11_estado_y_limites():
         "Sin firm-level access control completo",
         "No usar con datos reales sensibles",
     ]
-    for i, l in enumerate(limits):
+    for i, limit_text in enumerate(limits):
         y_ = cy + 1.40 + i * 0.36
         oval(s, right_x + 0.45, y_ + 0.13, 0.10, fill=AMBER)
         text(s, right_x + 0.68, y_, col_w - 0.85, 0.32,
-             l, size=11.5, color=TEXT_BODY, font=FONT_BODY)
+             limit_text, size=11.5, color=TEXT_BODY, font=FONT_BODY)
 
     # Small backup note: tech credibility
     round_rect(s, 0.85, 6.95, 11.6, 0.35, fill=BG_SOFT, line=BORDER,

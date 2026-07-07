@@ -51,6 +51,17 @@ target-version = "py310"
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501"]
 
+[tool.ruff.lint.flake8-bugbear]
+# Depends() en defaults es el patron idiomatico de FastAPI, no un bug (B008).
+# require_roles es nuestro factory de dependencias RBAC (api_layer/auth.py).
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.Body",
+    "risk_first_advisory.api_layer.auth.require_roles",
+]
+
 [tool.mypy]
 python_version = "3.10"
 strict = false

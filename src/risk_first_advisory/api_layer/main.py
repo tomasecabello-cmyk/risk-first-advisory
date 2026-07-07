@@ -69,6 +69,7 @@ from risk_first_advisory.api_layer.schemas import (
     AuditEventListResponse,
     AuditEventResponse,
     AuditVerifyResponse,
+    CapacityGap,
     CaseAdvisorProfileApprovalCreateRequest,
     CaseAdvisorProfileApprovalListResponse,
     CaseAdvisorProfileApprovalResponse,
@@ -95,7 +96,6 @@ from risk_first_advisory.api_layer.schemas import (
     CaseUniverseFilterRunListResponse,
     CaseUniverseFilterRunResponse,
     CaseWorkflowProgressResponse,
-    CapacityGap,
     ClientCreateRequest,
     ClientListResponse,
     ClientResponse,
@@ -1265,11 +1265,11 @@ def advisor_profile_approval(
             approved_profile=req.approved_profile,
             db_path=DEFAULT_DB_PATH,
         )
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Advisor profile approval persistence failed.",
-        )
+        ) from err
 
     # ── 2. Construir respuesta ────────────────────────────────────────────
     return AdvisorProfileApprovalResponse(
@@ -1341,11 +1341,11 @@ def advisor_override_approval(
             related_record_id=req.related_record_id,
             db_path=DEFAULT_DB_PATH,
         )
-    except Exception:
+    except Exception as _exc:
         raise HTTPException(
             status_code=500,
             detail="Advisor override approval persistence failed.",
-        )
+        ) from _exc
 
     # ── 2. Construir respuesta ────────────────────────────────────────────
     return AdvisorOverrideApprovalResponse(
@@ -1437,11 +1437,11 @@ def advisor_portfolio_selection(
             override_approval_record_id=req.override_approval_record_id,
             db_path=DEFAULT_DB_PATH,
         )
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Advisor portfolio selection persistence failed.",
-        )
+        ) from err
 
     # ── 3. Construir respuesta ────────────────────────────────────────────
     return AdvisorPortfolioSelectionResponse(
@@ -1536,11 +1536,11 @@ def ai_profile_demo(req: AIProfileRequest) -> AIProfileResponse:
     # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
-        )
+        ) from err
 
     # ── 2. Construir payload KYC como dict (excluye campos None) ──────────
     kyc_dict = req.kyc_payload.model_dump(exclude_none=True)
@@ -1550,16 +1550,16 @@ def ai_profile_demo(req: AIProfileRequest) -> AIProfileResponse:
     # ── 3. Llamar a la IA ─────────────────────────────────────────────────
     try:
         result = ai_client.analyze_kyc(kyc_dict)
-    except ValueError:
+    except ValueError as err:
         raise HTTPException(
             status_code=502,
             detail="AI profile analysis failed. The AI returned an invalid response.",
-        )
-    except Exception:
+        ) from err
+    except Exception as _exc:
         raise HTTPException(
             status_code=502,
             detail="AI profile analysis failed due to an unexpected error.",
-        )
+        ) from _exc
 
     # ── 4. Construir respuesta ─────────────────────────────────────────────
     contradictions = [
@@ -1599,11 +1599,11 @@ def ai_profile_follow_up(req: AIProfileFollowUpRequest) -> AIProfileFollowUpResp
     # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
-        )
+        ) from err
 
     # ── 2. Construir payload para la IA ──────────────────────────────────
     followup_payload = {
@@ -1619,16 +1619,16 @@ def ai_profile_follow_up(req: AIProfileFollowUpRequest) -> AIProfileFollowUpResp
     # ── 3. Llamar a la IA ─────────────────────────────────────────────────
     try:
         result = ai_client.analyze_follow_up(followup_payload)
-    except ValueError:
+    except ValueError as err:
         raise HTTPException(
             status_code=502,
             detail="AI profile follow-up analysis failed. The AI returned an invalid response.",
-        )
-    except Exception:
+        ) from err
+    except Exception as _exc:
         raise HTTPException(
             status_code=502,
             detail="AI profile follow-up analysis failed due to an unexpected error.",
-        )
+        ) from _exc
 
     # ── 4. Construir respuesta ─────────────────────────────────────────────
     remaining_contradictions = [
@@ -1672,14 +1672,14 @@ def ai_investment_preferences(
     # ── 1. Crear cliente (valida OPENAI_API_KEY en el entorno) ────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail=(
                 "OPENAI_API_KEY is not configured. "
                 "Set the environment variable and retry."
             ),
-        )
+        ) from err
 
     # ── 2. Construir payload para la IA ──────────────────────────────────
     preferences_payload: dict = {
@@ -1711,7 +1711,7 @@ def ai_investment_preferences(
                 "AI investment preferences extraction failed. "
                 "The AI returned an invalid response. Check backend logs."
             ),
-        )
+        ) from exc
     except Exception as exc:
         _persist_ai_request_log(
             endpoint=_AI_LOG_ENDPOINT_INVESTMENT_PREFS,
@@ -1726,7 +1726,7 @@ def ai_investment_preferences(
         raise HTTPException(
             status_code=502,
             detail="AI investment preferences extraction failed due to an unexpected error.",
-        )
+        ) from exc
 
     _persist_ai_request_log(
         endpoint=_AI_LOG_ENDPOINT_INVESTMENT_PREFS,
@@ -1805,11 +1805,11 @@ def ai_filter_universe_demo(
     # ── 1. Crear cliente IA ───────────────────────────────────────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
-        )
+        ) from err
 
     # ── 2. Extraer preferencias con IA + AIRequestLog automático ─────────
     preferences_payload: dict = {
@@ -1836,7 +1836,7 @@ def ai_filter_universe_demo(
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed. The AI returned an invalid response.",
-        )
+        ) from exc
     except Exception as exc:
         _persist_ai_request_log(
             endpoint=_AI_LOG_ENDPOINT_FILTER_UNIVERSE,
@@ -1851,7 +1851,7 @@ def ai_filter_universe_demo(
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed due to an unexpected error.",
-        )
+        ) from exc
 
     _persist_ai_request_log(
         endpoint=_AI_LOG_ENDPOINT_FILTER_UNIVERSE,
@@ -1873,11 +1873,11 @@ def ai_filter_universe_demo(
         )
     try:
         universe = CSVInstrumentUniverseProvider(csv_path).load()
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Instrument universe fixture not found.",
-        )
+        ) from err
 
     # ── 4. Construir dict de filtros (solo claves reconocidas por el engine) ──
     filter_prefs: dict = {
@@ -1888,7 +1888,7 @@ def ai_filter_universe_demo(
     try:
         filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # ── 6. Serializar preferencias para la respuesta ──────────────────────
     preferences_resp = AIInvestmentPreferencesResponse(
@@ -1979,11 +1979,11 @@ def universe_filter_demo(req: UniverseFilterRequest) -> UniverseFilterResponse:
     # ── 2. Cargar universo ────────────────────────────────────────────────
     try:
         universe = CSVInstrumentUniverseProvider(csv_path).load()
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Instrument universe fixture not found.",
-        )
+        ) from err
 
     # ── 3. Construir dict de preferencias — solo claves con valor activo ──
     prefs: dict = req.model_dump(exclude_none=True)
@@ -1995,7 +1995,7 @@ def universe_filter_demo(req: UniverseFilterRequest) -> UniverseFilterResponse:
         raise HTTPException(
             status_code=422,
             detail=str(exc),
-        )
+        ) from exc
 
     # ── 5. Serializar respuesta ───────────────────────────────────────────
     eligible_out = [
@@ -2084,11 +2084,11 @@ def ai_filtered_portfolio_demo(
     # ── 2. Crear cliente IA ───────────────────────────────────────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
-        )
+        ) from err
 
     # ── 3. Extraer preferencias con IA + AIRequestLog automático ─────────
     preferences_payload: dict = {
@@ -2115,7 +2115,7 @@ def ai_filtered_portfolio_demo(
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed. The AI returned an invalid response.",
-        )
+        ) from exc
     except Exception as exc:
         _persist_ai_request_log(
             endpoint=_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO,
@@ -2130,7 +2130,7 @@ def ai_filtered_portfolio_demo(
         raise HTTPException(
             status_code=502,
             detail="AI investment preference extraction failed due to an unexpected error.",
-        )
+        ) from exc
 
     _persist_ai_request_log(
         endpoint=_AI_LOG_ENDPOINT_FILTERED_PORTFOLIO,
@@ -2152,11 +2152,11 @@ def ai_filtered_portfolio_demo(
         )
     try:
         universe = CSVInstrumentUniverseProvider(csv_path).load()
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Instrument universe fixture not found.",
-        )
+        ) from err
 
     # ── 5. Aplicar filtro ─────────────────────────────────────────────────
     filter_prefs: dict = {
@@ -2165,7 +2165,7 @@ def ai_filtered_portfolio_demo(
     try:
         filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # ── 6. Serializar preferencias ────────────────────────────────────────
     preferences_resp = AIInvestmentPreferencesResponse(
@@ -2270,11 +2270,11 @@ def ai_filtered_portfolio_demo(
                 req.natural_language_preferences
             )
             report_md = AIFilteredPortfolioReportGenerator().generate(report_payload)
-        except Exception:
+        except Exception as err:
             raise HTTPException(
                 status_code=500,
                 detail="AI filtered portfolio report generation failed.",
-            )
+            ) from err
         response.report_markdown = report_md
 
         # ── Persistir en SQLite (payload + report) ─────────────────────────
@@ -2291,11 +2291,11 @@ def ai_filtered_portfolio_demo(
                 candidate_count=response.candidate_count,
                 db_path=DEFAULT_DB_PATH,
             )
-        except Exception:
+        except Exception as err:
             raise HTTPException(
                 status_code=500,
                 detail="AI filtered portfolio persistence failed.",
-            )
+            ) from err
         response.record_id = record_id
         response.report_record_id = report_record_id
 
@@ -2512,10 +2512,10 @@ def get_workflow(record_id: str) -> StoredRecordResponse:
         with SQLitePersistenceStore(db_path) as store:
             store.init_schema()
             record = SQLiteWorkflowRunRepository(store).get_workflow_result(record_id)
-    except RecordNotFoundError:
-        raise HTTPException(status_code=404, detail="Record not found")
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RecordNotFoundError as err:
+        raise HTTPException(status_code=404, detail="Record not found") from err
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     return _stored_record_to_response(record)
 
 
@@ -2526,10 +2526,10 @@ def get_report(record_id: str) -> StoredRecordResponse:
         with SQLitePersistenceStore(db_path) as store:
             store.init_schema()
             record = SQLiteReportRepository(store).get_report(record_id)
-    except RecordNotFoundError:
-        raise HTTPException(status_code=404, detail="Record not found")
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RecordNotFoundError as err:
+        raise HTTPException(status_code=404, detail="Record not found") from err
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     return _stored_record_to_response(record)
 
 
@@ -2540,10 +2540,10 @@ def get_audit(record_id: str) -> StoredRecordResponse:
         with SQLitePersistenceStore(db_path) as store:
             store.init_schema()
             record = SQLiteAuditRepository(store).get_audit_trail(record_id)
-    except RecordNotFoundError:
-        raise HTTPException(status_code=404, detail="Record not found")
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RecordNotFoundError as err:
+        raise HTTPException(status_code=404, detail="Record not found") from err
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     return _stored_record_to_response(record)
 
 
@@ -2563,8 +2563,8 @@ def list_workflows(
             records = SQLiteWorkflowRunRepository(store).list_workflow_results(
                 client_id=client_id
             )
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     items = [_stored_record_to_response(r) for r in records]
     return RecordListResponse(records=items, count=len(items))
 
@@ -2578,8 +2578,8 @@ def list_reports(
         with SQLitePersistenceStore(db_path) as store:
             store.init_schema()
             records = SQLiteReportRepository(store).list_reports(client_id=client_id)
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     items = [_stored_record_to_response(r) for r in records]
     return RecordListResponse(records=items, count=len(items))
 
@@ -2595,8 +2595,8 @@ def list_audit(
             records = SQLiteAuditRepository(store).list_audit_trails(
                 client_id=client_id
             )
-    except RepositoryError:
-        raise HTTPException(status_code=500, detail="Persistence error")
+    except RepositoryError as _exc:
+        raise HTTPException(status_code=500, detail="Persistence error") from _exc
     items = [_stored_record_to_response(r) for r in records]
     return RecordListResponse(records=items, count=len(items))
 
@@ -3063,10 +3063,10 @@ def patch_case_status(
         repo = SQLiteAdvisoryCaseRepository(store)
         try:
             data = repo.update_status(case_id, req.status)
-        except EntityNotFoundError:
+        except EntityNotFoundError as err:
             raise HTTPException(
                 status_code=404, detail=f"Case not found: {case_id!r}"
-            )
+            ) from err
         except CaseTransitionError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AdvisoryCaseResponse(**data)
@@ -3593,14 +3593,14 @@ def create_case_profile_analysis(
     # ── 2. Llamar a OpenAI (fuera del store; usa su propia conexión) ────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail=(
                 "OPENAI_API_KEY is not configured. "
                 "Set the environment variable and retry."
             ),
-        )
+        ) from err
 
     model_name = _resolve_ai_model_name(ai_client)
     endpoint_str = f"/cases/{case_id}/ai/profile-analysis"
@@ -3636,7 +3636,7 @@ def create_case_profile_analysis(
                 "AI profile analysis failed. "
                 "The AI returned an invalid response."
             ),
-        )
+        ) from exc
     except Exception as exc:
         _persist_ai_request_log(
             endpoint=endpoint_str,
@@ -3653,7 +3653,7 @@ def create_case_profile_analysis(
         raise HTTPException(
             status_code=502,
             detail="AI profile analysis failed due to an unexpected error.",
-        )
+        ) from exc
 
     latency_ms = int((time.perf_counter() - _start) * 1000)
 
@@ -3885,17 +3885,18 @@ def create_case_profile_follow_up(
     # ── 2. Construir payload y llamar a la IA (fuera del store) ──────────────
     try:
         ai_client = _get_openai_profile_client()
-    except (ValueError, ImportError):
+    except (ValueError, ImportError) as err:
         raise HTTPException(
             status_code=400,
             detail="OPENAI_API_KEY is not configured. Set the environment variable and retry.",
-        )
+        ) from err
 
     model_name = _resolve_ai_model_name(ai_client)
     endpoint_str = f"/cases/{case_id}/ai/profile-follow-up"
 
     kyc_payload: dict[str, Any] = dict(sub_data["payload"])
-    prev_result = prev.get("result") if isinstance(prev.get("result"), dict) else {}
+    prev_result_raw = prev.get("result")
+    prev_result: dict[str, Any] = prev_result_raw if isinstance(prev_result_raw, dict) else {}
     previous_analysis = {
         "preliminary_profile": prev.get("preliminary_profile"),
         "contradictions": prev_result.get("contradictions", []),
@@ -3932,7 +3933,7 @@ def create_case_profile_follow_up(
         raise HTTPException(
             status_code=502,
             detail="AI profile follow-up failed. The AI returned an invalid response.",
-        )
+        ) from exc
 
     latency_ms = int((time.perf_counter() - _start) * 1000)
 
@@ -4440,14 +4441,14 @@ def create_case_investment_preference(
         # (el schema garantiza que al menos uno de los dos viene)
         try:
             ai_client = _get_openai_profile_client()
-        except (ValueError, ImportError):
+        except (ValueError, ImportError) as err:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "OPENAI_API_KEY is not configured. "
                     "Set the environment variable and retry."
                 ),
-            )
+            ) from err
 
         model_name = _resolve_ai_model_name(ai_client)
         endpoint_str = f"/cases/{case_id}/investment-preferences"
@@ -4479,7 +4480,7 @@ def create_case_investment_preference(
                     "AI investment preferences extraction failed. "
                     "The AI returned an invalid response."
                 ),
-            )
+            ) from exc
         except Exception as exc:
             _persist_ai_request_log(
                 endpoint=endpoint_str,
@@ -4496,7 +4497,7 @@ def create_case_investment_preference(
             raise HTTPException(
                 status_code=502,
                 detail="AI investment preferences extraction failed due to an unexpected error.",
-            )
+            ) from exc
 
         latency_ms = int((time.perf_counter() - _start) * 1000)
         ai_request_log_id = _persist_ai_request_log(
@@ -4712,11 +4713,11 @@ def create_case_universe_filter_run(
         )
     try:
         universe = CSVInstrumentUniverseProvider(csv_path).load()
-    except Exception:
+    except Exception as err:
         raise HTTPException(
             status_code=500,
             detail="Instrument universe fixture not found.",
-        )
+        ) from err
 
     total_count = len(universe.instruments)
 
@@ -4728,7 +4729,7 @@ def create_case_universe_filter_run(
     try:
         filter_result = PreferenceFilterEngine().apply(universe, filter_prefs)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     eligible_serialized = [
         _serialize_instrument_for_filter_run(inst)
@@ -4904,7 +4905,7 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
         if not ticker:
             continue
         itype = getattr(inst, "instrument_type", None)
-        itype_str = itype.value if hasattr(itype, "value") else str(itype or "")
+        itype_str = str(getattr(itype, "value", None) or itype or "")
         source_map[ticker] = instrument_type_to_source(
             itype_str, getattr(inst, "country", "") or ""
         )
@@ -4920,7 +4921,7 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
     for inst in instruments:
         tk = getattr(inst, "ticker", None)
         ac = getattr(inst, "asset_class", None)
-        ac_str = ac.value if hasattr(ac, "value") else str(ac or "")
+        ac_str = str(getattr(ac, "value", None) or ac or "")
         if tk and ac_str.upper() == "FIXED_INCOME":
             declared_class[tk] = "fixed_income"
 
@@ -4936,7 +4937,7 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
     max_workers = min(16, len(tickers)) or 1
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         live_snaps = list(pool.map(provider.get_snapshot, tickers))
-    for ticker, live in zip(tickers, live_snaps):
+    for ticker, live in zip(tickers, live_snaps, strict=True):
         if live is not None:
             forced = declared_class.get(ticker)
             if forced and getattr(live, "asset_class", None) != forced:
@@ -5691,7 +5692,7 @@ def create_case_override_approval(
 
         # ── 4. candidate_variant debe existir + requerir override ─────────
         candidates_by_variant: dict[str, dict[str, Any]] = {
-            c.get("variant"): c
+            c["variant"]: c
             for c in proposal_data["candidates"]
             if isinstance(c, dict) and "variant" in c
         }
@@ -5899,7 +5900,7 @@ def create_case_portfolio_selection(
 
         # ── 3. resolver candidate ─────────────────────────────────────────
         candidates_by_variant: dict[str, dict[str, Any]] = {
-            c.get("variant"): c
+            c["variant"]: c
             for c in proposal_data["candidates"]
             if isinstance(c, dict) and "variant" in c
         }

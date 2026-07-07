@@ -158,8 +158,8 @@ class CovarianceMatrix:
     def _index(self, ticker: str) -> int:
         try:
             return self.tickers.index(ticker)
-        except ValueError:
-            raise KeyError(f"Ticker no encontrado en CovarianceMatrix: {ticker!r}.")
+        except ValueError as err:
+            raise KeyError(f"Ticker no encontrado en CovarianceMatrix: {ticker!r}.") from err
 
     def get_covariance(self, ticker_a: str, ticker_b: str) -> float:
         i = self._index(ticker_a)

@@ -77,7 +77,8 @@ def add_slide(bg=BG_LIGHT):
     s = prs.slides.add_slide(BLANK)
     r = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0,
                            prs.slide_width, prs.slide_height)
-    r.fill.solid(); r.fill.fore_color.rgb = bg
+    r.fill.solid()
+    r.fill.fore_color.rgb = bg
     r.line.fill.background()
     r.shadow.inherit = False
     return s
@@ -86,9 +87,11 @@ def add_slide(bg=BG_LIGHT):
 def rect(slide, x, y, w, h, *, fill=WHITE, line=None, line_w=0.75):
     s = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
                                 Inches(x), Inches(y), Inches(w), Inches(h))
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(line_w)
+        s.line.color.rgb = line
+        s.line.width = Pt(line_w)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -99,9 +102,11 @@ def round_rect(slide, x, y, w, h, *, fill=WHITE, line=None, line_w=0.5, radius=0
     s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
                                 Inches(x), Inches(y), Inches(w), Inches(h))
     s.adjustments[0] = radius
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(line_w)
+        s.line.color.rgb = line
+        s.line.width = Pt(line_w)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -111,9 +116,11 @@ def round_rect(slide, x, y, w, h, *, fill=WHITE, line=None, line_w=0.5, radius=0
 def oval(slide, x, y, d, *, fill, line=None):
     s = slide.shapes.add_shape(MSO_SHAPE.OVAL,
                                 Inches(x), Inches(y), Inches(d), Inches(d))
-    s.fill.solid(); s.fill.fore_color.rgb = fill
+    s.fill.solid()
+    s.fill.fore_color.rgb = fill
     if line is not None:
-        s.line.color.rgb = line; s.line.width = Pt(0.75)
+        s.line.color.rgb = line
+        s.line.width = Pt(0.75)
     else:
         s.line.fill.background()
     s.shadow.inherit = False
@@ -253,7 +260,7 @@ def slide_1_portada():
     s = add_slide(bg=NAVY_DARK)
 
     # Subtle grid-like decoration: a few thin cyan vertical lines on the right side
-    for i, x in enumerate([10.6, 11.4, 12.2]):
+    for x in [10.6, 11.4, 12.2]:
         hline(s, x, 0.0, x, SH, color=NAVY_700, weight=0.5)
 
     # Accent dot under brand mark (top-left)
@@ -474,15 +481,6 @@ def slide_4_flujo():
     text(s, pad_x + 0.30, strip_y, 2.8, strip_h,
          "¿Quién actúa?", size=11, color=TEXT_MUTED, bold=True,
          valign="middle", charspace=120)
-    actor_labels = [
-        ("ASESOR",   NAVY_900,  3.50),
-        ("IA",       CYAN_500,  5.20),
-        ("ASESOR",   EMERALD,   6.40),
-        ("SISTEMA",  AMBER,     7.70),
-        ("ASESOR",   EMERALD,   9.70),
-        ("ASESOR",   EMERALD,  10.65),
-        ("COMPLIANCE", VIOLET, 11.80),
-    ]
     # Simplified: just say "AI / Advisor / System / Compliance" markers under groups
     # Using a single explanation line
     text(s, pad_x, strip_y + 0.45, avail, 0.32,
@@ -611,7 +609,6 @@ def slide_6_demo():
          "Cada llamada a OpenAI guardada con el texto libre y el client_id redactados por el backend."),
     ]
     cols = 3
-    rows = 2
     pad_x = 0.85
     pad_top = 2.55
     gap = 0.25

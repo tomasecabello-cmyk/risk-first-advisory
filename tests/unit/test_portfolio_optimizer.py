@@ -100,6 +100,7 @@ def _build_input(
         for (t, ac, v), ret in zip(
             tickers_assets,
             returns or [0.07] * len(tickers_assets),
+            strict=False,
         )
     ]
     cm = _build_covariance(tickers_assets)

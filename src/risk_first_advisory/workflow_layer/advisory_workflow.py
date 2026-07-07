@@ -470,11 +470,11 @@ class AdvisoryWorkflowCoordinator:
             )
 
         # ── I. Return estimates ───────────────────────────────────────
-        snapshots = [
+        raw_snapshots = [
             market_data_provider.get_snapshot(t) for t in final_optimizer_tickers
         ]
         # Filtramos None defensivamente (no debería haber: el filter ya validó).
-        snapshots = [s for s in snapshots if s is not None]
+        snapshots = [s for s in raw_snapshots if s is not None]
 
         return_estimates = self._return_estimator.estimate_many(
             snapshots=snapshots,

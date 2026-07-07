@@ -617,7 +617,7 @@ class TestRobustness:
         # El pipe en el mensaje debe escaparse
         assert "A \\| B \\| C" in result or "A" in result
         # No debe producir celdas de tabla rotas (columnas extra)
-        lines_with_result = [l for l in result.splitlines() if "Resultado" in l]
+        lines_with_result = [ln for ln in result.splitlines() if "Resultado" in ln]
         for line in lines_with_result:
             # La fila de tabla tiene exactamente los pipes de columna
             assert line.startswith("|")

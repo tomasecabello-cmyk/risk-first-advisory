@@ -1,9 +1,3 @@
-"""Capa de optimización de portfolios.
-
-En M1 contiene PortfolioOptimizer con objetivos MIN_VARIANCE, MAX_RETURN y
-MAX_UTILITY. En sprints posteriores se agregará PortfolioGenerationCoordinator
-para generar múltiples carteras candidatas.
-"""
 """Capa C — portfolios.
 
 Contiene optimizador, coordinador de generación y compuerta de factibilidad

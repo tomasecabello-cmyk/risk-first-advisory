@@ -106,7 +106,7 @@ def _build_inputs(
     engine = CovarianceEngine()
     snaps = [_snap(t, ac, v) for t, ac, v in assets]
     cm = engine.build(snaps)
-    estimates = [_estimate(t, r) for (t, _, _), r in zip(assets, returns)]
+    estimates = [_estimate(t, r) for (t, _, _), r in zip(assets, returns, strict=False)]
     rb = _risk_budget(
         max_single_asset=max_single_asset,
         max_volatility=max_volatility,
