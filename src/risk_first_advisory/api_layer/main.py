@@ -4926,8 +4926,17 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
 
     provider = LiveMarketDataProvider(source_map, period="3y")
     by_ticker = {s.ticker: s for s in adapter_snapshots}
-    for ticker in source_map:
-        live = provider.get_snapshot(ticker)
+
+    # Fetch en PARALELO: bajar el histórico es I/O puro (red data912/yfinance +
+    # cache en disco POR-ticker, sin colisión entre archivos). Secuencial, ~100
+    # instrumentos × ~1.5s = minutos; con un pool de threads baja a ~10s en frío
+    # y es instantáneo con el cache tibio (fetch_series_cached, TTL 24h).
+    from concurrent.futures import ThreadPoolExecutor
+    tickers = list(source_map)
+    max_workers = min(16, len(tickers)) or 1
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        live_snaps = list(pool.map(provider.get_snapshot, tickers))
+    for ticker, live in zip(tickers, live_snaps):
         if live is not None:
             forced = declared_class.get(ticker)
             if forced and getattr(live, "asset_class", None) != forced:
