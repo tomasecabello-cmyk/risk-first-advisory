@@ -1,27 +1,40 @@
-# Handoff — próxima sesión (estado al 2026-07-07)
+# Handoff — próxima sesión (estado al 2026-07-07, tarde)
 
 ## Qué pasó en la última sesión
 
-**Limpieza total del repo, completa (5 etapas, commits "Limpieza N/5").**
+**Loop con el cliente cerrado** — los 3 ítems de corto plazo del ROADMAP,
+en 3 commits ("Loop cliente 1/3".."3/3") + un refresh del universo:
 
-- `ruff` y `mypy` en **cero** y ahora son **gate obligatorio** (ver CLAUDE.md).
-  B008 de FastAPI allowlisteado por config (`extend-immutable-calls`).
-- Docs consolidadas: se borraron `TODO_DESIGN_NOTES` (184 KB de historia),
-  `UX_REDESIGN_PLAN`, `DEMO_SCRIPT` y el handoff viejo. **El único backlog vivo es
-  `docs/ROADMAP.md`** — los pendientes van ahí, no en TODOs nuevos.
-- `README.md` y `frontend/README.md` reescritos de cero (cortos y al día).
-- INVARIANTS (I-011), DD-010, COMPLIANCE_NOTES y ARCHITECTURE sincronizados con lo
-  implementado.
-- Código muerto fuera: bloque BYMA + `data912_live` en `providers.py`, helpers sin
-  uso en `reason_codes.py`, `.pptx` generados destrackeados, worktree/branch viejos.
-- Fix real de paso: `fetch_series_cached` con `ttl<=0` ya no puede dar cache hit
-  espurio (flake de mtime en Windows).
+- `client.html` ya no deja ciego al cliente: estado "esperando a tu asesor"
+  tras enviar, banner al volver con un caso en curso (`localStorage.rfaLastCaseId`),
+  y vista read-only del caso hidratada con **una** llamada a `GET /cases/{id}/summary`
+  (cartera elegida, variantes consideradas en `<details>`, reporte final).
+- Los builders `idemo*`/`cw*` se reusaron por carga SIN tocarlos; los `<button>`
+  de acción del asesor que traen se remueven del DOM tras el render (I-001 intacto).
+- La última `advisor_note` (AuditEvent) aparece como "Comentario de tu asesor".
+- Export PDF client-side: botón "Descargar PDF" → `window.print()` con
+  `<style media="print">` inline en `client.html` (con la vista abierta se
+  imprime solo el caso; los `<details>` se abren antes de imprimir).
+- Sigue sin auth de cliente real: reencuadre de demo, mismo token por detrás.
+- Universo refrescado (`--warm` del día) commiteado como fixture.
+
+Verificación usada (sirve de plantilla): harness Node en scratchpad con stubs de
+DOM/fetch + JSONs **reales** de `/summary` y `/audit` capturados de un flujo
+completo contra el server vivo (6 escenarios, incluye strip de botones y print).
 
 ## Próximo paso recomendado
 
-**Cerrar el loop con el cliente** — ítem 1 de `docs/ROADMAP.md` (el cliente ve las
-opciones que el asesor comparte y el reporte final en `client.html`). Después: nota
-del asesor en el reporte del cliente (ítem 2) y export PDF (ítem 3).
+Elegir del ROADMAP (único backlog):
+
+1. **Chico, backend**: el quirk anotado en deuda técnica —
+   `next_recommended_action` queda clavado en `review_override` (y
+   `completion_ratio` < 1.0) si el asesor selecciona una variante sin override
+   cuando el proposal contiene una que sí lo requiere. Decidir si
+   `has_override_requirement` debe computarse contra la **selección** y ajustar
+   summary + smoke check + tests.
+2. **Grande, Fase 3**: universo dinámico pleno — el candidato más jugoso es
+   **correlaciones reales** (`CovarianceEngine` hoy usa correlaciones mock por
+   asset_class).
 
 ## Cómo correr la demo
 
@@ -32,11 +45,19 @@ python -m uvicorn risk_first_advisory.api_layer.main:app --port 8000
 python -m http.server 5500 -d frontend          # otra terminal → http://127.0.0.1:5500
 ```
 
+Para ver el loop completo del cliente: enviar perfil en `client.html`, completar
+el flujo como asesor en `advisor.html` (incluida la nota del informe), y volver a
+`client.html` → "Ver el estado de mi caso".
+
 ## Convenciones que muerden (el resto está en CLAUDE.md)
 
-- Gates antes de commitear Python: `pytest -q` + smoke check + `ruff` + `mypy` (0/0).
+- Gates antes de commitear Python: `pytest -q` (~2537) + smoke check + `ruff` +
+  `mypy` (0/0). Frontend: `node --check` + curl 200 + harness Node.
 - Commits en español, mensaje vía archivo (`git commit -F <archivo>` en scratchpad).
 - Los builders `idemo*` / `cw*` del frontend son compartidos: reusar por carga, no
   duplicar ni tocar.
-- Verificar frontend con el patrón Node (stubs + respuestas reales por curl); el
-  browser headless muere entre llamadas en este sandbox Windows.
+- El browser headless muere entre llamadas en este sandbox Windows: verificar
+  frontend con el patrón Node (stubs + respuestas reales por curl).
+- Los pendientes nuevos van a `docs/ROADMAP.md`, no a TODOs nuevos.
+- `GET /cases/{id}/audit/verify` requiere rol compliance/admin —
+  `dev-advisor-token` da 403 (esperado, no es un bug).
