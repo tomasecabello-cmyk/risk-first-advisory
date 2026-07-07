@@ -108,7 +108,10 @@ function clientSent(caseId) {
     `<div class="msg msg-success" style="margin-bottom:12px;">` +
       `<strong>¡Perfil enviado!</strong> Lo registramos como tu caso ` +
       `<code>${escapeHTML(caseId)}</code>. Abajo tenés tu primera lectura de riesgo — ` +
-      `tu asesor la va a revisar antes de presentarte opciones.` +
+      `ahora quedás <strong>esperando a tu asesor</strong>: él la revisa antes de presentarte opciones.` +
+      `<div style="margin-top:10px;">` +
+        `<button class="btn-secondary" onclick="clientOpenCaseView()">Ver el estado de mi caso →</button>` +
+      `</div>` +
     `</div>`
   );
 }
@@ -143,7 +146,115 @@ function clientError(msg) {
   return `<div class="msg msg-error">${msg}</div>`;
 }
 
-// init del wizard
+// ── Vista read-only del caso ────────────────────────────────────────────────
+// El cliente ve QUÉ decidió su asesor (cartera elegida, variantes consideradas,
+// reporte final) sin poder accionar nada: los builders idemo* se reusan por
+// carga y los <button> que traen (acciones del asesor) se remueven del DOM.
+
+function clientCaseId() {
+  try { return localStorage.getItem("rfaLastCaseId") || null; } catch (e) { return null; }
+}
+
+// next_recommended_action del backend → copy encuadrado al cliente.
+const CLIENT_WAITING_COPY = {
+  submit_kyc:                    "Todavía no recibimos tu perfil completo. Completá el formulario de arriba.",
+  run_ai_profile_analysis:       "Tu perfil quedó registrado y está en cola para la primera lectura de riesgo.",
+  approve_profile:               "Tu asesor está revisando tu perfil de riesgo.",
+  record_investment_preferences: "Tu asesor está relevando tus preferencias de inversión.",
+  run_universe_filter:           "Tu asesor está definiendo el universo de instrumentos apto para tu perfil.",
+  generate_portfolio_proposal:   "Tu asesor está preparando opciones de cartera alineadas con tu perfil.",
+  review_override:               "Tu asesor está evaluando las opciones de cartera (una requiere su firma extra).",
+  select_portfolio:              "Tu asesor está eligiendo entre las opciones de cartera generadas.",
+  generate_report:               "Tu asesor ya eligió una cartera y está preparando tu reporte.",
+  ready_for_review:              "Tu caso está completo: cartera elegida y reporte generado.",
+  closed:                        "Tu caso está cerrado. Hablá con tu asesor si querés retomarlo.",
+};
+
+function clientWaitingBlock(progress) {
+  const action = (progress && progress.next_recommended_action) || "";
+  const copy = CLIENT_WAITING_COPY[action] || "Tu asesor está trabajando en tu caso.";
+  const ratio = (progress && typeof progress.completion_ratio === "number")
+    ? Math.round(progress.completion_ratio * 100) : null;
+  const pct = ratio === null ? "" :
+    `<div style="font-size:12px;opacity:.75;margin-top:6px;">Avance del caso: <strong>${ratio}%</strong></div>`;
+  return (
+    `<div class="msg msg-info" style="margin-top:12px;">` +
+      `<strong>Esperando a tu asesor.</strong> ${escapeHTML(copy)}${pct}` +
+      `<div style="font-size:12px;opacity:.75;margin-top:6px;">Ninguna cartera se genera ni se elige sin la firma de tu asesor.</div>` +
+    `</div>`
+  );
+}
+
+function clientOpenCaseView() {
+  const card = document.getElementById("client-case-card");
+  if (card) card.style.display = "";
+  clientLoadCase();
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function clientLoadCase() {
+  const view = document.getElementById("client-case-view");
+  if (!view) return;
+  const caseId = clientCaseId();
+  if (!caseId) {
+    view.innerHTML = clientError(
+      "No encontramos un caso tuyo en este navegador. Completá y enviá tu perfil primero.");
+    return;
+  }
+  view.innerHTML = `<div style="opacity:.7;font-size:13px;"><span class="spinner"></span>Consultando tu caso…</div>`;
+
+  const res = await idemoApi("GET", `/cases/${encodeURIComponent(caseId)}/summary`);
+  if (!res.ok) {
+    view.innerHTML = clientError(
+      res.status === 404
+        ? "Tu caso ya no está disponible en esta demo (la base local pudo haberse reiniciado)."
+        : "No pudimos consultar tu caso. ¿Está el backend corriendo? Probá de nuevo.");
+    return;
+  }
+
+  const s = res.json || {};
+  const sel = s.current_portfolio_selection || null;
+  const prop = s.current_portfolio_proposal || null;
+  const rep = s.current_report || null;
+
+  let html =
+    `<div style="font-size:12px;opacity:.7;margin-top:4px;">Caso <code>${escapeHTML(caseId)}</code></div>`;
+
+  if (!sel) {
+    html += clientWaitingBlock(s.progress);
+  } else {
+    html += `<div class="section-label" style="margin:14px 0 4px;">La cartera que eligió tu asesor</div>`;
+    if (typeof idemoBuildSelectedPortfolioHtml === "function") {
+      html += idemoBuildSelectedPortfolioHtml(sel);
+    }
+    const candidates = (prop && Array.isArray(prop.candidates)) ? prop.candidates : [];
+    if (candidates.length && typeof idemoBuildPortfolioComparisonHtml === "function") {
+      html +=
+        `<details style="margin-top:12px;">` +
+          `<summary style="cursor:pointer;font-size:12px;font-weight:600;">Las variantes que consideró tu asesor</summary>` +
+          idemoBuildPortfolioComparisonHtml(candidates) +
+        `</details>`;
+    }
+  }
+
+  if (rep) {
+    html += `<div class="section-label" style="margin:16px 0 4px;">Tu reporte</div>`;
+    if (typeof idemoBuildReportPreviewHtml === "function") {
+      html += idemoBuildReportPreviewHtml(rep);
+    }
+  } else if (sel) {
+    html += `<div style="font-size:12px;opacity:.75;margin-top:12px;">El reporte final todavía no fue generado por tu asesor.</div>`;
+  }
+
+  view.innerHTML = html;
+  // Read-only: los builders reusados traen botones de acción del asesor
+  // ("Seleccionar", etc.) — acá el cliente no decide nada, se remueven.
+  view.querySelectorAll("button").forEach(b => b.remove());
+}
+
+// init del wizard + banner de caso en curso
 document.addEventListener("DOMContentLoaded", function () {
   if (document.getElementById("client-wizard-progress")) clientWizardShow(1);
+  const banner = document.getElementById("client-case-banner");
+  if (banner && clientCaseId()) banner.style.display = "flex";
 });
