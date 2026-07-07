@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compliance — Risk-First Advisory</title>
+  <meta name="description" content="Supervisión de solo lectura: cadena de auditoría SHA-256, verificación de trazabilidad y logs de IA con PII redactada." />
+  <link rel="stylesheet" href="css/base.css">
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-brand" style="text-decoration:none;"><span class="nav-brand-dot"></span>Risk-First Advisory</a>
+    <span class="nav-spacer"></span>
+    <a href="client.html" class="nav-item is-client">Cliente</a>
+    <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
+    <a href="compliance.html" class="nav-item is-compliance is-active">Compliance</a>
+    <a href="methodology.html" class="nav-item">Metodología</a>
+    <a href="advanced.html" class="nav-item nav-item-muted">Modo dev &rarr;</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <div class="role-hero is-compliance">
+    <div class="role-hero-eyebrow">🛡️ Vista de compliance</div>
+    <div class="role-hero-title">Trazabilidad y supervisión — solo lectura</div>
+    <div class="role-hero-sub">
+      Verificás que ninguna decisión del caso fue alterada: la cadena de auditoría SHA-256, el
+      resultado de la verificación, y los logs de IA con la PII redactada por el backend.
+      Compliance no escribe nada — solo supervisa. Estas vistas requieren el rol
+      <code>compliance</code> (el asesor no puede verlas).
+    </div>
+  </div>
+
+  <!-- token de sesión (compliance) -->
+  <div class="client-note">
+    <strong>Sesión de compliance:</strong> esta vista usa el token
+    <input type="text" id="cd-token" value="dev-compliance-token"
+           style="width:220px;display:inline-block;margin:0 6px;padding:4px 8px;vertical-align:middle;" />
+    (rol <code>compliance</code>). La verificación de hash-chain y los logs de IA están gatilladas a
+    este rol; con el token de asesor darían 403.
+  </div>
+
+  <!-- selector de caso -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Elegí un caso</h2>
+      <div class="pill-cluster">
+        <button class="btn-secondary btn-sm" onclick="complianceLoadBandeja()">Actualizar</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="form-grid cols-2" style="margin-bottom:12px;">
+        <div class="field">
+          <label>Case ID</label>
+          <input type="text" id="cw-case-id" placeholder="case_000123" />
+        </div>
+        <div class="field" style="align-self:end;">
+          <button class="btn-primary" onclick="complianceRunAll()">Cargar snapshot de compliance</button>
+        </div>
+      </div>
+      <div class="bandeja" id="compliance-bandeja">
+        <div style="opacity:.7;font-size:13px;">Cargando casos…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. snapshot de compliance -->
+  <div class="section-band">
+    <span class="num">▸</span>
+    <div><h2>Snapshot de compliance</h2><div class="sub">Resumen + verificación de auditoría + logs de IA en una vista.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="actions" style="margin-bottom:12px;">
+        <button class="btn-primary" onclick="cwRefreshComplianceSnapshot()">Cargar snapshot</button>
+      </div>
+      <div id="cw-compliance-result"><div class="sub">Elegí un caso arriba y cargá el snapshot.</div></div>
+    </div>
+  </div>
+
+  <!-- 2. verificación de la cadena -->
+  <div class="section-band">
+    <span class="num">▸</span>
+    <div><h2>Verificación de la cadena SHA-256</h2><div class="sub">Recomputa los hashes y confirma que ninguna decisión fue alterada.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="actions" style="margin-bottom:12px;">
+        <button class="btn-primary" onclick="cwVerifyAudit()">Verificar trazabilidad</button>
+      </div>
+      <div id="cw-verify-result"><div class="sub">Sin verificar todavía.</div></div>
+    </div>
+  </div>
+
+  <!-- 3. audit trail -->
+  <div class="section-band">
+    <span class="num">▸</span>
+    <div><h2>Cadena de auditoría (eventos)</h2><div class="sub">Cada decisión del caso, encadenada con hash.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="actions" style="margin-bottom:12px;">
+        <button class="btn-secondary" onclick="cwLoadAuditEvents()">Cargar eventos</button>
+      </div>
+      <div id="cw-audit-result"><div class="sub">Sin cargar todavía.</div></div>
+    </div>
+  </div>
+
+  <!-- 4. AI logs -->
+  <div class="section-band">
+    <span class="num">▸</span>
+    <div><h2>Logs de IA (PII redactada)</h2><div class="sub">Toda llamada a la IA se guarda con la PII redactada por el backend.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="actions" style="margin-bottom:12px;">
+        <button class="btn-secondary" onclick="cwLoadAiLogs()">Cargar logs de IA</button>
+      </div>
+      <div id="cw-logs-result"><div class="sub">Sin cargar todavía.</div></div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div>
+    <div class="foot-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</div>
+    <div style="margin-top:6px;">Demo local · no productivo · no es asesoramiento financiero</div>
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="foot-links">
+    <a href="index.html">Inicio</a>
+    <a href="client.html">Cliente</a>
+    <a href="advisor.html">Asesor</a>
+    <a href="compliance.html">Compliance</a>
+    <a href="methodology.html">Metodología</a>
+    <a href="advanced.html">Modo dev</a>
+  </div>
+  <div class="foot-note">La IA propone, el asesor decide, cada paso queda auditado. Sin PII real de clientes, sin auth productiva.</div>
+</footer>
+
+<script src="js/common.js"></script>
+<script src="js/case-dashboard.js"></script>
+<script src="js/case-workbench.js"></script>
+<script src="js/compliance.js"></script>
+
+</body>
+</html>

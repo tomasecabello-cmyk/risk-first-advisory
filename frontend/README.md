@@ -2,6 +2,32 @@
 
 Página HTML estática para probar visualmente el backend sin usar terminal ni curl.
 
+## Mapa de páginas — rediseño por roles (2026-07)
+
+El frontend se separó en **vistas por rol** para que quede claro "quién entra a qué".
+Todas comparten `css/base.css` y reusan `js/investor-demo.js` / `js/case-workbench.js`
+por carga (sin duplicar código).
+
+| Página | Rol | Qué hace | Scripts |
+|---|---|---|---|
+| `index.html` | **Hub** | Hero + 3 tarjetas de rol (Cliente / Asesor / Compliance) + "cómo funciona" + links a Metodología y Modo dev. | `base.css` |
+| `client.html` | **Cliente** | Completa su perfil (KYC + cuestionario + trade-off), envía, y ve su primera lectura (Risk Number, capacidad, inconsistencias). Reencuadre de demo: usa el token de asesor por detrás (no hay auth de cliente en el backend). | `common`, `case-workbench`, `investor-demo`, `client` |
+| `advisor.html` | **Asesor** | Bandeja de casos (`GET /firms/{id}/cases`) → abre un caso → revisa el análisis → **aprueba / modifica / rechaza** el perfil → propuesta → selección → reporte → auditoría. Reusa el motor `idemo*` verbatim + wrappers de decisión. | `common`, `case-dashboard`, `case-workbench`, `investor-demo`, `advisor` |
+| `compliance.html` | **Compliance** | Selector de caso + snapshot + verificación de hash-chain + audit trail + logs de IA. Solo lectura. Default token `dev-compliance-token` (verify/ai-logs requieren rol compliance; con token de asesor dan 403). | `common`, `case-dashboard`, `case-workbench`, `compliance` |
+| `methodology.html` | — | Fundamento del Risk Gap y del Risk Number (fórmulas + tabla vs. Nitrogen). Movido del hub y de advanced. | `base.css` |
+| `advanced.html` | **Dev** | Modo técnico crudo: Dashboard (CRUD) + Workbench (15 paneles) + JSON/endpoints. Sin cambios salvo el nav. | `common`, `case-dashboard`, `case-workbench` |
+
+**Traspaso de estado entre páginas:** `window.idemoState` se pierde al navegar. El
+handoff va por la lista de casos persistida (bandeja del asesor / compliance) +
+`localStorage.rfaLastCaseId` como puntero al último caso creado por el cliente.
+
+**Correr la demo (con universo en vivo):** `python scripts/build_arg_universe.py --warm`
+(precalienta el caché) → `RFA_DEMO_MODE=1 RFA_LIVE_DATA=1 uvicorn ...` en :8000 →
+`http.server 5500 -d frontend`. Sin `RFA_LIVE_DATA` el universo queda solo con renta fija.
+
+> Lo de abajo describe la etapa anterior (página única de 8 pasos). El flujo de 8 pasos
+> vive ahora en `advisor.html`; el detalle técnico del motor `idemo*` sigue vigente.
+
 ## Estado actual
 
 **Fase 3 cerrada como UI local/dev plug-and-play ✅, con rediseño visual showable.** Hoy entregado:

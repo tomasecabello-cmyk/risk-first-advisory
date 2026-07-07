@@ -1484,3 +1484,170 @@ details.demo-path[open] > *:not(summary) {
   .acc-chevron { transition: none; }
   .story-card:hover { transform: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * ROLE-BASED REDESIGN — shared chrome across hub / client / advisor /
+ * compliance / methodology pages. Additive only; existing classes untouched.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/* fill tokens referenced-but-undefined + a small spacing scale */
+:root {
+  --rf-radius-md: 10px;
+  --rf-bg-subtle: #fafbfc;
+  --rf-cyan-600: #0891b2;
+  --rf-space-1: 6px;
+  --rf-space-2: 12px;
+  --rf-space-3: 18px;
+  --rf-space-4: 28px;
+  --rf-space-5: 44px;
+  /* per-role accent (client=brand navy, advisor=emerald, compliance=violet) */
+  --rf-role-client: var(--rf-navy-600);
+  --rf-role-advisor: var(--rf-emerald-600);
+  --rf-role-compliance: var(--rf-violet-700);
+}
+
+/* ── shared nav: active state + role tint ─────────────────────────────────── */
+.nav-item.is-active {
+  color: var(--rf-navy-900);
+  background: var(--rf-bg-soft);
+  box-shadow: inset 0 -2px 0 var(--rf-navy-600);
+}
+.nav-item.is-active.is-client     { box-shadow: inset 0 -2px 0 var(--rf-role-client); }
+.nav-item.is-active.is-advisor    { box-shadow: inset 0 -2px 0 var(--rf-role-advisor);
+                                     color: var(--rf-emerald-700); }
+.nav-item.is-active.is-compliance { box-shadow: inset 0 -2px 0 var(--rf-role-compliance);
+                                     color: var(--rf-violet-700); }
+
+/* ── role page intro header ("quién sos / qué hacés acá") ──────────────────── */
+.role-hero {
+  border-radius: var(--rf-radius-lg);
+  padding: 24px 28px;
+  margin: 8px 0 28px;
+  background: linear-gradient(180deg, #ffffff, var(--rf-bg-subtle));
+  border: 1px solid var(--rf-border);
+  border-left: 4px solid var(--rf-role-client);
+  box-shadow: var(--rf-shadow-sm);
+}
+.role-hero.is-advisor    { border-left-color: var(--rf-role-advisor); }
+.role-hero.is-compliance { border-left-color: var(--rf-role-compliance); }
+.role-hero-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--rf-role-client);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.role-hero.is-advisor    .role-hero-eyebrow { color: var(--rf-role-advisor); }
+.role-hero.is-compliance .role-hero-eyebrow { color: var(--rf-role-compliance); }
+.role-hero-title {
+  font-size: 26px; font-weight: 800; letter-spacing: -.02em;
+  color: var(--rf-navy-900); margin: 8px 0 6px; line-height: 1.15;
+}
+.role-hero-sub { color: var(--rf-text-body); font-size: 14.5px; line-height: 1.6; max-width: 760px; }
+.role-hero-steps {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+  font-size: 12px; color: var(--rf-text-muted);
+}
+.role-hero-steps .rh-step {
+  padding: 4px 12px; border-radius: var(--rf-radius-pill);
+  background: var(--rf-card); border: 1px solid var(--rf-border); font-weight: 600;
+}
+.role-hero-steps .rh-arrow { color: var(--rf-text-faint); align-self: center; }
+
+/* ── hub: big role chooser cards ──────────────────────────────────────────── */
+.role-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px; margin: 8px 0 8px;
+}
+.role-card {
+  display: flex; flex-direction: column;
+  background: var(--rf-card); border: 1px solid var(--rf-border);
+  border-top: 3px solid var(--rf-role-client);
+  border-radius: var(--rf-radius-lg); padding: 26px 24px 22px;
+  box-shadow: var(--rf-shadow); text-decoration: none; color: inherit;
+  transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease;
+}
+.role-card.is-advisor    { border-top-color: var(--rf-role-advisor); }
+.role-card.is-compliance { border-top-color: var(--rf-role-compliance); }
+.role-card:hover {
+  box-shadow: var(--rf-shadow-md); transform: translateY(-3px); text-decoration: none;
+}
+.role-card-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; margin-bottom: 14px;
+  background: var(--rf-blue-100);
+}
+.role-card.is-advisor    .role-card-icon { background: var(--rf-emerald-100); }
+.role-card.is-compliance .role-card-icon { background: var(--rf-violet-100); }
+.role-card-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--rf-role-client);
+}
+.role-card.is-advisor    .role-card-eyebrow { color: var(--rf-role-advisor); }
+.role-card.is-compliance .role-card-eyebrow { color: var(--rf-role-compliance); }
+.role-card-title {
+  font-size: 20px; font-weight: 800; letter-spacing: -.01em;
+  color: var(--rf-navy-900); margin: 4px 0 8px;
+}
+.role-card-body { color: var(--rf-text-body); font-size: 14px; line-height: 1.6; flex: 1; }
+.role-card-cta {
+  margin-top: 18px; display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 14px; color: var(--rf-navy-600);
+}
+.role-card.is-advisor    .role-card-cta { color: var(--rf-emerald-700); }
+.role-card.is-compliance .role-card-cta { color: var(--rf-violet-700); }
+.role-card:hover .role-card-cta { gap: 12px; }
+
+/* ── shared footer ────────────────────────────────────────────────────────── */
+.site-footer {
+  max-width: 1280px; margin: 60px auto 0; padding: 26px 28px 40px;
+  border-top: 1px solid var(--rf-border);
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;
+  color: var(--rf-text-muted); font-size: 12.5px; line-height: 1.6;
+}
+.site-footer .foot-brand {
+  font-weight: 700; color: var(--rf-navy-900); font-size: 14px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.site-footer .foot-links { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.site-footer .foot-links a { color: var(--rf-text-muted); font-weight: 600; }
+.site-footer .foot-links a:hover { color: var(--rf-navy-600); }
+.site-footer .foot-note { flex-basis: 100%; color: var(--rf-text-faint); }
+.foot-spacer { flex: 1; }
+
+/* ── client-view disclaimer banner ───────────────────────────────────────── */
+.client-note {
+  border: 1px dashed var(--rf-border-strong);
+  background: var(--rf-bg-subtle);
+  border-radius: var(--rf-radius); padding: 12px 14px;
+  font-size: 12.5px; line-height: 1.55; color: var(--rf-text-muted);
+  margin-bottom: 18px;
+}
+.client-note strong { color: var(--rf-text-body); }
+
+/* ── advisor bandeja (case list) ─────────────────────────────────────────── */
+.bandeja { display: grid; gap: 10px; }
+.bandeja-row {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 16px; background: var(--rf-card);
+  border: 1px solid var(--rf-border); border-radius: var(--rf-radius);
+  cursor: pointer; transition: box-shadow .15s, border-color .15s;
+}
+.bandeja-row:hover { box-shadow: var(--rf-shadow); border-color: var(--rf-border-strong); }
+.bandeja-row.is-selected { border-color: var(--rf-emerald-600); box-shadow: inset 0 0 0 1px var(--rf-emerald-600); }
+.bandeja-row .b-title { font-weight: 700; color: var(--rf-navy-900); }
+.bandeja-row .b-meta  { font-size: 12px; color: var(--rf-text-muted); }
+.bandeja-row .b-id    { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+                        font-size: 11px; color: var(--rf-text-faint); }
+
+/* ── decision segment (approve / modify / reject) ────────────────────────── */
+.decision-seg { display: inline-flex; border: 1px solid var(--rf-border-strong);
+  border-radius: var(--rf-radius); overflow: hidden; }
+.decision-seg button {
+  border: none; border-radius: 0; background: var(--rf-card);
+  color: var(--rf-text-body); padding: 8px 16px; font-weight: 600;
+  border-right: 1px solid var(--rf-border);
+}
+.decision-seg button:last-child { border-right: none; }
+.decision-seg button.is-active[data-dec="approve"] { background: var(--rf-emerald-600); color: #fff; }
+.decision-seg button.is-active[data-dec="modify"]  { background: var(--rf-amber-600); color: #fff; }
+.decision-seg button.is-active[data-dec="reject"]  { background: var(--rf-rose-600); color: #fff; }

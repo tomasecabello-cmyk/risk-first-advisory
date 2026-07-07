@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Metodología — Risk-First Advisory</title>
+  <meta name="description" content="Fundamento del Risk Gap y del Risk Number: teoría pública que usamos, método propio diferenciado del patentado, y las fórmulas del motor determinístico." />
+  <link rel="stylesheet" href="css/base.css">
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-brand" style="text-decoration:none;"><span class="nav-brand-dot"></span>Risk-First Advisory</a>
+    <span class="nav-spacer"></span>
+    <a href="client.html" class="nav-item is-client">Cliente</a>
+    <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
+    <a href="compliance.html" class="nav-item is-compliance">Compliance</a>
+    <a href="methodology.html" class="nav-item is-active">Metodología</a>
+    <a href="advanced.html" class="nav-item nav-item-muted">Modo dev &rarr;</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <div class="role-hero">
+    <div class="role-hero-eyebrow">📐 Metodología · fundamento técnico</div>
+    <div class="role-hero-title">En qué se basan el Risk Gap y el Risk Number</div>
+    <div class="role-hero-sub">
+      El motor determinístico (<code>ai_layer/risk_scoring.py</code> + <code>ai_layer/risk_number.py</code>)
+      calcula el perfil, el Risk Gap y el Risk Number sin LLM: misma entrada → misma salida, auditable.
+      Corre en paralelo a la IA y se cruza con ella. Toda la teoría está en
+      <code>docs/RISK_SCORING_THEORY.md</code>, <code>docs/RISK_NUMBER_DESIGN.md</code> y las decisiones
+      DD-012 / DD-013.
+    </div>
+  </div>
+
+  <!-- ── Risk Gap: advisor-friendly ─────────────────────────────────────── -->
+  <div class="section-band">
+    <span class="num">01</span>
+    <div>
+      <h2>El Risk Gap — el problema #1 de una mesa de ventas</h2>
+      <div class="sub">Sin fórmulas: qué mide y por qué importa.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="method-lede" style="margin-bottom:16px;">
+        Mide la brecha entre el riesgo que el cliente <strong>declara</strong> aceptar y el que
+        realmente tolera <strong>bajo estrés</strong>. Se apoya en finanzas conductuales (Prospect
+        Theory) y en un principio simple: la <strong>capacidad financiera acota la tolerancia</strong>
+        — nadie debería asumir más riesgo del que su situación soporta.
+      </p>
+      <div class="method-cols">
+        <div class="method-col is-take">
+          <div class="method-col-head">Tomamos de la teoría pública</div>
+          <ul>
+            <li>Perfil declarado con una rúbrica transparente (estilo Grable-Lytton), no una caja negra.</li>
+            <li>La capacidad acota la tolerancia: lo que el cliente <em>quiere</em> vs lo que <em>puede</em> soportar.</li>
+            <li>Señal revelada desde el escenario de estrés (aversión a la pérdida).</li>
+          </ul>
+        </div>
+        <div class="method-col is-avoid">
+          <div class="method-col-head">Método propio — distinto del patentado</div>
+          <ul>
+            <li>Escala de 5 perfiles (conservador → agresivo), no el "Risk Number 1–99" de Nitrogen.</li>
+            <li>El gap declarado-vs-revelado es el resultado central, no un puntaje cosmético.</li>
+            <li>Determinístico y auditable: corre en paralelo a la IA y se cruza con ella.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Fórmulas del motor ─────────────────────────────────────────────── -->
+  <div class="section-band">
+    <span class="num">02</span>
+    <div>
+      <h2>Rúbrica del perfil declarado (willingness vs ability)</h2>
+      <div class="sub">Las fórmulas del motor determinístico. Misma entrada → misma salida.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="sub" style="margin-bottom:14px;">
+        La <strong>voluntad</strong> de tomar riesgo (lo que el cliente quiere) y la
+        <strong>capacidad</strong> (lo que su situación soporta) se calculan por separado en [0,1].
+        El riesgo <em>efectivo</em> es el mínimo: la capacidad acota la tolerancia.
+      </p>
+      <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:12.5px;line-height:1.65;margin:0 0 16px;"><code>willingness = 0.6 · tolerancia      + 0.4 · objetivo
+ability     = 0.4 · capacidad       + 0.3 · horizonte
+            + 0.2 · liquidez_inv    + 0.1 · experiencia
+
+riesgo_efectivo = min(willingness, ability)      # capacidad acota tolerancia
+perfil          = banda_de_20(riesgo_efectivo·100)  # 5 perfiles
+gap_interno     = |banda(willingness) − banda(ability)|   # tensión declarada
+gap_revelado    = caída de perfil bajo estrés (open_risk_reaction)
+gap_level       = bandas(max(gap_revelado, gap_interno))  # 1→low, 2→medium, ≥3→high</code></pre>
+      <p class="sub">
+        Todas las entradas vienen del KYC (scores 1–10, horizonte en años, liquidez 3/5/8,
+        experiencia y objetivo categóricos). La señal revelada se infiere léxicamente de la
+        respuesta abierta al escenario de estrés.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Risk Number ────────────────────────────────────────────────────── -->
+  <div class="section-band">
+    <span class="num">03</span>
+    <div>
+      <h2>El Risk Number — cliente y cartera en la misma escala 0-100</h2>
+      <div class="sub">Un número comparable: "tu número es 62, esta cartera es 68". Enfoque propio (DD-012 / DD-013).</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="sub" style="margin-bottom:14px;">
+        El cliente y cada cartera reciben un número 0-100 en la <strong>misma escala de downside</strong>,
+        para poder alinearlos. El del cliente es el <strong>operativo</strong>
+        <code>min(tolerancia, capacidad)</code> — la capacidad acota, igual que el perfil efectivo.
+        El de la cartera mide <strong>dispersión pura</strong> (no se descuenta por un retorno esperado
+        optimista: un puntaje de riesgo no baja porque esperás ganar mucho).
+      </p>
+      <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:12.5px;line-height:1.65;margin:0 0 16px;"><code>cliente:   número = min(tolerancia, capacidad)         # 0-100 operativo
+           tolerancia = cruce(cuestionario G-L, trade-off CRRA)
+cartera:   pérdida = k(α)·σ   (CVaR α=0.95, μ=0)         # dispersión pura
+           número  = escala(pérdida)   # anclada al max_volatility del perfil (YAML)
+alineación: aligned / over_tolerance / under_tolerance / over_capacity
+            (comparación por puntos, señal informativa — el override formal
+             lo gobierna metadata.requires_advisor_override, I-018)</code></pre>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px;">
+        <thead>
+          <tr style="text-align:left;border-bottom:2px solid var(--rf-border);">
+            <th style="padding:8px 10px;">Dimensión</th>
+            <th style="padding:8px 10px;">Teoría pública (la usamos)</th>
+            <th style="padding:8px 10px;">Método patentado (lo evitamos)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Escala de salida</td>
+            <td style="padding:8px 10px;">0-100 propia en bandas de 20 (5 perfiles)</td>
+            <td style="padding:8px 10px;">"Risk Number" 1–99 propietario</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Métrica de cartera</td>
+            <td style="padding:8px 10px;">CVaR / Expected Shortfall, horizonte configurable</td>
+            <td style="padding:8px 10px;">Rango 95% a 6 meses fijo</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--rf-border);">
+            <td style="padding:8px 10px;font-weight:600;">Elicitación del cliente</td>
+            <td style="padding:8px 10px;">Grable-Lytton + certainty equivalent (γ CRRA)</td>
+            <td style="padding:8px 10px;">Apuesta en dólares "devastador/aceptable"</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;font-weight:600;">Feature central</td>
+            <td style="padding:8px 10px;">Gap declarado-vs-revelado + alineación con la cartera</td>
+            <td style="padding:8px 10px;">Un número presentado al cliente</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin-top:14px;">
+        <strong>Patentabilidad:</strong> la reivindicación candidata no es el scoring (matemática
+        conocida) sino el <em>método</em> risk-first + Risk Gap + override auditado con
+        human-in-the-loop. Ver <code>docs/RISK_SCORING_THEORY.md §5</code>. Antes de comercializar:
+        freedom-to-operate + abogado de patentes.
+      </p>
+    </div>
+  </div>
+
+  <div class="fine-print" style="margin-top:24px;">
+    ¿Querés ver el motor corriendo con JSON, endpoints y hash chain? Está todo en
+    <a href="advanced.html"><strong>Modo dev</strong></a>.
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div>
+    <div class="foot-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</div>
+    <div style="margin-top:6px;">Demo local · no productivo · no es asesoramiento financiero</div>
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="foot-links">
+    <a href="index.html">Inicio</a>
+    <a href="client.html">Cliente</a>
+    <a href="advisor.html">Asesor</a>
+    <a href="compliance.html">Compliance</a>
+    <a href="methodology.html">Metodología</a>
+    <a href="advanced.html">Modo dev</a>
+  </div>
+  <div class="foot-note">La IA propone, el asesor decide, cada paso queda auditado. Sin PII real de clientes, sin auth productiva.</div>
+</footer>
+
+</body>
+</html>

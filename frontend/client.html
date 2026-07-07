@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tu perfil de inversor — Risk-First Advisory</title>
+  <meta name="description" content="Completá tu perfil de riesgo. El sistema lo analiza y tu asesor lo revisa antes de presentarte opciones de cartera." />
+  <link rel="stylesheet" href="css/base.css">
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-brand" style="text-decoration:none;"><span class="nav-brand-dot"></span>Risk-First Advisory</a>
+    <span class="nav-spacer"></span>
+    <a href="client.html" class="nav-item is-client is-active">Cliente</a>
+    <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
+    <a href="compliance.html" class="nav-item is-compliance">Compliance</a>
+    <a href="methodology.html" class="nav-item">Metodología</a>
+    <a href="advanced.html" class="nav-item nav-item-muted">Modo dev &rarr;</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <div class="role-hero">
+    <div class="role-hero-eyebrow">🧑 Tu perfil de inversor</div>
+    <div class="role-hero-title">Completá tu perfil — con honestidad</div>
+    <div class="role-hero-sub">
+      Respondé el cuestionario y la pregunta de trade-off pensando en plata real tuya. La meta es
+      que tu cartera coincida con lo que <strong>realmente</strong> vas a tolerar cuando el mercado
+      caiga, no con lo que te gustaría tolerar. Cuando envíes, el sistema analiza tu perfil y tu
+      asesor lo revisa antes de presentarte opciones.
+    </div>
+    <div class="role-hero-steps">
+      <span class="rh-step">Completás tu perfil</span><span class="rh-arrow">→</span>
+      <span class="rh-step">El sistema lo analiza</span><span class="rh-arrow">→</span>
+      <span class="rh-step">Tu asesor revisa</span><span class="rh-arrow">→</span>
+      <span class="rh-step">Te presenta opciones</span>
+    </div>
+  </div>
+
+  <div class="client-note">
+    <strong>Demo local:</strong> en esta demo el navegador usa el token de asesor para hablar con
+    el backend, porque todavía no existe autenticación de cliente. En producción esto requeriría un
+    rol/token <code>client</code> o un enlace seguro de un solo uso acotado a tu caso.
+  </div>
+
+  <div class="card card-hero">
+    <div class="card-header">
+      <h2>Tu perfil de riesgo</h2>
+      <div class="pill-cluster">
+        <span class="pill pill-blue">cuestionario validado</span>
+        <span class="pill pill-green">tus datos, no de un tercero</span>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <form id="idemo-form" onsubmit="event.preventDefault();" autocomplete="off" spellcheck="false">
+
+        <div class="section-label" style="margin-top:4px;margin-bottom:14px;">Tus datos básicos</div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label>Tu nombre</label>
+            <input type="text" id="idemo-name" value="María Pérez (demo)" />
+          </div>
+          <div class="field">
+            <label>Edad <span class="hint">18–120</span></label>
+            <input type="number" id="idemo-age" value="42" min="18" max="120" />
+          </div>
+          <div class="field">
+            <label>Jurisdicción</label>
+            <input type="text" id="idemo-jurisdiction" value="AR" />
+          </div>
+          <div class="field">
+            <label>Moneda preferida</label>
+            <select id="idemo-currency">
+              <option value="USD" selected>USD</option>
+              <option value="EUR">EUR</option>
+              <option value="ARS">ARS</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tu ingreso anual estimado (USD)</label>
+            <input type="number" id="idemo-income" value="80000" min="0" />
+          </div>
+          <div class="field">
+            <label>Tu patrimonio líquido estimado (USD)</label>
+            <input type="number" id="idemo-liquid" value="150000" min="0" oninput="idemoUpdateTradeoffPreview()" />
+          </div>
+          <div class="field">
+            <label>Horizonte de inversión (años) <span class="hint">&gt; 0</span></label>
+            <input type="number" id="idemo-horizon" value="10" min="1" />
+          </div>
+          <div class="field">
+            <label>Tu tolerancia al riesgo <span class="hint">se calcula con el cuestionario ↓</span></label>
+            <input type="text" id="idemo-risk-preview" value="— responder cuestionario" readonly />
+          </div>
+          <div class="field">
+            <label>Tu objetivo principal</label>
+            <select id="idemo-objective">
+              <option value="capital_preservation">Preservación de capital</option>
+              <option value="income">Ingresos</option>
+              <option value="balanced" selected>Balanceado</option>
+              <option value="growth">Crecimiento</option>
+              <option value="aggressive_growth">Crecimiento agresivo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tu necesidad de liquidez</label>
+            <select id="idemo-liquidity">
+              <option value="baja">Baja</option>
+              <option value="media" selected>Media</option>
+              <option value="alta">Alta</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tu experiencia invirtiendo</label>
+            <select id="idemo-experience">
+              <option value="ninguna">Ninguna</option>
+              <option value="basica">Básica</option>
+              <option value="moderada" selected>Moderada</option>
+              <option value="avanzada">Avanzada</option>
+              <option value="experto">Experto</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Estabilidad de tu ingreso <span class="hint">capacidad, no tolerancia</span></label>
+            <select id="idemo-income-stability">
+              <option value="stable" selected>Estable</option>
+              <option value="variable">Variable</option>
+              <option value="unstable">Inestable</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Personas a tu cargo (dependientes)</label>
+            <input type="number" id="idemo-dependents" value="0" min="0" />
+          </div>
+          <div class="field">
+            <label>¿Tus gastos esenciales están cubiertos sin tocar esta inversión?</label>
+            <select id="idemo-expenses-covered">
+              <option value="si" selected>Sí</option>
+              <option value="no">No</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Cuestionario de tolerancia <span class="hint">Grable-Lytton (1999), escala validada de 13 ítems</span></div>
+        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
+          <strong>Respondé con honestidad — no hay respuesta correcta.</strong> Si exagerás tu
+          aguante, la cartera te va a doler de verdad cuando el mercado caiga. Esto no mide tu
+          conducta futura: te ayuda a ser honesto con vos mismo.
+        </div>
+        <div id="idemo-gl-container" style="display:grid;gap:14px;">
+          <div style="opacity:.7;font-size:13px;">Cargando cuestionario…</div>
+        </div>
+        <div id="idemo-gl-preview" style="margin-top:12px;font-size:13px;padding:10px 12px;border-radius:8px;background:#f1f5f9;color:#475569;">
+          Tolerancia estimada: <strong id="idemo-gl-score">—</strong> · respondidas <span id="idemo-gl-count">0</span>/13
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preguntas abiertas</div>
+        <div class="form-grid cols-2">
+          <div class="field full-span">
+            <label>¿Cuál es tu objetivo principal de inversión?</label>
+            <textarea id="idemo-open-goal" rows="2">Ahorro de largo plazo con horizonte 10 años, objetivo jubilación.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>Si tu cartera cae 30% en pocas semanas, ¿qué harías? <span class="hint">la respuesta más importante</span></label>
+            <select id="idemo-open-reaction-choice">
+              <option value="Vendería todo, no aguanto seguir perdiendo">Vendería todo, no aguanto seguir perdiendo</option>
+              <option value="Vendería una parte para bajar el riesgo">Vendería una parte para bajar el riesgo</option>
+              <option value="No tocaría nada, esperaría la recuperación" selected>No tocaría nada, esperaría la recuperación</option>
+              <option value="Compraría más, aprovecho que está barato">Compraría más, aprovecho que está barato</option>
+            </select>
+          </div>
+          <div class="field full-span">
+            <label>¿Qué experiencia tenés invirtiendo?</label>
+            <textarea id="idemo-open-experience" rows="2">Inversiones previas en ETFs USD y bonos soberanos AR hard dollar.</textarea>
+          </div>
+          <div class="field full-span">
+            <label>¿Qué preocupaciones o restricciones tenés?</label>
+            <textarea id="idemo-open-concerns" rows="2">Volatilidad cambiaria; riesgo de duración en renta fija; preferencia por hard dollar.</textarea>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Pregunta de trade-off <span class="hint">opcional — cruza con el cuestionario</span></div>
+        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
+          <strong>Pensá en plata real tuya.</strong> Te ofrecen una apuesta 50/50: ganás
+          <strong id="idemo-tradeoff-gain-label">$15.000</strong> o perdés <strong id="idemo-tradeoff-loss-label">$7.500</strong>.
+          ¿Qué monto <strong>SEGURO</strong> (sin apostar) te resulta indiferente frente a esa apuesta?
+          No la respondas "para quedar bien": sirve para detectar contradicciones entre lo que decís
+          y lo que realmente tolerás.
+        </div>
+        <div class="form-grid cols-3">
+          <div class="field">
+            <label style="display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="idemo-tradeoff-enabled" checked style="width:auto;" onchange="idemoUpdateTradeoffPreview()" />
+              Responder la pregunta de trade-off
+            </label>
+          </div>
+          <div class="field">
+            <label>Monto seguro indiferente (USD) <span class="hint" id="idemo-tradeoff-range-hint">rango: -7.500 a 15.000</span></label>
+            <input type="number" id="idemo-tradeoff-certain" value="3000" step="100" oninput="idemoUpdateTradeoffPreview()" />
+            <div id="idemo-tradeoff-warning" style="display:none;margin-top:6px;font-size:12px;color:#a33;"></div>
+          </div>
+        </div>
+
+      </form>
+
+      <div class="actions" style="margin-top:22px;">
+        <button class="btn-primary btn-lg" id="client-submit-btn" onclick="clientSubmitProfile()">Enviar mi perfil →</button>
+      </div>
+
+      <div id="client-result" style="margin-top:18px;"></div>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div>
+    <div class="foot-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</div>
+    <div style="margin-top:6px;">Demo local · no productivo · no es asesoramiento financiero</div>
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="foot-links">
+    <a href="index.html">Inicio</a>
+    <a href="client.html">Cliente</a>
+    <a href="advisor.html">Asesor</a>
+    <a href="compliance.html">Compliance</a>
+    <a href="methodology.html">Metodología</a>
+    <a href="advanced.html">Modo dev</a>
+  </div>
+  <div class="foot-note">La IA propone, el asesor decide, cada paso queda auditado. Sin PII real de clientes, sin auth productiva.</div>
+</footer>
+
+<script src="js/common.js"></script>
+<script src="js/case-workbench.js"></script>
+<script src="js/investor-demo.js"></script>
+<script src="js/client.js"></script>
+
+</body>
+</html>

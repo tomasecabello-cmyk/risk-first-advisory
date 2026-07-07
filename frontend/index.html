@@ -1,17 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Risk-First Advisory — Wealth Advisory Demo</title>
-  <meta name="description" content="La IA propone. El asesor decide. Cada paso queda auditado. Demo local plug-and-play de un backend de asesoría de inversiones." />
+  <title>Risk-First Advisory — La IA propone, el asesor decide</title>
+  <meta name="description" content="Del KYC del cliente a una cartera aprobada por el asesor, con cada paso auditado. Elegí tu rol: cliente, asesor o compliance." />
   <link rel="stylesheet" href="css/base.css">
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- HERO                                                                    -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-text">
@@ -25,12 +22,11 @@
         La <strong style="color:#bfdbfe;">IA propone</strong>, el
         <strong style="color:#bfdbfe;">sistema controla</strong> suitability y presupuesto de riesgo,
         el <strong style="color:#bfdbfe;">asesor firma</strong> cada decisión — y todo queda
-        permanentemente <strong style="color:#bfdbfe;">auditado</strong>. El resultado es un
-        reporte revisable, no una recomendación automática.
+        permanentemente <strong style="color:#bfdbfe;">auditado</strong>.
       </p>
       <div class="hero-cta">
-        <a href="#investor-anchor" class="btn-primary btn-lg" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
-          ▶ Empezar la demo de perfil inversor
+        <a href="#roles" class="btn-primary btn-lg" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+          Elegí tu rol para empezar ↓
         </a>
       </div>
     </div>
@@ -43,598 +39,127 @@
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- STICKY NAV                                                              -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <nav class="top-nav">
   <div class="top-nav-inner">
-    <span class="nav-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</span>
-    <a href="#investor-anchor" class="nav-item nav-item-primary">Demo de perfil inversor</a>
+    <a href="index.html" class="nav-brand" style="text-decoration:none;"><span class="nav-brand-dot"></span>Risk-First Advisory</a>
     <span class="nav-spacer"></span>
-    <a href="advanced.html" class="nav-item nav-item-muted">Modo técnico &rarr;</a>
-    <span class="nav-tag">Fase 3 · lista</span>
+    <a href="client.html" class="nav-item is-client">Cliente</a>
+    <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
+    <a href="compliance.html" class="nav-item is-compliance">Compliance</a>
+    <a href="methodology.html" class="nav-item">Metodología</a>
+    <a href="advanced.html" class="nav-item nav-item-muted">Modo dev &rarr;</a>
   </div>
 </nav>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- HEADER (legacy fallback — hidden by CSS, kept for a11y/search)          -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<header>
-  <h1>Risk-First Advisory</h1>
-  <span class="badge">Demo local plug-and-play</span>
-</header>
-
 <main class="page">
 
-  <!-- ───────────────────────────────────────────────────────────────────── -->
-  <!-- STORY STRIP — what the AI / advisor / audit each do                   -->
-  <!-- ───────────────────────────────────────────────────────────────────── -->
+  <!-- ── Elegí tu rol ─────────────────────────────────────────────────────── -->
+  <div class="section-band" id="roles">
+    <span class="num">▸</span>
+    <div>
+      <h2>¿Quién sos en este flujo?</h2>
+      <div class="sub">Cada rol entra a su propia vista y ve solo lo suyo. Es la misma asesoría, contada por partes.</div>
+    </div>
+  </div>
+
+  <section class="role-grid">
+    <a class="role-card" href="client.html">
+      <div class="role-card-icon">🧑</div>
+      <div class="role-card-eyebrow">Cliente</div>
+      <div class="role-card-title">Completá tu perfil</div>
+      <div class="role-card-body">
+        Respondé el cuestionario de riesgo y la pregunta de trade-off. El sistema analiza tu
+        perfil y detecta inconsistencias entre lo que decís y lo que realmente tolerarías.
+        Después tu asesor revisa y te presenta opciones.
+      </div>
+      <div class="role-card-cta">Entrar como cliente →</div>
+    </a>
+
+    <a class="role-card is-advisor" href="advisor.html">
+      <div class="role-card-icon">👔</div>
+      <div class="role-card-eyebrow">Asesor</div>
+      <div class="role-card-title">Revisá y decidí</div>
+      <div class="role-card-body">
+        Tu bandeja de casos, el análisis de la IA con el Risk Number y el Risk Gap, y tu decisión:
+        aprobar, modificar o rechazar el perfil. Generás las carteras, elegís cuál y firmás el
+        override si excede el presupuesto. Vos sos el actor vinculante.
+      </div>
+      <div class="role-card-cta">Entrar como asesor →</div>
+    </a>
+
+    <a class="role-card is-compliance" href="compliance.html">
+      <div class="role-card-icon">🛡️</div>
+      <div class="role-card-eyebrow">Compliance</div>
+      <div class="role-card-title">Verificá la trazabilidad</div>
+      <div class="role-card-body">
+        La cadena de auditoría SHA-256 de cada caso, la verificación de que ninguna decisión fue
+        alterada, y los logs de IA con la PII redactada. Vista de solo lectura para supervisión.
+      </div>
+      <div class="role-card-cta">Entrar como compliance →</div>
+    </a>
+  </section>
+
+  <!-- ── Cómo funciona (condensado) ───────────────────────────────────────── -->
+  <div class="section-band">
+    <span class="num">▸</span>
+    <div>
+      <h2>Cómo funciona</h2>
+      <div class="sub">Cuatro actores, un flujo. <a href="methodology.html">Ver la metodología →</a></div>
+    </div>
+  </div>
   <section class="story-strip">
     <div class="story-card">
       <div class="story-eyebrow">Qué hace la IA</div>
       <div class="story-title">Propone — nunca decide</div>
       <div class="story-body">
-        Lee el KYC estructurado y las respuestas en texto libre. Propone un perfil
-        de riesgo preliminar y marca contradicciones. <strong>Nunca aprueba una
-        cartera, nunca firma nada, nunca convierte una recomendación en final.</strong>
+        Lee el KYC y las respuestas en texto libre, propone un perfil preliminar y marca
+        contradicciones. <strong>Nunca aprueba, nunca firma, nunca convierte en final.</strong>
       </div>
     </div>
     <div class="story-card is-advisor">
       <div class="story-eyebrow">Qué hace el asesor</div>
       <div class="story-title">Firma cada paso</div>
       <div class="story-body">
-        Revisa la propuesta de la IA, aprueba / modifica / rechaza el perfil,
-        firma cualquier override del presupuesto de riesgo y selecciona la
-        variante final. <strong>El asesor es siempre el actor vinculante.</strong>
+        Aprueba / modifica / rechaza el perfil, firma cualquier override del presupuesto de
+        riesgo y selecciona la variante final. <strong>El asesor es siempre el actor vinculante.</strong>
       </div>
     </div>
     <div class="story-card is-system">
       <div class="story-eyebrow">Qué controla el sistema</div>
-      <div class="story-title">Suitability y límites de riesgo</div>
+      <div class="story-title">Suitability y límites</div>
       <div class="story-body">
-        Governance, ESG, data quality y presupuesto de riesgo se verifican en
-        cada paso. Las variantes que exceden el presupuesto aprobado quedan
-        <strong>bloqueadas hasta que el asesor firme un override explícito</strong>.
+        Governance, ESG, data quality y presupuesto de riesgo se verifican en cada paso. Lo que
+        excede el presupuesto queda <strong>bloqueado hasta un override explícito</strong>.
       </div>
     </div>
     <div class="story-card is-audit">
       <div class="story-eyebrow">Qué queda auditado</div>
-      <div class="story-title">Cada decisión, encadenada con hash</div>
+      <div class="story-title">Cada decisión, con hash</div>
       <div class="story-body">
-        Cada paso significativo se agrega a una cadena SHA-256 por caso. Las
-        llamadas a la IA se guardan con la PII redactada por el backend.
-        <strong>Compliance obtiene un snapshot único</strong> de resumen +
-        auditoría + logs de IA en un click.
+        Cada paso se agrega a una cadena SHA-256 por caso. Las llamadas a la IA se guardan con la
+        PII redactada. <strong>Compliance obtiene un snapshot único.</strong>
       </div>
     </div>
   </section>
-
-  <!-- ───────────────────────────────────────────────────────────────────── -->
-  <!-- METHODOLOGY EXPLAINER (advisor-friendly — no formulas) -->
-  <!-- ───────────────────────────────────────────────────────────────────── -->
-  <section class="method-strip">
-    <details class="method-card method-collapse">
-      <summary class="method-summary">
-        <span class="story-eyebrow">Fundamento metodológico</span>
-        <span class="method-headline">¿En qué se basa el Risk Gap?</span>
-        <span class="acc-chevron" aria-hidden="true">▾</span>
-      </summary>
-      <p class="method-lede">
-        Mide la brecha entre el riesgo que el cliente <strong>declara</strong> aceptar y el que
-        realmente tolera <strong>bajo estrés</strong> — el problema #1 de una mesa de ventas. Se
-        apoya en finanzas conductuales (Prospect Theory) y en un principio simple: la
-        <strong>capacidad financiera acota la tolerancia</strong> — nadie debería asumir más riesgo
-        del que su situación soporta.
-      </p>
-      <div class="method-cols">
-        <div class="method-col is-take">
-          <div class="method-col-head">Tomamos de la teoría pública</div>
-          <ul>
-            <li>Perfil declarado con una rúbrica transparente (estilo Grable-Lytton), no una caja negra.</li>
-            <li>La capacidad acota la tolerancia: lo que el cliente <em>quiere</em> vs lo que <em>puede</em> soportar.</li>
-            <li>Señal revelada desde el escenario de estrés (aversión a la pérdida).</li>
-          </ul>
-        </div>
-        <div class="method-col is-avoid">
-          <div class="method-col-head">Método propio — distinto del patentado</div>
-          <ul>
-            <li>Escala de 5 perfiles (conservador → agresivo), no el "Risk Number 1–99" de Nitrogen.</li>
-            <li>El gap declarado-vs-revelado es el resultado central, no un puntaje cosmético.</li>
-            <li>Determinístico y auditable: corre en paralelo a la IA y se cruza con ella.</li>
-          </ul>
-        </div>
-      </div>
-      <div class="method-foot">
-        Inspirado en la teoría pública de Nitrogen/Riskalyze, deliberadamente distinto de su método
-        patentado. <a href="advanced.html#fundamento">Ver el detalle técnico (fórmulas) en Modo técnico →</a>
-      </div>
-    </details>
-  </section>
-
-  <!-- ───────────────────────────────────────────────────────────────────── -->
-  <!-- ADVISOR-FACING DEMO HELPERS (presenter notes + recommended demo path) -->
-  <!-- ───────────────────────────────────────────────────────────────────── -->
-  <section class="demo-helpers">
-
-    <!-- Recommended demo path — the click-by-click for a non-tech viewer -->
-    <details class="demo-path">
-      <summary class="demo-path-header">
-        <span class="demo-path-eyebrow">Recorrido recomendado</span>
-        <span class="demo-path-title">Un click y mirá el flujo completo (~90s)</span>
-        <span class="acc-chevron" aria-hidden="true">▾</span>
-      </summary>
-      <ol class="demo-path-steps">
-        <li><span class="step-num">1</span> <strong>Cargá un perfil de inversor</strong> — o dejá los valores por defecto, ya son razonables para un cliente de riesgo moderado.</li>
-        <li><span class="step-num">2</span> <strong>Hacé clic en <em>"Ejecutar demo guiada"</em></strong> — corre hasta la propuesta de cartera (KYC → análisis de IA → aprobación del asesor → propuesta) y <strong>se detiene para que vos elijas la variante</strong>, con override si excede el presupuesto. Recién ahí se generan el reporte y la auditoría.</li>
-        <li><span class="step-num">3</span> <strong>Detené la mirada en el Risk Gap</strong> — la IA marca si el perfil declarado es inconsistente con cómo reaccionaría el cliente ante una caída, y propone las preguntas para confirmarlo. La IA señala; el asesor decide.</li>
-        <li><span class="step-num">4</span> <strong>Cerrá con el reporte y la auditoría</strong> — el reporte Markdown es revisable (no es asesoramiento automático) y la cadena SHA-256 verifica que cada decisión quedó registrada.</li>
-      </ol>
-      <div class="demo-path-sub" style="margin-top:10px;">Sin <code>OPENAI_API_KEY</code>: levantá el backend con <code>RFA_DEMO_MODE=1</code> y la demo corre con un análisis determinístico.</div>
-    </details>
-
-    <!-- Demo presenter notes — collapsed by default, for the human running the demo -->
-    <details class="presenter-notes">
-      <summary>
-        <span class="presenter-icon">▸</span>
-        <span class="presenter-title">Guion de presentación</span>
-        <span class="presenter-sub">Talk track de 90 segundos para un profesor de finanzas o un asesor no técnico</span>
-      </summary>
-      <ol class="presenter-script">
-        <li>
-          <strong>"Esto es un backend de asesoría de inversiones."</strong>
-          El KYC y las preferencias del cliente se transforman en una cartera
-          aprobada por el asesor, con auditoría completa. Hacé clic en
-          <em>"Ejecutar demo guiada"</em> y dejá que corra.
-        </li>
-        <li>
-          <strong>"La IA nunca decide."</strong>
-          En el paso de análisis, la IA propone un perfil de riesgo y detecta
-          contradicciones en las respuestas del cliente. Nada es vinculante.
-        </li>
-        <li>
-          <strong>"El asesor firma cada paso."</strong>
-          La aprobación del perfil (approve / modify / reject) es la primera
-          decisión formal del asesor. El mismo patrón se repite en el override
-          y en la selección final de la cartera.
-        </li>
-        <li>
-          <strong>"El sistema controla suitability y riesgo."</strong>
-          Cuando una variante excede el presupuesto de riesgo aprobado, queda
-          marcada y <em>no se puede seleccionar</em> sin un override explícito
-          del asesor. Suitability / ESG / data quality corren automáticamente.
-        </li>
-        <li>
-          <strong>"El Risk Gap es el corazón."</strong>
-          La IA marca cuando lo que el cliente declara no coincide con cómo
-          reaccionaría ante una caída, y entrega las preguntas para confirmarlo.
-          No mide la conducta: señala una inconsistencia para que el asesor la
-          investigue.
-        </li>
-        <li>
-          <strong>"Revisable y auditado, no automático."</strong>
-          El reporte Markdown final lo revisa el asesor antes de entregarlo — no
-          hay botón de "enviar al cliente con un click" — y la cadena SHA-256
-          verifica que cada decisión del caso quedó registrada.
-        </li>
-      </ol>
-      <p class="presenter-disclaimer">
-        <strong>No es production-ready.</strong> Solo demo local de desarrollo —
-        no es asesoramiento financiero, no se usa con PII real de clientes, no
-        tiene auth productiva ni firm-level isolation.
-      </p>
-    </details>
-
-  </section>
-
-  <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <!-- 01 · DEMO DE PERFIL INVERSOR — entrada principal advisor-friendly     -->
-  <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <div class="section-band" id="investor-anchor">
-    <span class="num">01</span>
-    <div>
-      <h2>Demo de perfil inversor
-        <span style="display:inline-block;margin-left:6px;padding:3px 10px;background:var(--rf-emerald-100);color:var(--rf-emerald-700);border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle;">Inicio recomendado</span>
-      </h2>
-      <div class="sub">
-        Cargá un perfil, generá una propuesta y revisá la cartera con instrumentos, reporte y auditoría — sin tocar firms, advisors ni IDs técnicos. Pensado para mostrar la demo a un profesor o asesor no técnico.
-      </div>
-    </div>
-  </div>
-
-  <div class="card card-hero" id="card-investor-demo">
-    <div class="card-header">
-      <h2>Cargá un perfil y generá la cartera</h2>
-      <div class="pill-cluster">
-        <span class="pill pill-violet">8 pasos</span>
-        <span class="pill pill-blue">advisor-friendly</span>
-        <span class="pill pill-green">sin admin · sin CRUD</span>
-      </div>
-    </div>
-
-    <div class="card-body">
-
-      <div class="ai-disclaimer">
-        <strong>Demo local con universo de instrumentos acotado.</strong>
-        No es asesoramiento financiero real. <strong>La IA asiste, el asesor decide.</strong>
-        El reporte es revisable, no una recomendación automática.
-        Si la demo falla con "case_id no encontrado" o "client_id no encontrado",
-        corré primero: <code>python scripts/bootstrap_local_demo.py</code>.
-      </div>
-
-      <!-- ── Form: perfil del inversor ──────────────────────────────── -->
-      <form id="idemo-form" onsubmit="event.preventDefault();" autocomplete="off" spellcheck="false">
-
-        <div class="section-label" style="margin-top:4px;margin-bottom:14px;">Datos básicos del inversor</div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label>Nombre del inversor demo</label>
-            <input type="text" id="idemo-name" value="María Pérez (demo)" />
-          </div>
-          <div class="field">
-            <label>Edad <span class="hint">18–120</span></label>
-            <input type="number" id="idemo-age" value="42" min="18" max="120" />
-          </div>
-          <div class="field">
-            <label>Jurisdicción</label>
-            <input type="text" id="idemo-jurisdiction" value="AR" />
-          </div>
-          <div class="field">
-            <label>Moneda preferida</label>
-            <select id="idemo-currency">
-              <option value="USD" selected>USD</option>
-              <option value="EUR">EUR</option>
-              <option value="ARS">ARS</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Ingreso anual estimado (USD)</label>
-            <input type="number" id="idemo-income" value="80000" min="0" />
-          </div>
-          <div class="field">
-            <label>Patrimonio líquido estimado (USD)</label>
-            <input type="number" id="idemo-liquid" value="150000" min="0" oninput="idemoUpdateTradeoffPreview()" />
-          </div>
-          <div class="field">
-            <label>Horizonte de inversión (años) <span class="hint">&gt; 0</span></label>
-            <input type="number" id="idemo-horizon" value="10" min="1" />
-          </div>
-          <div class="field">
-            <label>Tolerancia al riesgo <span class="hint">se calcula con el cuestionario ↓</span></label>
-            <input type="text" id="idemo-risk-preview" value="— responder cuestionario" readonly />
-          </div>
-          <div class="field">
-            <label>Objetivo principal</label>
-            <select id="idemo-objective">
-              <option value="capital_preservation">Preservación de capital</option>
-              <option value="income">Ingresos</option>
-              <option value="balanced" selected>Balanceado</option>
-              <option value="growth">Crecimiento</option>
-              <option value="aggressive_growth">Crecimiento agresivo</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Necesidad de liquidez</label>
-            <select id="idemo-liquidity">
-              <option value="baja">Baja</option>
-              <option value="media" selected>Media</option>
-              <option value="alta">Alta</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Experiencia invirtiendo</label>
-            <select id="idemo-experience">
-              <option value="ninguna">Ninguna</option>
-              <option value="basica">Básica</option>
-              <option value="moderada" selected>Moderada</option>
-              <option value="avanzada">Avanzada</option>
-              <option value="experto">Experto</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Estabilidad del ingreso <span class="hint">capacidad, no tolerancia</span></label>
-            <select id="idemo-income-stability">
-              <option value="stable" selected>Estable</option>
-              <option value="variable">Variable</option>
-              <option value="unstable">Inestable</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Personas a cargo (dependientes)</label>
-            <input type="number" id="idemo-dependents" value="0" min="0" />
-          </div>
-          <div class="field">
-            <label>¿Gastos esenciales cubiertos sin tocar esta inversión?</label>
-            <select id="idemo-expenses-covered">
-              <option value="si" selected>Sí</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Cuestionario de tolerancia <span class="hint">Grable-Lytton (1999), escala validada de 13 ítems</span></div>
-        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
-          <strong>Respondé con honestidad — no hay respuesta correcta.</strong> La meta es que tu
-          cartera coincida con lo que <strong>realmente</strong> vas a tolerar cuando el mercado caiga,
-          no con lo que te gustaría tolerar. Si exagerás tu aguante, la cartera te va a doler de verdad.
-          Esto no mide tu conducta futura: te ayuda a ser honesto con vos mismo.
-        </div>
-        <div id="idemo-gl-container" style="display:grid;gap:14px;">
-          <div style="opacity:.7;font-size:13px;">Cargando cuestionario…</div>
-        </div>
-        <div id="idemo-gl-preview" style="margin-top:12px;font-size:13px;padding:10px 12px;border-radius:8px;background:#f1f5f9;color:#475569;">
-          Tolerancia estimada: <strong id="idemo-gl-score">—</strong> · respondidas <span id="idemo-gl-count">0</span>/13
-        </div>
-
-        <div class="section-label" style="margin-top:24px;margin-bottom:14px;">Preguntas abiertas</div>
-        <div class="form-grid cols-2">
-          <div class="field full-span">
-            <label>¿Cuál es tu objetivo principal de inversión?</label>
-            <textarea id="idemo-open-goal" rows="2">Ahorro de largo plazo con horizonte 10 años, objetivo jubilación.</textarea>
-          </div>
-          <div class="field full-span">
-            <label>Imaginá que tu cartera cae 30% en pocas semanas. ¿Qué harías? <span class="hint">señal revelada del Risk Gap</span></label>
-            <select id="idemo-open-reaction-choice">
-              <option value="Vendería todo, no aguanto seguir perdiendo">Vendería todo, no aguanto seguir perdiendo</option>
-              <option value="Vendería una parte para bajar el riesgo">Vendería una parte para bajar el riesgo</option>
-              <option value="No tocaría nada, esperaría la recuperación" selected>No tocaría nada, esperaría la recuperación</option>
-              <option value="Compraría más, aprovecho que está barato">Compraría más, aprovecho que está barato</option>
-            </select>
-          </div>
-          <div class="field full-span">
-            <label>¿Qué experiencia tenés invirtiendo?</label>
-            <textarea id="idemo-open-experience" rows="2">Inversiones previas en ETFs USD y bonos soberanos AR hard dollar.</textarea>
-          </div>
-          <div class="field full-span">
-            <label>¿Qué preocupaciones o restricciones tenés?</label>
-            <textarea id="idemo-open-concerns" rows="2">Volatilidad cambiaria; riesgo de duración en renta fija; preferencia por hard dollar.</textarea>
-          </div>
-        </div>
-
-        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Pregunta de trade-off <span class="hint">opcional — certainty equivalent, cruza con el cuestionario</span></div>
-        <div class="idemo-honesty" style="border:1px solid #d9c98a;background:#fdf9ec;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.55;">
-          <strong>Pensá en plata real tuya.</strong> Te ofrecen una apuesta 50/50: ganás
-          <strong id="idemo-tradeoff-gain-label">$15.000</strong> o perdés <strong id="idemo-tradeoff-loss-label">$7.500</strong>.
-          ¿Qué monto <strong>SEGURO</strong> (sin apostar) te resulta indiferente frente a esa apuesta?
-          Es un cruce de control contra el cuestionario de arriba — no la respondas "para quedar bien",
-          sirve para detectar contradicciones entre lo que decís y lo que realmente tolerás.
-        </div>
-        <div class="form-grid cols-3">
-          <div class="field">
-            <label style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="idemo-tradeoff-enabled" checked style="width:auto;" onchange="idemoUpdateTradeoffPreview()" />
-              Responder la pregunta de trade-off
-            </label>
-          </div>
-          <div class="field">
-            <label>Monto seguro indiferente (USD) <span class="hint" id="idemo-tradeoff-range-hint">rango: -7.500 a 15.000</span></label>
-            <input type="number" id="idemo-tradeoff-certain" value="3000" step="100" oninput="idemoUpdateTradeoffPreview()" />
-            <div id="idemo-tradeoff-warning" style="display:none;margin-top:6px;font-size:12px;color:#a33;"></div>
-          </div>
-        </div>
-
-        <div class="section-label" style="margin-top:24px;margin-bottom:8px;">Universo de instrumentos</div>
-        <div style="border:1px solid var(--rf-border);background:var(--rf-bg-subtle,#fafbfc);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.55;color:var(--rf-text-body);">
-          El universo es el que traen las fuentes de datos del bróker (data912 / yfinance en este demo).
-          El asesor <strong>no</strong> elige los instrumentos permitidos — eso lo configura el bróker / admin
-          (p. ej. restricciones operativas). El optimizador trabaja sobre ese universo, filtrado por
-          governance · suitability · ESG · calidad de datos.
-        </div>
-
-      </form>
-
-      <!-- ── Mini toolbar arriba del walkthrough ────────────────────── -->
-      <div class="idemo-walkthrough-intro">
-        <div>
-          <div class="idemo-walkthrough-eyebrow">Recorrido didáctico · 8 pasos</div>
-          <div class="idemo-walkthrough-title">Hacé clic en cada paso, leé qué pasa, mirá el resultado</div>
-          <div class="idemo-walkthrough-sub">El resultado de cada paso aparece debajo del botón. Pensado para presentar a un profesor o asesor no técnico sin que tenga que leer JSON ni endpoints.</div>
-        </div>
-        <button class="btn-secondary" onclick="idemoReset()">Reiniciar walkthrough</button>
-      </div>
-
-      <!-- ── WALKTHROUGH: 8 step cards didácticas ───────────────────── -->
-      <div class="idemo-walkthrough">
-
-        <!-- STEP 1 — Preparar caso -->
-        <article class="idemo-walkthrough-step" id="idemo-step-prepare" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">1</div>
-            <div class="idemo-step-card-title">Preparar el caso del inversor</div>
-            <div class="idemo-step-card-pill" id="idemo-step-prepare-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> crea internamente un <em>caso de asesoría</em> nuevo para este inversor. Reusa la firm y el cliente del seed local.</p>
-              <p><strong>Por qué importa:</strong> el caso es el contenedor donde van a vivir TODAS las decisiones siguientes (KYC, aprobación, override, selección, reporte). Es lo que después se audita.</p>
-              <p><strong>Qué mirar:</strong> el ID interno del caso y el título derivado del nombre del inversor que cargaste arriba.</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoPrepareCase()">Preparar caso</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-prepare-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 2 — KYC -->
-        <article class="idemo-walkthrough-step" id="idemo-step-kyc" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">2</div>
-            <div class="idemo-step-card-title">Enviar perfil / KYC del inversor</div>
-            <div class="idemo-step-card-pill" id="idemo-step-kyc-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> arma el KYC estructurado a partir del formulario de arriba (edad, scores de tolerancia y capacidad de riesgo, horizonte, objetivo, financials, preguntas abiertas) y lo guarda como un <em>submission</em> versionado del caso.</p>
-              <p><strong>Por qué importa:</strong> es el insumo que la IA va a leer en el paso 3. Cada nuevo envío de KYC incrementa la versión y queda en el audit trail — no se pisa el anterior.</p>
-              <p><strong>Qué mirar:</strong> el número de versión que devuelve el backend (1 en el primer envío).</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoSubmitKyc()">Enviar perfil / KYC</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-kyc-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 3 — AI -->
-        <article class="idemo-walkthrough-step" id="idemo-step-ai" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">3</div>
-            <div class="idemo-step-card-title">La IA analiza el perfil</div>
-            <div class="idemo-step-card-pill" id="idemo-step-ai-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> la IA (OpenAI) lee el KYC estructurado y las respuestas en texto libre, <em>propone</em> un perfil de riesgo preliminar y detecta contradicciones (por ejemplo, tolerancia baja con expectativa de retorno alta).</p>
-              <p><strong>Por qué importa:</strong> <strong>la IA propone, no decide.</strong> Nunca aprueba el perfil, nunca firma una recomendación, nunca elige una cartera. Solo asiste al asesor con un análisis estructurado.</p>
-              <p><strong>Qué mirar:</strong> el perfil sugerido y la cantidad de contradicciones / preguntas de seguimiento. <em>Si la demo local no tiene <code>OPENAI_API_KEY</code> configurada, este paso se reporta como saltado y se sigue con "moderado" como perfil sugerido.</em></p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoRunAiProfile()">Analizar perfil con IA</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-ai-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 4 — Approval -->
-        <article class="idemo-walkthrough-step" id="idemo-step-approve" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">4</div>
-            <div class="idemo-step-card-title">El asesor aprueba el perfil</div>
-            <div class="idemo-step-card-pill" id="idemo-step-approve-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> el asesor humano revisa la propuesta de la IA y la <em>aprueba</em>, la <em>modifica</em> o la <em>rechaza</em>, con un texto de justificación. En la demo guiada, simulamos la aprobación.</p>
-              <p><strong>Por qué importa:</strong> <strong>el asesor es siempre el actor vinculante.</strong> El perfil aprobado es lo que después conduce la generación de la cartera. Nada se hace sin esta firma.</p>
-              <p><strong>Qué mirar:</strong> el perfil aprobado final (puede coincidir con el propuesto o ser distinto) y la decisión registrada.</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoApproveProfile()">Aprobar perfil como asesor</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-approve-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 5 — Proposal -->
-        <article class="idemo-walkthrough-step" id="idemo-step-propose" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">5</div>
-            <div class="idemo-step-card-title">Generar la propuesta de cartera</div>
-            <div class="idemo-step-card-pill" id="idemo-step-propose-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> internamente corre tres pasos en cadena: registra las preferencias del inversor (tipos de instrumentos, hard dollar), filtra el universo de instrumentos elegibles, y genera hasta tres variantes de cartera: <strong>DEFENSIVE</strong>, <strong>BALANCED</strong> y <strong>GROWTH</strong>.</p>
-              <p><strong>Por qué importa:</strong> el <strong>universo de instrumentos es acotado / demo</strong> (~20 instrumentos del fixture); no es market data productivo. Cada variante muestra <strong>instrumentos concretos con pesos</strong> — no un score abstracto.</p>
-              <p><strong>Qué mirar:</strong> la tabla comparativa de las 3 variantes (retorno esperado, volatilidad, # instrumentos, si requiere override) y, dentro de cada card, los instrumentos con sus pesos y motivo de inclusión.</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoGenerateProposal()">Generar propuesta</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-propose-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 6 — Selection -->
-        <article class="idemo-walkthrough-step" id="idemo-step-select" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">6</div>
-            <div class="idemo-step-card-title">El asesor selecciona la cartera final</div>
-            <div class="idemo-step-card-pill" id="idemo-step-select-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> el asesor elige una de las variantes generadas como recomendación final para el cliente. En la demo elegimos automáticamente la primera variante "dentro del presupuesto de riesgo" (típicamente BALANCED).</p>
-              <p><strong>Por qué importa:</strong> si la variante elegida <strong>excede el presupuesto de riesgo aprobado</strong> (típicamente GROWTH), el sistema <strong>exige un override firmado</strong> por escrito antes de permitir la selección. En la demo lo firmamos automáticamente con un rationale demo, pero el principio es: <em>nada se salta el control</em>.</p>
-              <p><strong>Qué mirar:</strong> la variante seleccionada y la composición completa con instrumentos y pesos. Si la selección requirió override, aparece el pill ámbar "firmado con override".</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoSelectPortfolio()">Seleccionar cartera</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-select-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 7 — Report -->
-        <article class="idemo-walkthrough-step" id="idemo-step-report" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">7</div>
-            <div class="idemo-step-card-title">Generar el reporte para el cliente</div>
-            <div class="idemo-step-card-pill" id="idemo-step-report-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> genera un reporte Markdown determinístico que consolida la cartera seleccionada — con tabla de composición ("Instrumento · Tipo · Moneda · Peso · Motivo") y comparación de variantes generadas.</p>
-              <p><strong>Por qué importa:</strong> <strong>el reporte es revisable, no una recomendación automática.</strong> El asesor lo revisa antes de compartirlo con el cliente. <strong>No hay botón de "enviar al cliente"</strong> — la entrega es responsabilidad del asesor humano.</p>
-              <p><strong>Qué mirar:</strong> la vista previa del Markdown con las secciones "Composición de la cartera seleccionada" y "Comparación de variantes generadas" presentes.</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoGenerateReport()">Generar reporte</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-report-result"></div>
-          </div>
-        </article>
-
-        <!-- STEP 8 — Audit -->
-        <article class="idemo-walkthrough-step" id="idemo-step-audit" data-state="pending">
-          <header class="idemo-step-card-header">
-            <div class="idemo-step-card-num">8</div>
-            <div class="idemo-step-card-title">Verificar la trazabilidad (auditoría)</div>
-            <div class="idemo-step-card-pill" id="idemo-step-audit-pill"><span class="pill pill-grey">pendiente</span></div>
-          </header>
-          <div class="idemo-step-card-body">
-            <div class="idemo-step-card-explain">
-              <p><strong>Qué hace:</strong> recomputa la cadena de hashes SHA-256 del caso y verifica que <strong>ninguna decisión fue alterada</strong>. Cada paso del walkthrough (caso creado, KYC enviado, IA analizó, asesor aprobó, override firmado, cartera seleccionada, reporte generado) dejó un evento encadenado.</p>
-              <p><strong>Por qué importa:</strong> la <strong>auditoría verifica trazabilidad</strong>. Si un actor con acceso a la DB tocara un payload retroactivamente, la cadena se rompe y esta verificación lo detecta. Es el "libro de actas inmutable" del caso.</p>
-              <p><strong>Qué mirar:</strong> pill verde "cadena intacta" sobre el total de eventos registrados. Si por algún motivo apareciera "cadena rota", el número de evento dañado sale en el resultado.</p>
-            </div>
-            <div class="idemo-step-card-actions">
-              <button class="btn-primary" onclick="idemoVerifyAudit()">Verificar auditoría</button>
-            </div>
-            <div class="idemo-step-card-result" id="idemo-step-audit-result"></div>
-          </div>
-        </article>
-
-      </div>
-
-      <div class="fine-print" style="margin-top:24px;">
-        ¿Querés ver los detalles técnicos crudos (JSON, endpoints, hash chain completo,
-        Dashboard y Workbench paso a paso, demos previos de Fase 0/1)? Está todo en
-        <a href="advanced.html"><strong>Modo técnico</strong></a>.
-      </div>
-
-      <!-- ── Modo rápido técnico (demoted, colapsado por default) ───── -->
-      <details class="idemo-fast-mode">
-        <summary>
-          <span class="idemo-fast-icon">⚡</span>
-          <span class="idemo-fast-title">Modo rápido técnico (opcional · no recomendado para presentación)</span>
-        </summary>
-        <div class="idemo-fast-body">
-          <p>
-            Esto NO es el camino recomendado para mostrar la demo a un profesor o asesor.
-            Se saltea las explicaciones de cada paso y corre los 8 endpoints en cadena en ~3 segundos.
-            Útil solo para devs que quieren verificar que el flujo end-to-end funciona sin clickear los 8 botones.
-          </p>
-          <div class="actions">
-            <button class="btn-secondary" id="idemo-btn-guided" onclick="idemoRunGuidedDemo()">
-              Ejecutar los 8 pasos automáticamente
-            </button>
-          </div>
-        </div>
-      </details>
-
-    </div>
-  </div>
-
 
 </main>
 
-<!-- case-workbench.js solo define helpers (cwRenderHoldingsTable, cwNormalizeHoldings,
-     cwRenderCandidateCard) que reusa investor-demo.js. No tiene init de DOM, no
-     renderiza el Workbench (su HTML vive en advanced.html). -->
-<script src="js/common.js"></script>
-<script src="js/case-workbench.js"></script>
-<script src="js/investor-demo.js"></script>
+<footer class="site-footer">
+  <div>
+    <div class="foot-brand"><span class="nav-brand-dot"></span>Risk-First Advisory</div>
+    <div style="margin-top:6px;">Demo local · no productivo · no es asesoramiento financiero</div>
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="foot-links">
+    <a href="index.html">Inicio</a>
+    <a href="client.html">Cliente</a>
+    <a href="advisor.html">Asesor</a>
+    <a href="compliance.html">Compliance</a>
+    <a href="methodology.html">Metodología</a>
+    <a href="advanced.html">Modo dev</a>
+  </div>
+  <div class="foot-note">La IA propone, el asesor decide, cada paso queda auditado. Sin PII real de clientes, sin auth productiva.</div>
+</footer>
 
 </body>
 </html>
