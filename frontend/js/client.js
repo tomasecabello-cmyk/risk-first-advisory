@@ -185,6 +185,29 @@ function clientWaitingBlock(progress) {
   );
 }
 
+// Última nota del asesor (AuditEvent event_type="advisor_note", mismo patrón
+// que advisorFetchNotes en advisor.js — ese archivo no se carga en esta página).
+async function clientFetchAdvisorNote(caseId) {
+  const res = await idemoApi("GET", `/cases/${encodeURIComponent(caseId)}/audit`);
+  if (!res.ok || !res.json) return null;
+  const evs = res.json.events || res.json.audit_events || [];
+  const notes = evs.filter(e => e.event_type === "advisor_note");
+  return notes.length ? notes[notes.length - 1] : null;
+}
+
+function clientAdvisorNoteBlock(note) {
+  if (!note || !note.payload || !note.payload.text) return "";
+  const p = note.payload;
+  const when = (p.at || note.created_at_utc || "").slice(0, 16).replace("T", " ");
+  return (
+    `<div class="section-label" style="margin:16px 0 4px;">Comentario de tu asesor</div>` +
+    `<div style="border-left:3px solid var(--rf-violet-700,#7c5cbf);padding:10px 14px;background:var(--rf-bg-subtle,#fafbfc);border-radius:0 6px 6px 0;">` +
+      `<div style="font-size:13px;white-space:pre-wrap;">${escapeHTML(p.text)}</div>` +
+      (when ? `<div style="font-size:11px;opacity:.65;margin-top:6px;">${escapeHTML(when)} · quedó auditado</div>` : "") +
+    `</div>`
+  );
+}
+
 function clientOpenCaseView() {
   const card = document.getElementById("client-case-card");
   if (card) card.style.display = "";
@@ -216,6 +239,7 @@ async function clientLoadCase() {
   const sel = s.current_portfolio_selection || null;
   const prop = s.current_portfolio_proposal || null;
   const rep = s.current_report || null;
+  const note = await clientFetchAdvisorNote(caseId);
 
   let html =
     `<div style="font-size:12px;opacity:.7;margin-top:4px;">Caso <code>${escapeHTML(caseId)}</code></div>`;
@@ -236,6 +260,8 @@ async function clientLoadCase() {
         `</details>`;
     }
   }
+
+  html += clientAdvisorNoteBlock(note);
 
   if (rep) {
     html += `<div class="section-label" style="margin:16px 0 4px;">Tu reporte</div>`;
