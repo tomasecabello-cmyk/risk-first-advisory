@@ -9,7 +9,6 @@ dist/
 .env
 .vscode/
 *.zip
-*.zip
 .claude/
 reports/
 data/
@@ -20,3 +19,9 @@ config/advisor_tokens.yaml
 
 # capturas de trabajo (no es codigo)
 screenshots analysis/
+
+# manifiesto del instalador de skills global (no es del repo)
+skills-lock.json
+
+# pitch decks generados por scripts/build_*_pitch_deck.py (artefactos, no fuente)
+*.pptx
