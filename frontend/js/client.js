@@ -6,6 +6,40 @@
  * es seguro reusarlos acá.
  * ==========================================================================*/
 
+// ── Wizard: navegación paso a paso ─────────────────────────────────────────
+const CLIENT_WIZARD_STEPS = 4;
+let clientWizardStep = 1;
+
+function clientWizardShow(n) {
+  clientWizardStep = Math.max(1, Math.min(CLIENT_WIZARD_STEPS, n));
+  document.querySelectorAll(".wizard-step").forEach(s => {
+    s.classList.toggle("is-active", Number(s.getAttribute("data-step")) === clientWizardStep);
+  });
+  // progreso: nodos y barras
+  document.querySelectorAll(".wizard-progress .wz-node").forEach(node => {
+    const i = Number(node.getAttribute("data-node"));
+    node.classList.toggle("is-active", i === clientWizardStep);
+    node.classList.toggle("is-done", i < clientWizardStep);
+  });
+  document.querySelectorAll(".wizard-progress .wz-bar").forEach(bar => {
+    bar.classList.toggle("is-done", Number(bar.getAttribute("data-bar")) < clientWizardStep);
+  });
+  // botones
+  const back = document.getElementById("client-back-btn");
+  const next = document.getElementById("client-next-btn");
+  const submit = document.getElementById("client-submit-btn");
+  if (back) back.style.visibility = clientWizardStep === 1 ? "hidden" : "visible";
+  const last = clientWizardStep === CLIENT_WIZARD_STEPS;
+  if (next) next.style.display = last ? "none" : "inline-flex";
+  if (submit) submit.style.display = last ? "inline-flex" : "none";
+  // scroll suave al inicio de la card
+  const card = document.querySelector(".card-hero .card-body");
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clientWizardNext() { clientWizardShow(clientWizardStep + 1); }
+function clientWizardBack() { clientWizardShow(clientWizardStep - 1); }
+
 async function clientSubmitProfile() {
   const btn = document.getElementById("client-submit-btn");
   const out = document.getElementById("client-result");
@@ -108,3 +142,8 @@ function clientClosing() {
 function clientError(msg) {
   return `<div class="msg msg-error">${msg}</div>`;
 }
+
+// init del wizard
+document.addEventListener("DOMContentLoaded", function () {
+  if (document.getElementById("client-wizard-progress")) clientWizardShow(1);
+});

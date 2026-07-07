@@ -1639,6 +1639,48 @@ details.demo-path[open] > *:not(summary) {
 .bandeja-row .b-id    { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
                         font-size: 11px; color: var(--rf-text-faint); }
 
+/* ── client wizard (formulario paso a paso) ──────────────────────────────── */
+.wizard-progress {
+  display: flex; align-items: center; gap: 0; margin: 4px 0 22px;
+}
+.wizard-progress .wz-node {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  flex: 0 0 auto; position: relative;
+}
+.wizard-progress .wz-dot {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  background: var(--rf-card); color: var(--rf-text-faint);
+  border: 2px solid var(--rf-border-strong); transition: all .2s ease;
+}
+.wizard-progress .wz-node.is-active .wz-dot {
+  background: var(--rf-navy-600); color: #fff; border-color: var(--rf-navy-600);
+  box-shadow: 0 0 0 4px rgba(29,78,216,.15);
+}
+.wizard-progress .wz-node.is-done .wz-dot {
+  background: var(--rf-emerald-600); color: #fff; border-color: var(--rf-emerald-600);
+}
+.wizard-progress .wz-label {
+  font-size: 11px; font-weight: 600; color: var(--rf-text-muted); white-space: nowrap;
+}
+.wizard-progress .wz-node.is-active .wz-label { color: var(--rf-navy-700); }
+.wizard-progress .wz-bar {
+  flex: 1 1 auto; height: 2px; background: var(--rf-border-strong);
+  margin: 0 6px; align-self: flex-start; margin-top: 15px; min-width: 20px;
+}
+.wizard-progress .wz-bar.is-done { background: var(--rf-emerald-600); }
+.wizard-step { display: none; animation: rfFadeUp .35s ease both; }
+.wizard-step.is-active { display: block; }
+.wizard-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px;
+  border-top: 1px solid var(--rf-border); padding-top: 18px; }
+.wizard-step-title { font-size: 18px; font-weight: 800; color: var(--rf-navy-900);
+  letter-spacing: -.01em; margin-bottom: 4px; }
+.wizard-step-sub { color: var(--rf-text-muted); font-size: 13.5px; margin-bottom: 18px; }
+@media (max-width: 640px) {
+  .wizard-progress .wz-label { display: none; }
+}
+
 /* ── decision segment (approve / modify / reject) ────────────────────────── */
 .decision-seg { display: inline-flex; border: 1px solid var(--rf-border-strong);
   border-radius: var(--rf-radius); overflow: hidden; }
