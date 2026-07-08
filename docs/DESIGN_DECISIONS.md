@@ -241,3 +241,29 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 - El número de cartera es función monótona de la volatilidad (a horizonte/α fijos).
 - Cambió el valor esperado en los tests unitarios (recalibrados a mano) — ningún cambio de contrato en la API (mismas claves salvo que el número ya no expone `cvar`).
 - El universo demo ampliado sólo rinde con `RFA_LIVE_DATA=1` (equities/ETF necesitan precios reales; sin la env var el adapter sólo cubre renta fija). La demo debe correrse con datos en vivo.
+
+---
+
+## DD-014 — Estimación live: Σ Ledoit-Wolf + μ Black-Litterman (portados de markowitz-optimizer)
+
+**Estado:** Aceptado
+**Fecha:** 2026-07-07
+**Área:** `data_layer/estimation.py`, `api_layer` (portfolio-proposal case-scoped), `portfolio_layer/generation.py`
+
+**Contexto:** El path live (`RFA_LIVE_DATA=1`) estimaba μ por media histórica diaria ×252 (2 años) por ticker, y Σ con vols reales pero **correlaciones mock por asset_class** (`CovarianceEngine`). Consecuencias observadas probando "cliente solo-ARG": (1) μ de 30-40% en soberanos post-rally que MAX_RETURN perseguía; (2) correlaciones fijas 0.80/0.85 que negaban diversificación intra-clase e inflaban el piso de vol mínima a ~30% (todo perfil infactible); (3) una serie CEDEAR corrupta (ETHA, vol 119.651%) entraba al optimizador, envenenaba Σ y el solver fallaba con un mensaje genérico sin culpable.
+
+**Decisión:** Nuevo `data_layer/estimation.py` (portado del proyecto hermano `markowitz-optimizer`, sin dependencia cruzada):
+- **Σ = Ledoit-Wolf (2004)** sobre la matriz de retornos diarios ALINEADA (inner join de fechas, ARS→USD CCL): shrinkage hacia identidad escalada con λ óptimo de fórmula cerrada (numpy puro, equivalente a sklearn — no se suma scikit-learn como dependencia). Correlaciones reales, matriz bien condicionada.
+- **μ = Black-Litterman (1992)**: prior de equilibrio Π = δΣw_ref (w_ref equal-weight; no afirmamos conocer el portafolio de mercado ARG+US) mezclado con la media histórica como view (P=I, Ω=diag(τΣ), He & Litterman 2002). Shrinkage de μ hacia un ancla económica; δ=2.5, τ=0.05, rf=4%.
+- **Sanity bound de volatilidad** (`MAX_SANE_VOL=300%` anual): series corruptas se DESCARTAN con razón auditada (persistida en `warnings` del proposal), en el estimador conjunto y en `LiveMarketDataProvider`.
+- **Diagnóstico de infactibilidad**: `PortfolioGenerationInfeasibleError` (subclase de ValueError) conserva reason_codes y notas por variante del pre-check; la API las persiste en `warnings` (incluye `min_achievable_volatility` vs budget y sugerencias). Las variantes omitidas en un proposal `completed` también dejan sus notas.
+- Los tickers sin serie utilizable quedan como snapshots `stale` con la razón en notes (visibles, fuera del optimizador): mezclar μ/σ de fixture con Σ real sería incoherente. Sin `RFA_LIVE_DATA` nada cambia: fixture + `CovarianceEngine` mock, tests y smoke deterministas.
+
+**Resultado medido (2026-07-07):** piso de vol solo-ARG: ~30% (mock) → ~9.7% (LW real) ⇒ `moderado` solo-ARG pasó de infactible a `completed` (BALANCED 10% vol, 100% instrumentos AR); GD29: μ 40%→10.4%, vol 61%→19.6%; `conservador` solo-ARG sigue infactible (correcto) pero ahora con diagnóstico accionable por variante.
+
+**Alternativas descartadas:** (a) depender de scikit-learn (pesado para una fórmula cerrada de 30 líneas); (b) importar markowitz-optimizer como paquete (acoplamiento entre repos con ciclos de vida distintos; se porta el método con crédito); (c) shrinkage solo de Σ sin tocar μ (deja el garbage-in de la media histórica, que era el problema dominante).
+
+**Consecuencias:**
+- La ventana efectiva es la INTERSECCIÓN de fechas de las series (el instrumento más joven la limita); queda registrada en notes (`window=...`, `obs=`).
+- `CovarianceEngine` (correlaciones mock) sigue siendo el motor del modo fixture y el fallback si la estimación conjunta falla (sin red) — el ROADMAP ya no lo lista como deuda del path live.
+- δ, τ, rf y el bound de vol son supuestos DEMO tuneables por parámetro; no reemplazan un proceso de CMA formal.

@@ -55,6 +55,20 @@ RC_GROWTH_EXCEEDS_APPROVED_RISK_BUDGET = "PORTFOLIO_GROWTH_EXCEEDS_APPROVED_RISK
 _DEFENSIVE_MAX_SINGLE_ASSET_CAP = 0.20
 
 
+class PortfolioGenerationInfeasibleError(ValueError):
+    """
+    Ninguna variante resultó factible. Subclase de ValueError (compatibilidad
+    con callers existentes) que CONSERVA el diagnóstico acumulado por variante
+    — reason_codes de los pre-checks y notas con sugerencias accionables — para
+    que la capa API pueda persistirlo en vez de un mensaje genérico.
+    """
+
+    def __init__(self, message: str, reason_codes: list[str], notes: list[str]) -> None:
+        super().__init__(message)
+        self.reason_codes = list(reason_codes)
+        self.notes = list(notes)
+
+
 # ---------------------------------------------------------------------------
 # PortfolioVariant
 # ---------------------------------------------------------------------------
@@ -323,7 +337,9 @@ class PortfolioGenerationCoordinator:
         Genera las tres carteras candidatas.
 
         Raises:
-            ValueError: si ninguna variante es factible.
+            PortfolioGenerationInfeasibleError (subclase de ValueError): si
+            ninguna variante es factible; conserva reason_codes y notas del
+            diagnóstico por variante.
         """
         candidates: dict[PortfolioVariant, OptimizedPortfolio] = {}
         metadata_by_variant: dict[PortfolioVariant, PortfolioVariantMetadata] = {}
@@ -421,10 +437,12 @@ class PortfolioGenerationCoordinator:
                 )
 
         if not candidates:
-            raise ValueError(
+            raise PortfolioGenerationInfeasibleError(
                 f"Ninguna variante (DEFENSIVE, BALANCED, GROWTH) resultó factible "
                 f"para el cliente {client_id!r} con perfil {approved_profile_name!r}. "
-                f"Revisar risk_budget y datos de mercado."
+                f"Revisar risk_budget y datos de mercado.",
+                reason_codes=reason_codes,
+                notes=notes,
             )
 
         return PortfolioCandidateSet(

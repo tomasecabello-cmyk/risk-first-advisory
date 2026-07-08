@@ -24,6 +24,7 @@ from risk_first_advisory.portfolio_layer.generation import (
     RC_VARIANT_INFEASIBLE,
     PortfolioCandidateSet,
     PortfolioGenerationCoordinator,
+    PortfolioGenerationInfeasibleError,
     PortfolioVariant,
     PortfolioVariantMetadata,
 )
@@ -415,6 +416,26 @@ class TestPortfolioGenerationCoordinator:
         )
         with pytest.raises(ValueError, match="factible"):
             self.coordinator.generate("CLI-003", "Moderate", estimates, cm, rb)
+
+    def test_all_infeasible_error_carries_per_variant_diagnostics(self):
+        """
+        La excepción all-infeasible debe CONSERVAR el diagnóstico acumulado
+        (reason_codes de los pre-checks + notas con sugerencias por variante)
+        para que la capa API pueda persistirlo — no un mensaje genérico.
+        """
+        estimates, cm, rb = _build_inputs(
+            max_volatility=0.001,
+            target_volatility=0.001,
+            max_single_asset=0.40,
+        )
+        with pytest.raises(PortfolioGenerationInfeasibleError) as exc_info:
+            self.coordinator.generate("CLI-003", "Moderate", estimates, cm, rb)
+        err = exc_info.value
+        assert RC_VARIANT_INFEASIBLE in err.reason_codes
+        # Cada variante omitida dejó al menos una nota mencionándola.
+        joined = " ".join(err.notes)
+        for variant in ("DEFENSIVE", "BALANCED", "GROWTH"):
+            assert variant in joined
 
 
 # ---------------------------------------------------------------------------

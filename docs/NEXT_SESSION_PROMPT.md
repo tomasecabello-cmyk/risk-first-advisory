@@ -32,9 +32,10 @@ Elegir del ROADMAP (único backlog):
    cuando el proposal contiene una que sí lo requiere. Decidir si
    `has_override_requirement` debe computarse contra la **selección** y ajustar
    summary + smoke check + tests.
-2. **Grande, Fase 3**: universo dinámico pleno — el candidato más jugoso es
-   **correlaciones reales** (`CovarianceEngine` hoy usa correlaciones mock por
-   asset_class).
+2. **Grande, Fase 3**: universo dinámico pleno — generación on-demand del universo,
+   bróker como filtro de disponibilidad, YTM como view de Black-Litterman para renta
+   fija. (Las correlaciones reales ya están: DD-014, Σ Ledoit-Wolf + μ Black-Litterman
+   en el path live, portados de markowitz-optimizer el 2026-07-07.)
 
 ## Cómo correr la demo
 

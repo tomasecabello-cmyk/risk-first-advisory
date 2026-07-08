@@ -10,11 +10,10 @@
 - Generación on-demand por request (hoy: CSV pre-generado por `scripts/build_arg_universe.py`).
 - "Bróker" como filtro de disponibilidad (`available_entities` ya está en el schema).
 - Bonos peso ARS-nativos (Lecaps/CER) — hoy fuera de alcance por ruido de devaluación (marco USD/CCL).
-- **Correlaciones reales**: `CovarianceEngine` usa correlaciones mock por asset_class.
-- **Retornos esperados menos naive**: `live_market_data` usa media histórica diaria ×252
-  (2 años) clippeada a ±100%. Post-rally ARG eso da μ de 30-40% en soberanos que
-  MAX_RETURN persigue. Considerar shrinkage, equilibrio (Black-Litterman/CAPM) o YTM
-  para renta fija.
+- **Correlaciones/μ reales en modo fixture**: el path live ya estima Σ con Ledoit-Wolf
+  y μ con Black-Litterman sobre series alineadas (DD-014, `data_layer/estimation.py`);
+  `CovarianceEngine` (correlaciones mock por asset_class) queda solo como motor del
+  modo fixture y fallback sin red. YTM para renta fija sigue pendiente como view de BL.
 - La demo debe correr SIEMPRE con `RFA_LIVE_DATA=1` (el CSV solo cubre renta fija con precio).
 
 ## Fase 4 — pilot readiness (asesor piloto real; no producción aún)
@@ -44,17 +43,10 @@
 - **Cache de extracción de preferencias OpenAI** (`hash(texto)` + TTL) para no re-llamar
   con texto idéntico.
 - **Firma digital** del rationale del asesor (hoy texto libre sin identidad verificada).
-- **Data quality no ataja volatilidades absurdas** (encontrado probando "solo ARG"
-  2026-07-07): ETHA llegó al optimizador con vol anualizada 119.651% (serie CEDEAR
-  corrupta, probablemente cambio de ratio), envenenó la matriz y el solver SLSQP falló
-  → proposal `infeasible` sin señalar el instrumento culpable. Falta un sanity bound
-  (p. ej. vol > 300% ⇒ FAIL de data quality o descarte en el provider live) y revisar
-  series CEDEAR con saltos de ratio (IBM 137%, NFLX 149% también sospechosos).
-- **Proposal all-infeasible pierde el diagnóstico**: cuando ninguna variante es
-  factible, `PortfolioGenerationCoordinator.generate()` levanta ValueError y la API
-  solo persiste un warning genérico — los `failed_checks` y `suggested_actions` del
-  feasibility pre-check por variante no llegan a la respuesta. El asesor ve
-  "infeasible" sin saber qué tocar.
+- **Series CEDEAR con saltos de ratio**: el sanity bound (DD-014) descarta las
+  corruptas obvias (vol > 300%), pero series con saltos de ratio dentro del umbral
+  (IBM ~137%, NFLX ~149% anual en la ventana larga) inflan σ sin ser descartadas.
+  Detectar y ajustar saltos de ratio en el provider (o acortar/limpiar la serie).
 - **`next_recommended_action` queda en `review_override`** si el proposal tiene alguna
   variante que requiere override pero el asesor seleccionó una que NO lo requiere:
   `has_override_requirement` se computa a nivel proposal, no a nivel selection, así que

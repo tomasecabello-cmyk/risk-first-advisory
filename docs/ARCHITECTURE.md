@@ -68,7 +68,8 @@ Contiene cuatro sub-módulos independientes:
 | `market_data` | Provee snapshots de mercado por ticker (`MockMarketDataProvider`). Si un ticker no tiene snapshot, devuelve `None`. |
 | `data_quality` | Evalúa si el snapshot es utilizable: detecta datos stale, campos críticos faltantes, liquidez baja, volatilidad cero en non-cash. |
 | `return_estimator` | Estima retornos esperados anuales por ticker a partir del snapshot y los resultados de ESG/DQ. |
-| `covariance` | Construye la matriz de covarianza a partir de los snapshots finales. |
+| `covariance` | Construye la matriz de covarianza a partir de los snapshots finales (correlaciones mock por asset_class — modo fixture y fallback sin red). |
+| `estimation` | Modo live (`RFA_LIVE_DATA=1`): μ Black-Litterman + Σ Ledoit-Wolf sobre las series reales alineadas (inner join de fechas, ARS→USD CCL), con sanity bound de volatilidad y descartes auditados. Portado de markowitz-optimizer (DD-014). |
 
 - **Qué NO hace:** no filtra por suitability, no evalúa ESG, no optimiza.
 

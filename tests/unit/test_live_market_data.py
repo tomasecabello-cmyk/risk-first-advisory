@@ -78,6 +78,17 @@ def test_provider_error_returns_none():
     assert prov.get_snapshot("X") is None
 
 
+def test_absurd_volatility_returns_none():
+    # Serie corrupta (saltos de ratio estilo CEDEAR): vol anualizada absurda.
+    # No debe producir snapshot — un dato así envenena Σ y rompe el optimizador.
+    def _corrupt(sym, source, period):
+        idx = pd.date_range("2024-01-01", periods=120, freq="D")
+        prices = [100.0 * (50.0 if i % 2 else 1.0) for i in range(120)]
+        return PriceSeries(sym, "us", "USD", "equity", pd.Series(prices, index=idx))
+    prov = LiveMarketDataProvider({"ETHA": "us"}, _fetch=_corrupt)
+    assert prov.get_snapshot("ETHA") is None
+
+
 def test_get_many_skips_failures():
     def _mixed(sym, source, period):
         if sym == "BAD":

@@ -30,6 +30,11 @@ from risk_first_advisory.data_layer.providers import (
 _TRADING_DAYS = 252
 _MIN_OBS = 40  # ONs tienen histórico corto; umbral más laxo que yfinance puro
 
+# Vol anualizada máxima "sana" (ver data_layer/estimation.MAX_SANE_VOL). Series
+# con vol por encima se asumen corruptas (ratios de CEDEAR sin ajustar, precios
+# basura) y NO producen snapshot: mejor sin dato que con un dato que envenena Σ.
+_MAX_SANE_VOL = 3.0
+
 
 def instrument_type_to_source(instrument_type: str, country: str = "") -> str:
     """
@@ -114,6 +119,9 @@ class LiveMarketDataProvider:
 
         exp_return = max(-1.0, min(1.0, float(daily.mean()) * _TRADING_DAYS))
         vol = max(0.0, float(daily.std()) * math.sqrt(_TRADING_DAYS))
+        if vol > _MAX_SANE_VOL:
+            # Serie corrupta: sin snapshot (mismo contrato que un fetch fallido).
+            return None
         asset_class = "fixed_income" if ps.kind == "bond" else "equity"
         currency = "USD" if (self._normalize_usd and ps.currency == "ARS") else ps.currency
 

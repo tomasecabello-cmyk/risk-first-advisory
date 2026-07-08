@@ -4960,6 +4960,112 @@ def _apply_live_market_data(instruments: list[Any], adapter_snapshots: list[Any]
     return ordered
 
 
+def _apply_live_joint_market_data(
+    instruments: list[Any], adapter_snapshots: list[Any]
+) -> tuple[list[Any], Any | None, list[str]]:
+    """
+    Estimación CONJUNTA sobre series reales: además de reemplazar μ/σ por datos
+    live, estima la covarianza real con Ledoit-Wolf y μ con Black-Litterman
+    sobre la matriz de retornos alineada (data_layer/estimation, portado de
+    markowitz-optimizer). Devuelve (snapshots, covariance | None, warnings).
+
+    - Los tickers estimados van PRIMERO y en el orden del estimador, así el
+      filtro is_usable produce una lista alineada 1:1 con covariance.tickers.
+    - Los no estimados (fetch fallido, historia corta, vol absurda) quedan como
+      snapshots stale con la razón en notes: visibles pero fuera del optimizador.
+      Mezclar μ/σ del fixture con una Σ real seria estadísticamente incoherente.
+    - Si la estimación conjunta entera falla (sin red, < 2 series), degrada al
+      reemplazo per-ticker de _apply_live_market_data con covarianza mock
+      (covariance=None) y lo deja avisado en warnings.
+    """
+    import dataclasses
+
+    from risk_first_advisory.data_layer.estimation import (
+        EstimationError,
+        estimate_joint_moments,
+    )
+    from risk_first_advisory.data_layer.live_market_data import (
+        instrument_type_to_source,
+    )
+    from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
+
+    source_map: dict[str, str] = {}
+    declared_class: dict[str, str] = {}
+    for inst in instruments:
+        ticker = getattr(inst, "ticker", None)
+        if not ticker:
+            continue
+        itype = getattr(inst, "instrument_type", None)
+        itype_str = str(getattr(itype, "value", None) or itype or "")
+        source_map[ticker] = instrument_type_to_source(
+            itype_str, getattr(inst, "country", "") or ""
+        )
+        ac = getattr(inst, "asset_class", None)
+        ac_str = str(getattr(ac, "value", None) or ac or "")
+        if ac_str.upper() == "FIXED_INCOME":
+            declared_class[ticker] = "fixed_income"
+    if not source_map:
+        return adapter_snapshots, None, []
+
+    try:
+        est = estimate_joint_moments(source_map, period="3y")
+    except EstimationError as exc:
+        snaps = _apply_live_market_data(instruments, adapter_snapshots)
+        return snaps, None, [
+            f"live: estimación conjunta no disponible ({exc}); "
+            "fallback per-ticker con correlaciones mock por asset_class."
+        ]
+
+    estimated: list[Any] = []
+    for t in est.tickers:
+        m = est.meta[t]
+        asset_class = declared_class.get(t) or (
+            "fixed_income" if m.get("kind") == "bond" else "equity"
+        )
+        estimated.append(MarketDataSnapshot(
+            ticker=t,
+            expected_return_annual=round(est.mu[t], 6),
+            volatility_annual=round(est.vol[t], 6),
+            liquidity_score=0.7,  # heurística neutra, igual que el provider per-ticker
+            expense_ratio=0.0,
+            duration=None,
+            asset_class=asset_class,
+            currency="USD",
+            stale=False,
+            missing_fields=["expense_ratio"],
+            notes=[
+                f"source={m.get('source')}",
+                f"ccy_native={m.get('ccy_native')}",
+                f"obs={m.get('obs')}",
+                f"mu_hist={est.mu_hist[t]:.4f}",
+                f"mu=black_litterman sigma=ledoit_wolf(lambda={est.shrinkage:.3f})",
+            ],
+        ))
+
+    dropped_reason = {d["ticker"]: d["reason"] for d in est.dropped}
+    estimated_set = set(est.tickers)
+    rest: list[Any] = []
+    for snap in adapter_snapshots:
+        if snap.ticker in estimated_set:
+            continue
+        reason = dropped_reason.get(snap.ticker, "sin serie live utilizable")
+        rest.append(dataclasses.replace(
+            snap,
+            stale=True,
+            notes=[*snap.notes, f"excluded_from_live_estimation: {reason}"],
+        ))
+
+    warnings = [
+        f"live: {d['ticker']} excluido de la estimación — {d['reason']}"
+        for d in est.dropped
+    ]
+    warnings.append(
+        f"live: μ=Black-Litterman, Σ=Ledoit-Wolf (λ={est.shrinkage:.3f}) "
+        f"sobre {len(est.tickers)} series alineadas."
+    )
+    return estimated + rest, est.covariance, warnings
+
+
 def _serialize_snapshot_for_proposal(snap: Any) -> dict[str, Any]:
     """Mismo shape que FilteredSnapshotResponse para coherencia con endpoints legacy."""
     return {
@@ -5229,6 +5335,7 @@ def create_case_portfolio_proposal(
     from risk_first_advisory.data_layer.return_estimator import ReturnEstimator
     from risk_first_advisory.portfolio_layer.generation import (
         PortfolioGenerationCoordinator,
+        PortfolioGenerationInfeasibleError,
         PortfolioVariant,
     )
     from risk_first_advisory.rules_layer.risk_budget_builder import VALID_PROFILES
@@ -5368,11 +5475,16 @@ def create_case_portfolio_proposal(
     all_snapshots = adapter.to_many(eligible_instruments)
 
     # ── 3b. Data de mercado REAL (opt-in via RFA_LIVE_DATA) ─────────────────
-    # Reemplaza return/vol del fixture por datos reales (data912/yfinance, USD).
-    # Sin la env var, sigue el fixture → tests y smoke check deterministas.
+    # Estimación CONJUNTA sobre series reales: μ Black-Litterman + Σ Ledoit-Wolf
+    # (correlaciones reales). Sin la env var, sigue el fixture con la covarianza
+    # mock por asset_class → tests y smoke check deterministas.
     import os
+    live_covariance: Any | None = None
+    live_warnings: list[str] = []
     if os.environ.get("RFA_LIVE_DATA"):
-        all_snapshots = _apply_live_market_data(eligible_instruments, all_snapshots)
+        all_snapshots, live_covariance, live_warnings = _apply_live_joint_market_data(
+            eligible_instruments, all_snapshots
+        )
 
     usable_snapshots = [s for s in all_snapshots if s.is_usable]
     snapshots_serialized = [_serialize_snapshot_for_proposal(s) for s in all_snapshots]
@@ -5448,7 +5560,7 @@ def create_case_portfolio_proposal(
         return _persist_and_return(
             status="blocked_insufficient_universe",
             candidates=[],
-            warnings=[
+            warnings=live_warnings + [
                 f"Only {len(usable_snapshots)} usable snapshot(s) for filtered universe; need at least 3."
             ],
         )
@@ -5458,7 +5570,7 @@ def create_case_portfolio_proposal(
         return _persist_and_return(
             status="infeasible",
             candidates=[],
-            warnings=["RiskBudget invalid: max_single_asset must be > 0."],
+            warnings=live_warnings + ["RiskBudget invalid: max_single_asset must be > 0."],
         )
 
     required_min = math.ceil(1.0 / msa)
@@ -5466,7 +5578,7 @@ def create_case_portfolio_proposal(
         return _persist_and_return(
             status="blocked_insufficient_diversification_capacity",
             candidates=[],
-            warnings=[
+            warnings=live_warnings + [
                 f"Only {len(usable_snapshots)} usable snapshot(s) for profile "
                 f"{profile_name!r} (max_single_asset={msa:.0%}); need at least "
                 f"{required_min} instruments."
@@ -5474,8 +5586,21 @@ def create_case_portfolio_proposal(
         )
 
     # ── 6. Estimar retornos / covarianzas ───────────────────────────────────
+    # Con estimación conjunta live: Σ = Ledoit-Wolf real, alineada 1:1 con los
+    # usables (los estimados van primero y el resto quedó stale). Si el orden
+    # no coincidiera (defensivo), se degrada a la covarianza mock avisando.
     return_estimates = ReturnEstimator().estimate_many(usable_snapshots)
-    covariance_matrix = CovarianceEngine().build(usable_snapshots)
+    if live_covariance is not None and (
+        [s.ticker for s in usable_snapshots] == list(live_covariance.tickers)
+    ):
+        covariance_matrix = live_covariance
+    else:
+        if live_covariance is not None:
+            live_warnings.append(
+                "live: covarianza conjunta desalineada con los snapshots usables; "
+                "se usa la covarianza mock por asset_class."
+            )
+        covariance_matrix = CovarianceEngine().build(usable_snapshots)
 
     # ── 6b. Risk Number: datos planos para el número de cartera + cliente ───
     # docs/RISK_NUMBER_DESIGN.md (Slice 3). Puramente derivado de lo estimado
@@ -5505,11 +5630,24 @@ def create_case_portfolio_proposal(
             covariance_matrix=covariance_matrix,
             risk_budget=risk_budget,
         )
+    except PortfolioGenerationInfeasibleError as exc:
+        # Diagnóstico completo: qué pre-check falló en cada variante y qué
+        # sugiere el feasibility checker — el asesor sabe qué tocar.
+        return _persist_and_return(
+            status="infeasible",
+            candidates=[],
+            warnings=(
+                live_warnings
+                + [f"PortfolioGenerationCoordinator failed: {exc}"]
+                + [f"reason_code: {rc}" for rc in dict.fromkeys(exc.reason_codes)]
+                + list(exc.notes)
+            ),
+        )
     except ValueError as exc:
         return _persist_and_return(
             status="infeasible",
             candidates=[],
-            warnings=[f"PortfolioGenerationCoordinator failed: {exc}"],
+            warnings=live_warnings + [f"PortfolioGenerationCoordinator failed: {exc}"],
         )
 
     # ── 8. Serializar candidatos ────────────────────────────────────────────
@@ -5542,10 +5680,12 @@ def create_case_portfolio_proposal(
             )
         )
 
+    # Diagnóstico de variantes omitidas (infactibilidad PARCIAL): si alguna
+    # variante quedó afuera por pre-check, sus notas también son accionables.
     return _persist_and_return(
         status="completed",
         candidates=candidates_serialized,
-        warnings=[],
+        warnings=live_warnings + list(candidate_set.notes),
     )
 
 
