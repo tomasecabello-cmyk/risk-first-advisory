@@ -17,6 +17,8 @@ QUÉ ARREGLA (vs. la estimación naive del path live anterior):
       posterior de Black-Litterman (1992): prior de equilibrio Π = δ Σ w_ref
       (w_ref = equal-weight) mezclado bayesianamente con la media histórica
       como view (P=I, Ω = diag(τΣ)/confianza, convención He & Litterman 2002).
+      Para renta fija la view puede ser el YTM (parámetro `views`): un ancla
+      forward-looking mucho mejor que la media histórica post-rally.
       Es shrinkage de la media histórica hacia un ancla con estructura
       económica — mismo espíritu que Ledoit-Wolf pero para μ.
     - Saltos de ratio: los rebasings multiplicativos de CEDEARs (cambio de
@@ -206,6 +208,7 @@ def estimate_joint_moments(
     rf: float = _DEFAULT_RF,
     min_obs: int = _MIN_OBS,
     max_sane_vol: float = MAX_SANE_VOL,
+    views: dict[str, float] | None = None,
     max_workers: int = 16,
     _fetch: Callable[[str, str, str], PriceSeries] | None = None,
     _fx: Callable[[str, str], pd.Series] | None = None,
@@ -214,6 +217,12 @@ def estimate_joint_moments(
     Estima μ (Black-Litterman) y Σ (Ledoit-Wolf) sobre las series reales de los
     tickers de `source_map`, alineadas por fechas comunes y normalizadas a USD
     (CCL) cuando cotizan en ARS.
+
+    `views` permite reemplazar la view de BL por ticker (retorno anual esperado
+    en decimal, p.ej. el YTM de un bono) en vez de la media histórica. P sigue
+    siendo la identidad; solo cambia Q para esos tickers. Los que no aparecen
+    en `views` conservan la media histórica como view. Queda trazado en
+    `meta[ticker]["view"]` ("explicit" | "hist_mean").
 
     Corrige saltos de ratio (rebasings de CEDEARs) por back-scaling sobre la
     serie ya en USD, con nota auditada por salto en `adjusted`. Descarta, con
@@ -344,7 +353,18 @@ def estimate_joint_moments(
     sigma_daily, lam = ledoit_wolf_covariance(daily.to_numpy())
     sigma_annual = sigma_daily * _TRADING_DAYS
     mu_hist_arr = daily.mean().to_numpy() * _TRADING_DAYS
-    mu_bl_arr = black_litterman_returns(sigma_annual, mu_hist_arr, rf=rf)
+
+    # Views de BL: media histórica por defecto; explícita (p.ej. YTM) si viene.
+    view_map = {t.strip().upper(): float(v) for t, v in (views or {}).items()
+                if v is not None}
+    q_arr = mu_hist_arr.copy()
+    explicit_view: set[str] = set()
+    for i, t in enumerate(ordered):
+        if t in view_map:
+            q_arr[i] = view_map[t]
+            explicit_view.add(t)
+
+    mu_bl_arr = black_litterman_returns(sigma_annual, q_arr, rf=rf)
     mu_bl_arr = np.clip(mu_bl_arr, -1.0, 1.0)
 
     d = np.sqrt(np.clip(np.diag(sigma_annual), 0.0, None))
@@ -362,6 +382,10 @@ def estimate_joint_moments(
         f"mu=black_litterman(delta={DEFAULT_DELTA}, tau={DEFAULT_TAU}, rf={rf})",
         window_note,
     ]
+    if explicit_view:
+        method_notes.append(
+            f"views=explicit para {len(explicit_view)} tickers (resto: media histórica)"
+        )
 
     covariance = CovarianceMatrix(
         tickers=ordered,
@@ -378,6 +402,7 @@ def estimate_joint_moments(
             "ccy_native": native_ccy.get(t, by_symbol[t].currency),
             "kind": by_symbol[t].kind,
             "obs": int(len(daily)),
+            "view": "explicit" if t in explicit_view else "hist_mean",
         }
         for t in ordered
     }

@@ -4991,6 +4991,7 @@ def _apply_live_joint_market_data(
 
     source_map: dict[str, str] = {}
     declared_class: dict[str, str] = {}
+    ytm_views: dict[str, float] = {}
     for inst in instruments:
         ticker = getattr(inst, "ticker", None)
         if not ticker:
@@ -5004,11 +5005,17 @@ def _apply_live_joint_market_data(
         ac_str = str(getattr(ac, "value", None) or ac or "")
         if ac_str.upper() == "FIXED_INCOME":
             declared_class[ticker] = "fixed_income"
+            # YTM del universo (en %, p.ej. 7.80) como view de BL: ancla
+            # forward-looking para bonos, mejor que la media histórica
+            # post-rally. Solo valores plausibles (0 < ytm < 100).
+            ytm = getattr(inst, "ytm", None)
+            if ytm is not None and 0.0 < float(ytm) < 100.0:
+                ytm_views[ticker] = float(ytm) / 100.0
     if not source_map:
         return adapter_snapshots, None, []
 
     try:
-        est = estimate_joint_moments(source_map, period="3y")
+        est = estimate_joint_moments(source_map, period="3y", views=ytm_views)
     except EstimationError as exc:
         snaps = _apply_live_market_data(instruments, adapter_snapshots)
         return snaps, None, [
@@ -5043,6 +5050,7 @@ def _apply_live_joint_market_data(
                 f"obs={m.get('obs')}",
                 f"mu_hist={est.mu_hist[t]:.4f}",
                 f"mu=black_litterman sigma=ledoit_wolf(lambda={est.shrinkage:.3f})",
+                *([f"view=ytm({ytm_views[t]:.4f})"] if t in ytm_views else []),
                 *adjusted_notes.get(t, []),
             ],
         ))
@@ -5072,6 +5080,12 @@ def _apply_live_joint_market_data(
         f"live: μ=Black-Litterman, Σ=Ledoit-Wolf (λ={est.shrinkage:.3f}) "
         f"sobre {len(est.tickers)} series alineadas."
     )
+    viewed = [t for t in est.tickers if t in ytm_views]
+    if viewed:
+        warnings.append(
+            f"live: view de BL = YTM para {len(viewed)} instrumentos de renta "
+            "fija (resto: media histórica)."
+        )
     return estimated + rest, est.covariance, warnings
 
 

@@ -296,6 +296,22 @@ recortó, subestimando levemente la σ de esos tickers (~1 día en ~700). El
 refinamiento (distinguir evento de mercado de artefacto, p.ej. con señal
 cross-sectional) queda en el ROADMAP.
 
+**Extensión (2026-07-08) — YTM como view de BL para renta fija:**
+`estimate_joint_moments` acepta `views` explícitas por ticker (P sigue siendo
+la identidad; solo cambia Q). La API construye las views con el `ytm` del
+universo (en %, validado 0 < ytm < 100, convertido a decimal) para todo
+instrumento `FIXED_INCOME`: un ancla forward-looking en vez de la media
+histórica post-rally. Trazabilidad completa: `meta[t]["view"]`
+("explicit"/"hist_mean"), nota `view=ytm(...)` en el snapshot, warning
+resumen en el proposal y `mu_hist` intacto para comparar.
+
+*Resultado medido (2026-07-08):* GD30 μ_hist −4.3% → μ_BL +10.5% (YTM 11.5%);
+AL30 −1.8% → +11.1% (YTM 12.2%); 21 instrumentos de renta fija con view YTM.
+La media histórica de un bono post-rally (o post-selloff) es el peor
+estimador posible de su retorno esperado; el YTM es el retorno contractual a
+vencimiento sin default — sigue sin ajustar por pérdida esperada de crédito
+(supuesto DEMO, documentado en COMPLIANCE_NOTES/limitaciones generales).
+
 ## DD-015 — El requisito de override del progreso se evalúa contra la selección vigente
 
 **Estado:** Aceptado

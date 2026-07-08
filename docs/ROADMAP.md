@@ -11,9 +11,10 @@
 - "Bróker" como filtro de disponibilidad (`available_entities` ya está en el schema).
 - Bonos peso ARS-nativos (Lecaps/CER) — hoy fuera de alcance por ruido de devaluación (marco USD/CCL).
 - **Correlaciones/μ reales en modo fixture**: el path live ya estima Σ con Ledoit-Wolf
-  y μ con Black-Litterman sobre series alineadas (DD-014, `data_layer/estimation.py`);
+  y μ con Black-Litterman sobre series alineadas (DD-014, `data_layer/estimation.py`),
+  con el YTM del universo como view de BL para renta fija (ext. 2026-07-08);
   `CovarianceEngine` (correlaciones mock por asset_class) queda solo como motor del
-  modo fixture y fallback sin red. YTM para renta fija sigue pendiente como view de BL.
+  modo fixture y fallback sin red.
 - La demo debe correr SIEMPRE con `RFA_LIVE_DATA=1` (el CSV solo cubre renta fija con precio).
 
 ## Fase 4 — pilot readiness (asesor piloto real; no producción aún)

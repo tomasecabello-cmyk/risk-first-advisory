@@ -232,6 +232,36 @@ def test_joint_moments_ars_without_fx_is_dropped():
     assert reasons["GD30"] == "ars_without_fx"
 
 
+def test_joint_moments_explicit_view_pulls_mu_toward_view():
+    """Con una view explícita (p.ej. YTM de un bono), la view de BL para ese
+    ticker deja de ser la media histórica: μ posterior queda MÁS CERCA de la
+    view que en la corrida base, y el resto no usa view explícita."""
+    base = estimate_joint_moments(
+        _sources(), _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    ytm = 0.09
+    est = estimate_joint_moments(
+        _sources(), views={"GD30": ytm},
+        _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    assert abs(est.mu["GD30"] - ytm) < abs(base.mu["GD30"] - ytm)
+    assert est.meta["GD30"]["view"] == "explicit"
+    assert est.meta["SPY"]["view"] == "hist_mean"
+    # μ del resto casi no cambia (P=I: cada view es por-ticker; el efecto
+    # cruzado entra solo vía Σ y debe ser de segundo orden).
+    assert est.mu["SPY"] == pytest.approx(base.mu["SPY"], abs=0.02)
+    # mu_hist sigue siendo la media histórica (trazabilidad intacta).
+    assert est.mu_hist["GD30"] == pytest.approx(base.mu_hist["GD30"])
+    assert any("views=explicit" in n for n in est.notes)
+
+
+def test_joint_moments_view_for_unknown_ticker_is_ignored():
+    est = estimate_joint_moments(
+        _sources(), views={"NOPE": 0.10, "GD30": None},  # type: ignore[dict-item]
+        _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    assert sorted(est.tickers) == ["GD30", "GGAL", "SPY"]
+    assert all(est.meta[t]["view"] == "hist_mean" for t in est.tickers)
+    assert not any("views=explicit" in n for n in est.notes)
+
+
 def test_joint_moments_raises_when_less_than_two_series():
     with pytest.raises(EstimationError):
         estimate_joint_moments(
