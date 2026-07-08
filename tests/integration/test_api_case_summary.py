@@ -578,6 +578,95 @@ class TestIntermediateStates:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# DD-015 — selección SIN override con proposal que SÍ tiene variante override
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _workflow_until_proposal(c: TestClient, patch_ai_client) -> tuple[str, dict]:
+    """Pipeline hasta el proposal inclusive. Devuelve (case_id, proposal)."""
+    patch_ai_client()
+    ctx = _setup_empty_case(c)
+    case_id = ctx["case"]["case_id"]
+    _post(c, f"/cases/{case_id}/kyc", _kyc_body())
+    _post(c, f"/cases/{case_id}/ai/profile-analysis", {})
+    _post(c, f"/cases/{case_id}/profile-approval",
+          {"decision": "approve", "rationale": "ok"})
+    _post(c, f"/cases/{case_id}/investment-preferences",
+          {"structured_preferences": _BROAD_PREFS})
+    _post(c, f"/cases/{case_id}/universe-filter", {})
+    proposal = _post(c, f"/cases/{case_id}/portfolio-proposal", {}).json()
+    return case_id, proposal
+
+
+class TestSelectionWithoutOverride:
+    """El requisito de override se evalúa contra la SELECCIÓN vigente (DD-015):
+    si el proposal tiene una variante que requiere override pero el asesor
+    selecciona una que NO lo requiere, el paso de override deja de aplicar —
+    next_recommended_action no debe quedar clavado en review_override y
+    completion_ratio debe llegar a 1.0."""
+
+    def _select_non_override(
+        self, c: TestClient, patch_ai_client
+    ) -> tuple[str, dict]:
+        case_id, proposal = _workflow_until_proposal(c, patch_ai_client)
+        # El quirk solo existe si conviven ambos tipos de variante.
+        assert _find_override_variant(proposal) is not None
+        non_override = _find_non_override_variant(proposal)
+        assert non_override is not None
+        _post(c, f"/cases/{case_id}/portfolio-selection",
+              {"selected_variant": non_override,
+               "rationale": "Variante conservadora, sin override"})
+        return case_id, proposal
+
+    def test_after_selection_next_action_generate_report(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case_id, _ = self._select_non_override(client, patch_ai_client)
+        body = _get_summary(client, case_id).json()
+        assert body["progress"]["next_recommended_action"] == "generate_report"
+
+    def test_after_report_ready_for_review_and_ratio_one(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        case_id, _ = self._select_non_override(client, patch_ai_client)
+        _post(client, f"/cases/{case_id}/reports", {})
+        body = _get_summary(client, case_id).json()
+        assert body["progress"]["next_recommended_action"] == "ready_for_review"
+        assert body["progress"]["completion_ratio"] == 1.0
+
+    def test_override_approved_but_non_override_selected_ratio_one(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Override approval registrado sobre la variante que lo requiere,
+        pero selección final de la que NO lo requiere: el override no cuenta
+        ni penaliza (denominador 8)."""
+        case_id, proposal = _workflow_until_proposal(client, patch_ai_client)
+        override_variant = _find_override_variant(proposal)
+        assert override_variant is not None
+        non_override = _find_non_override_variant(proposal)
+        assert non_override is not None
+        _post(client, f"/cases/{case_id}/override-approval",
+              {"candidate_variant": override_variant, "decision": "approve",
+               "rationale": "Cliente aceptaba el exceso de riesgo."})
+        _post(client, f"/cases/{case_id}/portfolio-selection",
+              {"selected_variant": non_override,
+               "rationale": "Finalmente se eligió la variante sin override"})
+        _post(client, f"/cases/{case_id}/reports", {})
+        body = _get_summary(client, case_id).json()
+        assert body["progress"]["next_recommended_action"] == "ready_for_review"
+        assert body["progress"]["completion_ratio"] == 1.0
+
+    def test_before_selection_still_review_override(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Sin selección, la guía a nivel proposal se mantiene."""
+        case_id, proposal = _workflow_until_proposal(client, patch_ai_client)
+        assert _find_override_variant(proposal) is not None
+        body = _get_summary(client, case_id).json()
+        assert body["progress"]["next_recommended_action"] == "review_override"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Audit broken in DB
 # ═════════════════════════════════════════════════════════════════════════════
 

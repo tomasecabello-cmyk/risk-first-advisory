@@ -47,9 +47,3 @@
   corruptas obvias (vol > 300%), pero series con saltos de ratio dentro del umbral
   (IBM ~137%, NFLX ~149% anual en la ventana larga) inflan σ sin ser descartadas.
   Detectar y ajustar saltos de ratio en el provider (o acortar/limpiar la serie).
-- **`next_recommended_action` queda en `review_override`** si el proposal tiene alguna
-  variante que requiere override pero el asesor seleccionó una que NO lo requiere:
-  `has_override_requirement` se computa a nivel proposal, no a nivel selection, así que
-  `completion_ratio` nunca llega a 1.0 en ese path (el smoke check lo esquiva
-  seleccionando la variante con override). Sin impacto en la vista del cliente (solo usa
-  el copy de progreso antes de la selección), pero es confuso para quien lea el summary.

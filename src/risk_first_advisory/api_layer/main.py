@@ -6557,6 +6557,25 @@ def _proposal_has_override_required(proposal_data: dict[str, Any] | None) -> boo
     return False
 
 
+def _override_requirement_for_progress(
+    proposal_data: dict[str, Any] | None,
+    selection_data: dict[str, Any] | None,
+) -> bool:
+    """
+    Requisito de override a efectos del progreso del workflow (DD-015).
+
+    Con una selección vigente manda la variante ELEGIDA: si no requiere
+    override, el paso de override no aplica aunque otra variante del proposal
+    sí lo requiera (si la elegida lo requiere, el endpoint de selección ya
+    garantizó el override approval). Sin selección se evalúa a nivel proposal,
+    para guiar al asesor a revisar el override antes de elegir.
+    """
+    if selection_data is not None:
+        candidate = selection_data.get("selected_candidate")
+        return isinstance(candidate, dict) and _candidate_requires_override(candidate)
+    return _proposal_has_override_required(proposal_data)
+
+
 def _compute_next_recommended_action(
     *,
     case_status: str,
@@ -6764,7 +6783,9 @@ def get_case_summary(
     has_override_approval      = current_override is not None
     has_portfolio_selection    = current_selection is not None
     has_report                 = current_report is not None
-    has_override_requirement   = _proposal_has_override_required(current_proposal)
+    has_override_requirement   = _override_requirement_for_progress(
+        current_proposal, current_selection
+    )
 
     next_action = _compute_next_recommended_action(
         case_status=case_data["status"],

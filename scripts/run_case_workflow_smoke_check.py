@@ -462,13 +462,14 @@ def run_case_workflow_smoke_check(
 
         # ── Override approval (si aplica) ───────────────────────────────────
         #
-        # Política del smoke check: si el proposal contiene CUALQUIER candidate
-        # que requiera override (típicamente GROWTH), aprobamos el override
-        # para ese variant y lo seleccionamos. Razón: el summary computa
-        # `has_override_requirement` a nivel proposal (no a nivel selection),
-        # entonces para alcanzar `completion_ratio=1.0` y
-        # `next_action=ready_for_review` el smoke check debe ejercitar el
-        # path con override. También cubre el caso productivo más interesante.
+        # Política del smoke check (DD-015): si el proposal contiene un
+        # candidate que requiere override (típicamente GROWTH), registramos el
+        # override approval para ese variant (cubre el endpoint) pero
+        # SELECCIONAMOS un variant que NO lo requiere. Ese es exactamente el
+        # path del quirk histórico (next_action clavado en review_override y
+        # completion_ratio topado en 8/9): el summary ahora evalúa el
+        # requisito de override contra la SELECCIÓN vigente, así que este
+        # camino también debe llegar a completion_ratio=1.0.
         _section("Step 10 / 14: override approval (if required)")
         override_variant = _find_override_variant(proposal)
         non_override_variant = _find_non_override_variant(proposal)
@@ -477,15 +478,18 @@ def run_case_workflow_smoke_check(
             ovr = _post(client, f"/cases/{case_id}/override-approval", {
                 "candidate_variant": override_variant,
                 "decision": "approve",
-                "rationale": "Smoke check: aprobando override para ejercitar path completo.",
+                "rationale": "Smoke check: aprobando override para ejercitar el endpoint.",
             }).json()
             _expect(failures, ovr.get("decision") == "approve",
                     "override decision=approve", actual=ovr.get("decision"))
-            chosen_variant = override_variant
-        elif non_override_variant is not None:
-            _ok("no override-requiring variant; selecting non-override variant",
+        if non_override_variant is not None:
+            _ok("selecting non-override variant (DD-015 quirk path)",
                 value=non_override_variant)
             chosen_variant = non_override_variant
+        elif override_variant is not None:
+            _ok("only override-requiring variants; selecting the approved one",
+                value=override_variant)
+            chosen_variant = override_variant
         else:
             failures.append("No usable candidate variants in proposal")
             _fail("no candidate variants available", expected=">=1", actual=0)

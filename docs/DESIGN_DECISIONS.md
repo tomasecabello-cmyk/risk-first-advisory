@@ -267,3 +267,22 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 - La ventana efectiva es la INTERSECCIÓN de fechas de las series (el instrumento más joven la limita); queda registrada en notes (`window=...`, `obs=`).
 - `CovarianceEngine` (correlaciones mock) sigue siendo el motor del modo fixture y el fallback si la estimación conjunta falla (sin red) — el ROADMAP ya no lo lista como deuda del path live.
 - δ, τ, rf y el bound de vol son supuestos DEMO tuneables por parámetro; no reemplazan un proceso de CMA formal.
+
+## DD-015 — El requisito de override del progreso se evalúa contra la selección vigente
+
+**Estado:** Aceptado
+**Fecha:** 2026-07-08
+**Área:** `api_layer/main.py` (`GET /cases/{id}/summary`), `scripts/run_case_workflow_smoke_check.py`
+
+**Contexto:** `has_override_requirement` se computaba a nivel PROPOSAL (¿algún candidate requiere override?). Si el proposal tenía una variante con override (típicamente GROWTH) pero el asesor seleccionaba una que NO lo requería, `next_recommended_action` quedaba clavado en `review_override` y `completion_ratio` topaba en 8/9 ≈ 0.89 — el caso nunca "terminaba" según el summary. El smoke check esquivaba el quirk seleccionando siempre la variante con override.
+
+**Decisión:** `_override_requirement_for_progress(proposal, selection)`:
+- **Con selección vigente**, manda la variante ELEGIDA (`selected_candidate.metadata.requires_advisor_override`). Si la elegida requiere override, el endpoint de selección ya garantizó el override approval (422 si falta) ⇒ 9/9. Si no lo requiere, el paso de override no aplica ⇒ denominador 8 y el caso llega a 1.0 / `ready_for_review`.
+- **Sin selección**, se mantiene la evaluación a nivel proposal: recomendar `review_override` antes de elegir sigue siendo la guía correcta para el asesor.
+- Un override approval registrado sobre una variante que finalmente NO se seleccionó ni cuenta ni penaliza (queda en el audit trail y en `current_override_approval`, como siempre).
+
+El smoke check ahora ejercita este path en vez de esquivarlo: registra el override approval sobre la variante que lo requiere (cobertura del endpoint) y luego selecciona la variante SIN override, exigiendo `completion_ratio == 1.0`.
+
+**Alternativas descartadas:** (a) dejar el quirk documentado (confunde a quien lee el summary y rompe la semántica de "caso completo"); (b) evaluar SIEMPRE contra la selección (antes de seleccionar no hay selección: el proposal es la única señal disponible para guiar la revisión); (c) contar el override approval huérfano en el ratio (mezclaría un paso no requerido en el denominador de otro path).
+
+**Consecuencias:** el summary es la única superficie afectada — los endpoints de override/selección no cambian sus validaciones (I-016/I-019 intactos). La vista del cliente no cambia (solo usa el copy de progreso pre-selección).
