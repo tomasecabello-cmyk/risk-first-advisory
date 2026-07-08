@@ -268,6 +268,34 @@ Formato ADR liviano. Cada decisión incluye contexto, alternativa descartada y c
 - `CovarianceEngine` (correlaciones mock) sigue siendo el motor del modo fixture y el fallback si la estimación conjunta falla (sin red) — el ROADMAP ya no lo lista como deuda del path live.
 - δ, τ, rf y el bound de vol son supuestos DEMO tuneables por parámetro; no reemplazan un proceso de CMA formal.
 
+**Extensión (2026-07-08) — saltos de ratio en series CEDEAR/data912:**
+el sanity bound descarta series destruidas (vol > 300%) pero dejaba pasar series
+con saltos de ratio que inflaban σ sin volverla absurda (IBM ~137%, NFLX ~149%).
+`providers.adjust_ratio_jumps` detecta retornos diarios absurdos y AISLADOS
+(|r| > 40%, outlier extremo vs escala robusta MAD de la propia serie, vecinos
+normales — un crash genuino con rebote tiene días grandes contiguos y no se
+toca) y corrige por **back-scaling**: reescala el segmento pre-salto por el
+factor implícito (el ajuste estándar de rebasing; preserva las observaciones y
+el solapamiento del inner join). Cada ajuste queda auditado: nota por salto en
+`JointMomentResult.adjusted` → warnings del proposal + notes del snapshot.
+Con más de `RATIO_JUMP_MAX=5` saltos la serie se descarta como no confiable
+(calibrado: NFLX real acumula 4 glitches/rebasings legítimos en 3y). Se aplica
+sobre la serie YA normalizada a USD — en ARS un día de devaluación es real y la
+conversión CCL lo cancela; ajustar antes del FX crearía un salto inverso.
+Ambos consumidores lo usan: `estimate_joint_moments` y `LiveMarketDataProvider`.
+
+*Resultado medido (2026-07-08):* IBM 137%→64%, NFLX 149%→45% (4 saltos), KO
+47%→35%, MELI 86%→46%; series limpias (AAPL/TSLA/NVDA…) intactas. Además
+detectó un artefacto de base de precios común de data912 el 2023-08-03/04
+(todos los soberanos +60-69% y varias acciones ARG +48-58% el mismo día, con
+serie CCL suave — no es mercado) que antes inflaba σ y correlaciones.
+
+*Limitación conocida:* días de evento genuinos, aislados y >40% se ajustan de
+más — medido: 2025-10-27 post-elecciones (BHIP/SUPV/METR +43-46% reales) se
+recortó, subestimando levemente la σ de esos tickers (~1 día en ~700). El
+refinamiento (distinguir evento de mercado de artefacto, p.ej. con señal
+cross-sectional) queda en el ROADMAP.
+
 ## DD-015 — El requisito de override del progreso se evalúa contra la selección vigente
 
 **Estado:** Aceptado

@@ -5016,6 +5016,10 @@ def _apply_live_joint_market_data(
             "fallback per-ticker con correlaciones mock por asset_class."
         ]
 
+    adjusted_notes: dict[str, list[str]] = {}
+    for a in est.adjusted:
+        adjusted_notes.setdefault(a["ticker"], []).append(a["note"])
+
     estimated: list[Any] = []
     for t in est.tickers:
         m = est.meta[t]
@@ -5039,6 +5043,7 @@ def _apply_live_joint_market_data(
                 f"obs={m.get('obs')}",
                 f"mu_hist={est.mu_hist[t]:.4f}",
                 f"mu=black_litterman sigma=ledoit_wolf(lambda={est.shrinkage:.3f})",
+                *adjusted_notes.get(t, []),
             ],
         ))
 
@@ -5059,6 +5064,10 @@ def _apply_live_joint_market_data(
         f"live: {d['ticker']} excluido de la estimación — {d['reason']}"
         for d in est.dropped
     ]
+    warnings.extend(
+        f"live: {a['ticker']} serie ajustada — {a['note']}"
+        for a in est.adjusted
+    )
     warnings.append(
         f"live: μ=Black-Litterman, Σ=Ledoit-Wolf (λ={est.shrinkage:.3f}) "
         f"sobre {len(est.tickers)} series alineadas."

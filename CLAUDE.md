@@ -42,7 +42,7 @@ order is compliance-significant, not incidental.
 
 - **`kyc/`** — `KYCData`, `FinancialGoal`, `ESGProfile` (the standardized client inputs).
 - **`ai_layer/`** — `OpenAIProfileClient` (real OpenAI; interprets KYC, flags contradictions, proposes a *preliminary* profile — never approves), `MockAIClient` (scripted, for tests/smoke), `risk_gap.py` (pure deterministic mapper: contradictions → Risk Gap flag), `risk_number.py` (0-100 client↔portfolio score), `grable_lytton.py` + `risk_scoring.py` (questionnaire scoring).
-- **`data_layer/`** — market data providers (YAML fixtures, CSV adapter, live ARG+US via data912/yfinance in `providers.py`/`live_market_data.py`), `covariance.py` (correlaciones mock; modo fixture y fallback), `estimation.py` (modo live: Σ Ledoit-Wolf + μ Black-Litterman sobre series alineadas — DD-014), `return_estimator.py`, `data_quality.py`.
+- **`data_layer/`** — market data providers (YAML fixtures, CSV adapter, live ARG+US via data912/yfinance in `providers.py`/`live_market_data.py`), `covariance.py` (correlaciones mock; modo fixture y fallback), `estimation.py` (modo live: Σ Ledoit-Wolf + μ Black-Litterman sobre series alineadas — DD-014), `providers.adjust_ratio_jumps` (corrección auditada de rebasings de CEDEARs sobre la serie en USD — DD-014 ext.), `return_estimator.py`, `data_quality.py`.
 - **`models/`** — shared dataclasses (`portfolio.py`, `risk_budget.py`).
 - **`rules_layer/`** — governance, instrument suitability, ESG, `goal_feasibility`, `risk_budget`, `reason_codes`.
 - **`universe_layer/`** — preference + eligibility filters over the instrument universe.

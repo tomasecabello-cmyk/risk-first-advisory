@@ -22,9 +22,10 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 import urllib3
@@ -66,6 +67,109 @@ class PriceSeries:
 
 class ProviderError(RuntimeError):
     pass
+
+
+# ---------------------------------------------------------------------------
+# Saltos de ratio (rebasings multiplicativos) — típico de CEDEARs cuando cambia
+# el ratio CEDEAR:acción y el proveedor no re-ajusta el histórico. El sanity
+# bound de vol (estimation.MAX_SANE_VOL) ataja las series destruidas; esto
+# corrige las que tienen UN salto dentro del umbral que infla σ sin volverla
+# absurda (p.ej. IBM/NFLX ~140% anual por un único día de -80%).
+#
+# IMPORTANTE: aplicar sobre la serie YA normalizada a USD. En ARS un día de
+# devaluación fuerte es un movimiento real que la conversión CCL cancela;
+# ajustarlo antes del FX crearía un salto inverso en la serie USD.
+# ---------------------------------------------------------------------------
+
+RATIO_JUMP_THRESHOLD: float = 0.40    # |retorno diario| mínimo para ser salto
+RATIO_JUMP_MAD_MULTIPLE: float = 8.0  # outlier vs escala robusta de la serie
+# Más saltos que esto = serie sospechosa, no se ajusta. Calibrado con data912
+# 3y (2026-07): NFLX real acumula 4 glitches/rebasings legítimos; una serie
+# con más de 5 días absurdos aislados ya no es creíble como rebasing.
+RATIO_JUMP_MAX: int = 5
+
+
+@dataclass
+class RatioJumpAdjustment:
+    """Resultado de adjust_ratio_jumps: serie (ajustada o no) + auditoría."""
+
+    close: pd.Series
+    notes: list[str] = field(default_factory=list)  # una nota auditable por salto
+    n_jumps: int = 0
+    suspect: bool = False   # demasiados saltos: no se ajusta, el caller descarta
+
+
+def adjust_ratio_jumps(
+    close: pd.Series,
+    jump_threshold: float = RATIO_JUMP_THRESHOLD,
+    mad_multiple: float = RATIO_JUMP_MAD_MULTIPLE,
+    max_jumps: int = RATIO_JUMP_MAX,
+) -> RatioJumpAdjustment:
+    """
+    Detecta y corrige saltos de ratio en una serie de cierres.
+
+    Un salto es un retorno diario absurdo y AISLADO: |r| > jump_threshold, que
+    además es outlier extremo respecto de la escala robusta (MAD) de la propia
+    serie, y cuyos vecinos inmediatos son días normales. Un crash genuino con
+    rebote tiene días grandes contiguos y NO se toca; una serie genuinamente
+    salvaje tiene MAD alto y tampoco.
+
+    Corrección: back-scaling — todo el segmento previo al salto se reescala
+    por el factor implícito (p_t / p_{t-1}), el ajuste estándar de rebasing.
+    El retorno de ese día queda en 0 (el retorno real del día se pierde: es la
+    aproximación estándar y queda anotado); el resto de la serie no cambia.
+
+    Con más de max_jumps saltos la serie se considera sospechosa y NO se
+    ajusta (suspect=True): el caller decide descartarla con razón auditada.
+    """
+    s = close.dropna()
+    s = s[s > 0]
+    if len(s) < 3:
+        return RatioJumpAdjustment(close=s)
+
+    rets = s.to_numpy(dtype=float)[1:] / s.to_numpy(dtype=float)[:-1] - 1.0
+    abs_rets = np.abs(rets)
+    med = float(np.median(rets))
+    sigma_rob = 1.4826 * float(np.median(np.abs(rets - med)))
+
+    jumps: list[int] = []   # i = salto entre s[i] y s[i+1] (retorno rets[i])
+    for i, r in enumerate(rets):
+        if abs(r) <= jump_threshold:
+            continue
+        if sigma_rob > 0.0 and abs(r - med) <= mad_multiple * sigma_rob:
+            continue
+        prev_ok = i == 0 or abs_rets[i - 1] <= jump_threshold
+        next_ok = i == len(rets) - 1 or abs_rets[i + 1] <= jump_threshold
+        if prev_ok and next_ok:
+            jumps.append(i)
+
+    if not jumps:
+        return RatioJumpAdjustment(close=s)
+    if len(jumps) > max_jumps:
+        return RatioJumpAdjustment(
+            close=s,
+            notes=[
+                f"ratio_jumps_excessive: {len(jumps)} saltos aislados con "
+                f"|r| > {jump_threshold:.0%} (> {max_jumps}); serie no "
+                "confiable, no se ajusta"
+            ],
+            n_jumps=len(jumps),
+            suspect=True,
+        )
+
+    values = s.to_numpy(dtype=float).copy()
+    notes: list[str] = []
+    for i in jumps:
+        factor = values[i + 1] / values[i]
+        values[: i + 1] *= factor
+        notes.append(
+            f"ratio_jump_adjusted: {pd.Timestamp(s.index[i + 1]).date()} "
+            f"r={rets[i]:+.1%} factor={factor:.4g} (prefijo reescalado)"
+        )
+    adjusted = pd.Series(values, index=s.index, name=s.name)
+    return RatioJumpAdjustment(
+        close=adjusted, notes=notes, n_jumps=len(jumps), suspect=False
+    )
 
 
 def _cutoff(period: str) -> _dt.date | None:

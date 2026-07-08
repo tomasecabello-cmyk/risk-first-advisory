@@ -43,7 +43,11 @@
 - **Cache de extracción de preferencias OpenAI** (`hash(texto)` + TTL) para no re-llamar
   con texto idéntico.
 - **Firma digital** del rationale del asesor (hoy texto libre sin identidad verificada).
-- **Series CEDEAR con saltos de ratio**: el sanity bound (DD-014) descarta las
-  corruptas obvias (vol > 300%), pero series con saltos de ratio dentro del umbral
-  (IBM ~137%, NFLX ~149% anual en la ventana larga) inflan σ sin ser descartadas.
-  Detectar y ajustar saltos de ratio en el provider (o acortar/limpiar la serie).
+- **Ratio jumps — falsos positivos en días de evento genuinos**: `adjust_ratio_jumps`
+  (DD-014, extensión 2026-07-08) recorta días aislados con |r| > 40% también cuando son
+  mercado real (medido: rally post-elecciones 2025-10-27, BHIP/SUPV/METR +43-46%),
+  subestimando levemente la σ de esos tickers. Refinar con una señal cross-sectional
+  (muchos tickers con día grande común y FX/mercado coherentes = evento, no artefacto).
+- **Series con historia rota en el universo**: VIST y XLB llegan con 1 observación en
+  la ventana 3y del caché (quedan excluidos de la estimación con razón auditada, pero
+  deberían tener serie completa) — revisar el fetch/caché de esos tickers.

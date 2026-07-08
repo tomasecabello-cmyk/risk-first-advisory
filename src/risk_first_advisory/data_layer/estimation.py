@@ -19,9 +19,13 @@ QUÉ ARREGLA (vs. la estimación naive del path live anterior):
       como view (P=I, Ω = diag(τΣ)/confianza, convención He & Litterman 2002).
       Es shrinkage de la media histórica hacia un ancla con estructura
       económica — mismo espíritu que Ledoit-Wolf pero para μ.
-    - Sanity bound: series con volatilidad anualizada absurda (> MAX_SANE_VOL,
-      p.ej. CEDEARs con cambios de ratio que generan saltos falsos) se
-      DESCARTAN con razón auditada en vez de envenenar Σ y romper el solver.
+    - Saltos de ratio: los rebasings multiplicativos de CEDEARs (cambio de
+      ratio sin re-ajustar el histórico) se corrigen por back-scaling sobre la
+      serie ya en USD (providers.adjust_ratio_jumps), con nota auditada por
+      salto. Series con demasiados saltos se descartan.
+    - Sanity bound: series con volatilidad anualizada absurda (> MAX_SANE_VOL)
+      que sobreviven a lo anterior se DESCARTAN con razón auditada en vez de
+      envenenar Σ y romper el solver.
 
 Ledoit-Wolf se implementa en numpy puro (fórmula cerrada del paper, la misma
 que sklearn.covariance.LedoitWolf) para no sumar scikit-learn como dependencia.
@@ -45,6 +49,7 @@ from risk_first_advisory.data_layer.covariance import CovarianceMatrix
 from risk_first_advisory.data_layer.providers import (
     PriceSeries,
     ProviderError,
+    adjust_ratio_jumps,
     fetch_series_cached,
     usd_ars_history,
 )
@@ -191,6 +196,7 @@ class JointMomentResult:
     shrinkage: float                    # λ de Ledoit-Wolf ∈ [0, 1]
     meta: dict[str, dict[str, Any]]     # ticker → {source, ccy_native, kind, obs}
     dropped: list[dict[str, str]]       # [{ticker, reason}]
+    adjusted: list[dict[str, str]] = field(default_factory=list)  # [{ticker, note}] saltos de ratio
     notes: list[str] = field(default_factory=list)
 
 
@@ -209,9 +215,12 @@ def estimate_joint_moments(
     tickers de `source_map`, alineadas por fechas comunes y normalizadas a USD
     (CCL) cuando cotizan en ARS.
 
-    Descarta, con razón auditada: series que no se pueden traer, con menos de
-    `min_obs` observaciones, ARS sin FX disponible, y series con volatilidad
-    anualizada > `max_sane_vol` (corrupción de datos).
+    Corrige saltos de ratio (rebasings de CEDEARs) por back-scaling sobre la
+    serie ya en USD, con nota auditada por salto en `adjusted`. Descarta, con
+    razón auditada: series que no se pueden traer, con menos de `min_obs`
+    observaciones, ARS sin FX disponible, series con demasiados saltos de
+    ratio, y series con volatilidad anualizada > `max_sane_vol` (corrupción
+    de datos).
 
     Raises:
         EstimationError: si quedan < 2 series utilizables o el solapamiento de
@@ -275,6 +284,21 @@ def estimate_joint_moments(
             continue
         usable.append(PriceSeries(symbol=ps.symbol, source=ps.source,
                                   currency="USD", kind=ps.kind, close=usd_close))
+
+    # ── 2b. Saltos de ratio (rebasings de CEDEARs) — sobre la serie ya en USD ─
+    adjusted: list[dict[str, str]] = []
+    cleaned: list[PriceSeries] = []
+    for ps in usable:
+        adj = adjust_ratio_jumps(ps.close)
+        if adj.suspect:
+            dropped.append({"ticker": ps.symbol, "reason": adj.notes[0]})
+            continue
+        if adj.n_jumps:
+            adjusted.extend({"ticker": ps.symbol, "note": n} for n in adj.notes)
+            ps = PriceSeries(symbol=ps.symbol, source=ps.source,
+                             currency=ps.currency, kind=ps.kind, close=adj.close)
+        cleaned.append(ps)
+    usable = cleaned
 
     if len(usable) < 2:
         raise EstimationError(
@@ -367,5 +391,6 @@ def estimate_joint_moments(
         shrinkage=lam,
         meta=meta,
         dropped=dropped,
+        adjusted=adjusted,
         notes=notes + method_notes,
     )

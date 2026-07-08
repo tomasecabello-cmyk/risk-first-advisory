@@ -23,6 +23,7 @@ from risk_first_advisory.data_layer.market_data import MarketDataSnapshot
 from risk_first_advisory.data_layer.providers import (
     PriceSeries,
     ProviderError,
+    adjust_ratio_jumps,
     fetch_series_cached,
     usd_ars_history,
 )
@@ -112,6 +113,15 @@ class LiveMarketDataProvider:
                 notes.append("normalized=USD(CCL)")
             except Exception:  # noqa: BLE001 — sin FX, se queda en moneda nativa
                 notes.append("normalized=NO(fx_unavailable)")
+
+        # Saltos de ratio (rebasings de CEDEARs) — sobre la serie ya en USD.
+        adj = adjust_ratio_jumps(close)
+        if adj.suspect:
+            # Demasiados saltos: serie no confiable, sin snapshot.
+            return None
+        if adj.n_jumps:
+            close = adj.close
+            notes.extend(adj.notes)
 
         daily = close.pct_change().dropna()
         if len(daily) < _MIN_OBS:
