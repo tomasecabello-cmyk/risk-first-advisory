@@ -113,6 +113,27 @@ def test_short_series_passthrough():
     assert adj.n_jumps == 0 and not adj.suspect
 
 
+def test_exempt_dates_keep_jump_with_audited_note():
+    base = _walk(400, seed=51)
+    jumped = _with_jump(base, at=200, factor=1.45)  # +45% aislado
+    day = pd.Timestamp(jumped.index[200]).normalize()
+
+    adj = adjust_ratio_jumps(jumped, exempt_dates={day})
+    assert adj.n_jumps == 0 and not adj.suspect
+    assert len(adj.notes) == 1 and "ratio_jump_kept" in adj.notes[0]
+    pd.testing.assert_series_equal(adj.close, jumped)  # el día se conserva
+
+
+def test_exempt_dates_do_not_shield_other_days():
+    base = _walk(400, seed=53)
+    jumped = _with_jump(base, at=200, factor=1 / 2.5)
+    other_day = pd.Timestamp(jumped.index[100]).normalize()
+
+    adj = adjust_ratio_jumps(jumped, exempt_dates={other_day})
+    assert adj.n_jumps == 1
+    assert any("ratio_jump_adjusted" in n for n in adj.notes)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Integración: estimador conjunto
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +187,39 @@ def test_joint_moments_drops_suspect_series():
     assert "TRASH" not in est.tickers
     reasons = {d["ticker"]: d["reason"] for d in est.dropped}
     assert "ratio_jumps_excessive" in reasons["TRASH"]
+
+
+def test_joint_moments_market_event_day_is_not_adjusted():
+    """Día de evento cross-sectional (muchos movers, extremos en minoría —
+    p.ej. rally post-electoral): los saltos de ese día se CONSERVAN con nota
+    ratio_jump_kept; un artefacto aislado en otra fecha se sigue ajustando."""
+    rng = np.random.default_rng(61)
+    n, event_at, artifact_at = 500, 250, 100
+    series: dict[str, pd.Series] = {}
+    for k in range(14):
+        s = _walk(n, seed=100 + k)
+        # Evento común: 12 series con +12%..+35% (movers) y 2 con +45% (extremos
+        # en minoría: 2/14 <= 0.5) — repricing permanente, como un rally real.
+        move = 1.45 if k < 2 else 1.12 + 0.23 * float(rng.random())
+        series[f"T{k:02d}"] = _with_jump(s, at=event_at, factor=move)
+    # Artefacto aislado en OTRA fecha sobre una de las series de evento suave.
+    series["T05"] = _with_jump(series["T05"], at=artifact_at, factor=2.5)
+
+    est = estimate_joint_moments(
+        {t: "us" for t in series},
+        _fetch=_fetch_factory(series), _fx=_fx_flat,
+    )
+    assert sorted(est.tickers) == sorted(series)
+    assert any(n.startswith("market_event_days") for n in est.notes)
+    notes_by_ticker: dict[str, list[str]] = {}
+    for a in est.adjusted:
+        notes_by_ticker.setdefault(a["ticker"], []).append(a["note"])
+    # Los dos extremos del día de evento se conservan, no se ajustan.
+    for t in ("T00", "T01"):
+        assert any("ratio_jump_kept" in n for n in notes_by_ticker.get(t, []))
+        assert not any("ratio_jump_adjusted" in n for n in notes_by_ticker.get(t, []))
+    # El artefacto aislado en otra fecha se ajusta igual.
+    assert any("ratio_jump_adjusted" in n for n in notes_by_ticker.get("T05", []))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

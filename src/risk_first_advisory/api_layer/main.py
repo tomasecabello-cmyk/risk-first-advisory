@@ -5073,7 +5073,7 @@ def _apply_live_joint_market_data(
         for d in est.dropped
     ]
     warnings.extend(
-        f"live: {a['ticker']} serie ajustada — {a['note']}"
+        f"live: {a['ticker']} saltos de ratio — {a['note']}"
         for a in est.adjusted
     )
     warnings.append(

@@ -290,11 +290,32 @@ detectó un artefacto de base de precios común de data912 el 2023-08-03/04
 (todos los soberanos +60-69% y varias acciones ARG +48-58% el mismo día, con
 serie CCL suave — no es mercado) que antes inflaba σ y correlaciones.
 
-*Limitación conocida:* días de evento genuinos, aislados y >40% se ajustan de
-más — medido: 2025-10-27 post-elecciones (BHIP/SUPV/METR +43-46% reales) se
-recortó, subestimando levemente la σ de esos tickers (~1 día en ~700). El
-refinamiento (distinguir evento de mercado de artefacto, p.ej. con señal
-cross-sectional) queda en el ROADMAP.
+*Refinamiento cross-sectional (2026-07-09):* los días de EVENTO de mercado
+genuinos (p.ej. rally post-electoral 2025-10-27, BHIP/SUPV/METR +43-46%
+reales) ya no se ajustan de más. `estimate_joint_moments` detecta días de
+evento sobre el cross-section de series utilizables: participación amplia
+(≥ `EVENT_MIN_BREADTH=10` series con |r| > `EVENT_MOVE_THRESHOLD=10%`) con
+extremos en minoría (≤ `EVENT_EXTREME_SHARE_MAX=50%` de los movers supera el
+umbral de salto). En esos días los saltos detectados se CONSERVAN con nota
+auditada `ratio_jump_kept` (y no cuentan para `RATIO_JUMP_MAX`). El
+discriminador se validó empíricamente: un evento real tiene distribución
+continua de movimientos (2025-10-27: 30 movers, solo 3 extremos), una ruptura
+de base del proveedor concentra a los afectados por encima del umbral
+(2023-08-04: 27 de 31 movers >40% — se sigue ajustando), y los artefactos
+aislados dejan el cross-section quieto. `LiveMarketDataProvider` (per-ticker)
+no ve el cross-section y mantiene el ajuste incondicional — la Σ del proposal
+la produce el estimador conjunto, que sí exime.
+
+**Extensión (2026-07-09) — fallback de fetch para CEDEARs sin histórico local:**
+VIST/XLB no tienen histórico en data912 y yfinance `.BA` devolvía 1 obs (solo
+hoy) que se aceptaba y quedaba cacheada 24h (terminaban excluidos de la
+estimación con `short_history: 1 obs`). Ahora el fallback `.BA` exige ≥ 30 obs
+(mismo guard que data912) y los CEDEARs tienen un último recurso: el
+subyacente US en yfinance como PROXY (`source="arg_cedear>us_proxy"`,
+auditado en meta/notes; serie ya en USD, sin conversión CCL). Es válido para
+μ/σ/correlaciones porque solo importan los retornos y el ratio CEDEAR:acción
+es un factor de escala constante. Medido: VIST 752 obs (σ 44.4%), XLB 752 obs
+(σ 22.7%), ambos de vuelta en el universo estimable.
 
 **Extensión (2026-07-08) — YTM como view de BL para renta fija:**
 `estimate_joint_moments` acepta `views` explícitas por ticker (P sigue siendo

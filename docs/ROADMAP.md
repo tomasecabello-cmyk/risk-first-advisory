@@ -44,11 +44,7 @@
 - **Cache de extracción de preferencias OpenAI** (`hash(texto)` + TTL) para no re-llamar
   con texto idéntico.
 - **Firma digital** del rationale del asesor (hoy texto libre sin identidad verificada).
-- **Ratio jumps — falsos positivos en días de evento genuinos**: `adjust_ratio_jumps`
-  (DD-014, extensión 2026-07-08) recorta días aislados con |r| > 40% también cuando son
-  mercado real (medido: rally post-elecciones 2025-10-27, BHIP/SUPV/METR +43-46%),
-  subestimando levemente la σ de esos tickers. Refinar con una señal cross-sectional
-  (muchos tickers con día grande común y FX/mercado coherentes = evento, no artefacto).
-- **Series con historia rota en el universo**: VIST y XLB llegan con 1 observación en
-  la ventana 3y del caché (quedan excluidos de la estimación con razón auditada, pero
-  deberían tener serie completa) — revisar el fetch/caché de esos tickers.
+- **Ratio jumps en `LiveMarketDataProvider` (per-ticker)**: el path per-ticker no ve el
+  cross-section, así que ajusta incondicionalmente también en días de evento genuinos
+  (la Σ del proposal la produce el estimador conjunto, que sí exime — impacto acotado a
+  los snapshots per-ticker del path legacy/fallback).

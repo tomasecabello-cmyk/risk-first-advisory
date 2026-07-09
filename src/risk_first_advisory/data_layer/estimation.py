@@ -49,6 +49,7 @@ import pandas as pd
 
 from risk_first_advisory.data_layer.covariance import CovarianceMatrix
 from risk_first_advisory.data_layer.providers import (
+    RATIO_JUMP_THRESHOLD,
     PriceSeries,
     ProviderError,
     adjust_ratio_jumps,
@@ -69,6 +70,18 @@ _DEFAULT_RF: float = 0.04   # tasa libre de riesgo anual (igual que markowitz-op
 
 DEFAULT_DELTA: float = 2.5  # aversión al riesgo del inversor representativo
 DEFAULT_TAU: float = 0.05   # incertidumbre del prior de equilibrio
+
+# ── Exención cross-sectional del ajuste de saltos de ratio (DD-014 ext.) ─────
+# Un día de EVENTO de mercado genuino (p.ej. rally post-electoral 2025-10-27)
+# tiene participación amplia con extremos en minoría: muchas series se mueven
+# > EVENT_MOVE_THRESHOLD pero pocas cruzan el umbral de salto. Una ruptura de
+# base del proveedor (2023-08-04: soberanos +60-69% el mismo día) es lo
+# contrario: los afectados saltan TODOS por encima del umbral. En días de
+# evento, los saltos detectados se conservan (nota ratio_jump_kept) en vez de
+# ajustarse. Calibrado con data912 3y (2026-07).
+EVENT_MOVE_THRESHOLD: float = 0.10   # |r| mínimo para contar como "mover"
+EVENT_MIN_BREADTH: int = 10          # movers mínimos para considerar evento
+EVENT_EXTREME_SHARE_MAX: float = 0.5  # extremos (>|salto|) / movers máximo
 
 
 class EstimationError(RuntimeError):
@@ -295,15 +308,37 @@ def estimate_joint_moments(
                                   currency="USD", kind=ps.kind, close=usd_close))
 
     # ── 2b. Saltos de ratio (rebasings de CEDEARs) — sobre la serie ya en USD ─
+    # Días de evento cross-sectional: participación amplia con extremos en
+    # minoría ⇒ mercado real, los saltos de ese día NO se ajustan.
+    exempt_dates: set[pd.Timestamp] = set()
+    if len(usable) >= EVENT_MIN_BREADTH:
+        cross = pd.concat(
+            {ps.symbol: ps.close.pct_change().dropna() for ps in usable},
+            axis=1, sort=True,
+        ).abs()
+        movers = (cross > EVENT_MOVE_THRESHOLD).sum(axis=1)
+        extremes = (cross > RATIO_JUMP_THRESHOLD).sum(axis=1)
+        event_mask = (movers >= EVENT_MIN_BREADTH) & (
+            extremes <= EVENT_EXTREME_SHARE_MAX * movers
+        )
+        exempt_dates = {
+            pd.Timestamp(ts).normalize() for ts in cross.index[event_mask]
+        }
+        if exempt_dates:
+            notes.append(
+                "market_event_days: "
+                + ", ".join(str(d.date()) for d in sorted(exempt_dates))
+            )
+
     adjusted: list[dict[str, str]] = []
     cleaned: list[PriceSeries] = []
     for ps in usable:
-        adj = adjust_ratio_jumps(ps.close)
+        adj = adjust_ratio_jumps(ps.close, exempt_dates=exempt_dates)
         if adj.suspect:
             dropped.append({"ticker": ps.symbol, "reason": adj.notes[0]})
             continue
+        adjusted.extend({"ticker": ps.symbol, "note": n} for n in adj.notes)
         if adj.n_jumps:
-            adjusted.extend({"ticker": ps.symbol, "note": n} for n in adj.notes)
             ps = PriceSeries(symbol=ps.symbol, source=ps.source,
                              currency=ps.currency, kind=ps.kind, close=adj.close)
         cleaned.append(ps)

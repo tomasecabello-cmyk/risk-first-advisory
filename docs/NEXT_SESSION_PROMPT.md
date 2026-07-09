@@ -23,13 +23,21 @@ Los 3 ítems de deuda técnica del plan, commiteados por separado:
    view para renta fija. Medido: GD30 μ_hist −4.3% → μ_BL +10.5% (YTM 11.5%),
    21 bonos con view.
 
-## Pendientes que dejó esta sesión (ya en ROADMAP, sección deuda técnica)
+## Cerrado en la continuación (2026-07-09)
 
-- **Falsos positivos del ratio-jump en días de evento genuinos**: el rally
-  post-elecciones 2025-10-27 (BHIP/SUPV/METR +43-46% reales) se recorta de más
-  → subestima levemente σ de esos tickers. Refinar con señal cross-sectional.
-- **VIST y XLB llegan con 1 observación** en la ventana 3y del caché (quedan
-  excluidos con razón auditada, pero deberían tener serie) — revisar fetch/caché.
+- **Exención cross-sectional del ratio-jump**: días de evento (≥10 movers >10%,
+  extremos ≤50% de los movers) → los saltos se conservan con nota
+  `ratio_jump_kept`. Validado: 2025-10-27 exento (BHIP/SUPV/METR recuperan σ
+  57/60/49%), ruptura de base 2023-08-04 se sigue ajustando.
+- **VIST/XLB**: el fallback `.BA` ahora exige ≥30 obs (antes cacheaba 1 obs por
+  24h) y los CEDEARs caen al subyacente US como proxy auditado
+  (`arg_cedear>us_proxy`). Ambos de vuelta en la estimación (752 obs).
+
+## Pendiente que quedó en ROADMAP
+
+- `LiveMarketDataProvider` (per-ticker) ajusta incondicionalmente (no ve el
+  cross-section); impacto acotado: la Σ del proposal la produce el estimador
+  conjunto, que sí exime.
 
 ## Cómo correr la demo
 
