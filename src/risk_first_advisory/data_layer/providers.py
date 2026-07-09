@@ -104,6 +104,7 @@ def adjust_ratio_jumps(
     jump_threshold: float = RATIO_JUMP_THRESHOLD,
     mad_multiple: float = RATIO_JUMP_MAD_MULTIPLE,
     max_jumps: int = RATIO_JUMP_MAX,
+    exempt_dates: set[pd.Timestamp] | None = None,
 ) -> RatioJumpAdjustment:
     """
     Detecta y corrige saltos de ratio en una serie de cierres.
@@ -113,6 +114,11 @@ def adjust_ratio_jumps(
     serie, y cuyos vecinos inmediatos son días normales. Un crash genuino con
     rebote tiene días grandes contiguos y NO se toca; una serie genuinamente
     salvaje tiene MAD alto y tampoco.
+
+    `exempt_dates` (fechas normalizadas): días de EVENTO de mercado detectados
+    cross-sectionalmente por el caller (p.ej. rally post-electoral) — un salto
+    en esas fechas se conserva con nota auditada (`ratio_jump_kept`) en vez de
+    ajustarse, y no cuenta para max_jumps.
 
     Corrección: back-scaling — todo el segmento previo al salto se reescala
     por el factor implícito (p_t / p_{t-1}), el ajuste estándar de rebasing.
@@ -133,6 +139,7 @@ def adjust_ratio_jumps(
     sigma_rob = 1.4826 * float(np.median(np.abs(rets - med)))
 
     jumps: list[int] = []   # i = salto entre s[i] y s[i+1] (retorno rets[i])
+    kept_notes: list[str] = []
     for i, r in enumerate(rets):
         if abs(r) <= jump_threshold:
             continue
@@ -140,11 +147,19 @@ def adjust_ratio_jumps(
             continue
         prev_ok = i == 0 or abs_rets[i - 1] <= jump_threshold
         next_ok = i == len(rets) - 1 or abs_rets[i + 1] <= jump_threshold
-        if prev_ok and next_ok:
-            jumps.append(i)
+        if not (prev_ok and next_ok):
+            continue
+        day = pd.Timestamp(s.index[i + 1]).normalize()
+        if exempt_dates and day in exempt_dates:
+            kept_notes.append(
+                f"ratio_jump_kept: {day.date()} r={r:+.1%} "
+                "(día de evento de mercado cross-sectional, no se ajusta)"
+            )
+            continue
+        jumps.append(i)
 
     if not jumps:
-        return RatioJumpAdjustment(close=s)
+        return RatioJumpAdjustment(close=s, notes=kept_notes)
     if len(jumps) > max_jumps:
         return RatioJumpAdjustment(
             close=s,
@@ -158,7 +173,7 @@ def adjust_ratio_jumps(
         )
 
     values = s.to_numpy(dtype=float).copy()
-    notes: list[str] = []
+    notes: list[str] = list(kept_notes)
     for i in jumps:
         factor = values[i + 1] / values[i]
         values[: i + 1] *= factor
@@ -388,7 +403,31 @@ def fetch_series(symbol: str, source: str, period: str) -> PriceSeries:
     if suffix:
         try:
             close = yfinance_history(symbol + suffix, period)
-            return PriceSeries(symbol, source, meta["currency"], meta["kind"], close)
+            # Mismo guard que data912: yfinance puede "tener" el ticker .BA
+            # pero sin barras diarias (devuelve 1 obs de hoy) — eso no es una
+            # serie, y si se acepta queda cacheada 24h envenenando el flujo.
+            if len(close) >= 30:
+                return PriceSeries(symbol, source, meta["currency"], meta["kind"], close)
+            err = ProviderError(
+                f"yfinance {symbol}{suffix} con muy pocos datos ({len(close)} obs)."
+            )
+        except ProviderError as e:
+            err = e
+
+    if source == "arg_cedear":
+        # Último recurso para CEDEARs sin histórico local (ni data912 ni .BA):
+        # el subyacente US en yfinance como PROXY. Para μ/σ/correlaciones solo
+        # importan los retornos y el ratio CEDEAR:acción es un factor de escala
+        # constante; la serie llega ya en USD (sin conversión CCL). El origen
+        # queda auditado en source ("arg_cedear>us_proxy" → meta/notes).
+        try:
+            close = yfinance_history(symbol, period)
+            if len(close) >= 30:
+                return PriceSeries(symbol, "arg_cedear>us_proxy", "USD",
+                                   meta["kind"], close)
+            err = ProviderError(
+                f"yfinance US proxy {symbol} con muy pocos datos ({len(close)} obs)."
+            )
         except ProviderError as e:
             err = e
 
