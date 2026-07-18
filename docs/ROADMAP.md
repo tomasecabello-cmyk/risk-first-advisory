@@ -48,3 +48,116 @@
   cross-section, así que ajusta incondicionalmente también en días de evento genuinos
   (la Σ del proposal la produce el estimador conjunto, que sí exime — impacto acotado a
   los snapshots per-ticker del path legacy/fallback).
+
+## Auditoría de compliance (2026-07-17 — skills compliance@finance-skills)
+
+> Diagnóstico contra práctica estándar (FINRA 2111/2090, CIP/CDD, Reg BI) usada como
+> referencia de doctrina, ADAPTADA: esto es un demo local ARG, `docs/INVARIANTS.md`
+> manda, y el marco regulatorio real del piloto sería CNV/UIF, no SEC/FINRA.
+> Lo que ya cubre bien el motor (sin gap): rationale obligatorio en
+> approval/selection/override, tope determinístico de capacidad con
+> `framework_override_acknowledged`, matriz de suitability con default conservador
+> `SUITABILITY_RULE_MISSING`, audit chain, separación IA-propone/asesor-decide.
+
+### Suitability / perfil del cliente
+
+- **Sin "otras inversiones" ni pasivos en `KYCData`**: la propuesta solo ve el capital
+  del caso; no hay análisis de concentración a nivel cliente (posiciones held-away,
+  deudas). Agregar campos opcionales informativos (additive, sin romper I-015).
+- **Sin tax status en `KYCData`**: factor estándar del perfil de suitability; en ARG
+  relevante para bonos exentos vs CEDEARs (ganancias / bienes personales). Primero
+  como campo informativo para el asesor.
+- **Sin vigencia/staleness del KYC**: las submissions son versionadas pero nada marca
+  un KYC viejo ni exige reconfirmación ante eventos de vida (jubilación, herencia).
+  Propuesta barata: TTL configurable + reason_code `KYC_STALE` como warning del
+  proposal cuando el KYC current supera la antigüedad máxima.
+- **Sin registro de negativa a informar**: todos los campos del KYC son obligatorios
+  (conservador, bien), pero no se puede documentar "el cliente se negó a responder X"
+  — práctica estándar: registrar la negativa y estrechar el universo recomendable.
+- **Sin marca de "producto complejo"**: la matriz cubre (instrument_type × perfil) pero
+  no distingue productos que exigen diligencia reforzada de reasonable-basis (p.ej.
+  CEDEARs: riesgo de ratio y CCL implícito). Usar `requires_advisor_note` de forma
+  sistemática + nota de producto en el report.
+
+### Identidad y onboarding (para Fase 4 — piloto real)
+
+- **Cliente = `display_name` + jurisdiction**: sin identidad verificable (DNI/CUIT),
+  sin screening PEP/sanciones, sin beneficial ownership para cuentas de entidades.
+  Para un piloto con asesor real esto es requisito UIF (sujeto obligado), no opcional.
+  Va junto al checklist legal/compliance ya listado en Fase 4.
+- **Sin trusted contact / persona autorizada** en el modelo de cliente.
+
+### Disclosures y costos (Reg BI como referencia)
+
+- **Costos al cliente no modelados**: los candidates del proposal no llevan
+  TER/comisiones/custodia; no se puede comparar variantes por costo total ni incluir
+  disclosure de fees en el report. El costo es factor obligatorio del care obligation
+  en la práctica estándar; hoy el motor optimiza sin verlo.
+- **Sin registro de conflictos de interés de la firma** (productos propios,
+  retrocesiones) ni sección de disclosure en el report: los 4 disclaimers fijos de
+  I-020 no cubren fees, conflictos ni capacidad en la que actúa el asesor.
+- **Alternativas consideradas sin estructura**: la selección exige `rationale` libre
+  pero no registra por qué se descartaron las otras variantes del proposal. Campo
+  opcional `considered_alternatives` en el payload de selection — barato y alinea con
+  la doctrina de "reasonably available alternatives".
+- **Sin documento tipo relationship summary** (análogo Form CRS) en onboarding —
+  Fase 4, junto con PDF/branding del report.
+
+## Auditoría de seguridad (2026-07-17 — skill security-guidance)
+
+> Revisión de `api_layer/` + `persistence_layer/`. Sin hallazgos de inyección SQL
+> (queries parametrizadas) ni de leak de tokens en errores/logs (error policy
+> genérica en auth). Severidades para el contexto "demo local que aspira a piloto".
+
+- **[Alta] Fallback de dev tokens siempre activo**: sin `ADVISOR_TOKENS_FILE` ni
+  `config/advisor_tokens.yaml`, los tokens `dev-advisor-token`/`dev-compliance-token`
+  (públicos en el repo) autentican con roles advisor/compliance. Si el backend se
+  expone fuera de localhost, es bypass de auth con credenciales conocidas. Fix barato
+  y previo a todo lo de Fase 4: kill-switch explícito (p.ej. exigir
+  `RFA_ALLOW_DEV_TOKENS=1` para habilitar el fallback) o rehusar el fallback cuando
+  el bind no es loopback.
+- **[Alta — refuerza ítem existente de Fase 4] Sin firm-level access control**:
+  cualquier token con rol advisor lee KYC, casos y AI logs de CUALQUIER firma
+  (PII cross-tenant). Ya está en Fase 4; esta auditoría lo confirma como el gap de
+  autorización más serio del estado actual.
+- **[Media] `raw_response_json` se persiste sin redacción**: I-022 redacta el INPUT
+  de `ai_request_logs`, pero la respuesta cruda del modelo puede citar texto libre
+  del cliente (`open_*`, preferencias) y queda en claro en la DB. Extender la
+  política de redacción al output (o redactar campos citados) y actualizar I-022.
+- **[Media] Tokens en claro en el YAML de advisors**: el archivo de tokens guarda el
+  token literal; guardar hash (SHA-256) y comparar por hash — complementa la
+  rotación/revocación ya listada en Fase 4.
+- **[Baja] `POST /admin/ai-logs` acepta `raw_response` arbitrario**: es admin-only y
+  redacta el input, pero es una vía de backfill que escribe contenido no redactado
+  al log (mismo fondo que el hallazgo Media de arriba).
+- **[Baja] CORS con `allow_credentials=True`**: inocuo hoy (orígenes locales fijos);
+  revisar la lista de orígenes al desplegar (no pasar nunca a `*`).
+
+## Mejoras metodológicas `data_layer/estimation.py` (2026-07-17 — wealth-management + quant-finance-methods)
+
+> DD-014 (Σ Ledoit-Wolf + μ Black-Litterman) es sólido; esto es afinación con buena
+> relación costo/beneficio, no rediseño. Ordenado por prioridad.
+
+- **Confianza por view en Ω (Idzorek 2007)**: hoy `view_confidence` es un escalar
+  (=1.0) para todas las views. El YTM de un bono (ancla forward-looking) merece una
+  Ω más chica que la media histórica de una acción ARG. Cambio local: aceptar un
+  vector de confianza por ticker en `black_litterman_returns` y dar más peso a las
+  views `explicit` que a las `hist_mean`. Costo bajo, beneficio directo sobre la
+  renta fija (misma dirección que la ext. DD-014 del YTM).
+- **Guard de solapamiento en el inner join**: la serie más corta recorta la ventana
+  común de TODOS los tickers (`concat(...).dropna()`). Descartar, con razón auditada
+  (patrón `dropped`), series cuya inclusión reduzca la ventana común por debajo de un
+  umbral (p.ej. <60% de la ventana máxima disponible). Costo bajo.
+- **`ffill()` sin límite antes del `dropna()`**: días sin cotización (feriados ARG vs
+  US) generan retornos 0 espurios que subestiman vol y correlaciones
+  (nonsynchronous trading). Mitigación barata: `ffill(limit=2)` o validar las
+  correlaciones cross-market con retornos semanales.
+- **Target de shrinkage constant-correlation (Ledoit-Wolf 2003)**: para universos
+  con mayoría accionaria suele superar al target identidad escalada; fórmula cerrada,
+  sin dependencias nuevas. Beneficio moderado.
+- **`rf`, `delta`, `tau` hardcodeados en `estimation.py`**: mover a `config_layer`
+  para coherencia con `risk_assumptions` (hoy `rf=0.04` vive en el módulo).
+- **No recomendado** (costo > beneficio): GARCH/EWMA para la Σ del proposal (horizonte
+  de advisory largo; complejidad sin ganancia) y cap-weights como `w_ref` de BL (el
+  "portafolio de mercado" de una canasta mixta ARG/US no es observable; equal-weight
+  es defendible y está documentado).
