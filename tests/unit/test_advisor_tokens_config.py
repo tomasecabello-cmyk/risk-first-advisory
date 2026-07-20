@@ -28,7 +28,10 @@ import pytest
 from risk_first_advisory.config_layer.advisor_tokens import (
     ADVISOR_TOKENS_ENV_VAR,
     ALLOWED_ROLES,
+    DEMO_MODE_ENV_VAR,
+    DEV_TOKENS_FLAG_ENV_VAR,
     REQUIRED_TOKEN_FIELDS,
+    AdvisorTokensNotConfiguredError,
     get_default_advisor_tokens,
     load_advisor_tokens,
 )
@@ -524,6 +527,94 @@ tokens:
         monkeypatch.setenv(ADVISOR_TOKENS_ENV_VAR, str(bad))
         with pytest.raises(ValueError):
             get_default_advisor_tokens()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Kill-switch del fallback dev-only (auditoría de seguridad 2026-07-17)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestDevFallbackKillSwitch:
+    """
+    Sin fuente de tokens (env var + default file ausentes, garantizado por el
+    fixture autouse) el fallback dev-only SOLO se habilita con
+    RFA_ALLOW_DEV_TOKENS o RFA_DEMO_MODE no vacías. La suite corre con
+    RFA_ALLOW_DEV_TOKENS=1 (tests/conftest.py); estos tests la borran para
+    verificar el comportamiento fail-closed.
+    """
+
+    def test_without_flags_raises_not_configured(self, monkeypatch):
+        monkeypatch.delenv(DEV_TOKENS_FLAG_ENV_VAR, raising=False)
+        monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+        with pytest.raises(AdvisorTokensNotConfiguredError):
+            get_default_advisor_tokens()
+
+    def test_error_message_is_actionable_without_leaking_tokens(self, monkeypatch):
+        monkeypatch.delenv(DEV_TOKENS_FLAG_ENV_VAR, raising=False)
+        monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+        with pytest.raises(AdvisorTokensNotConfiguredError) as exc_info:
+            get_default_advisor_tokens()
+        msg = str(exc_info.value)
+        assert DEV_TOKENS_FLAG_ENV_VAR in msg
+        assert DEMO_MODE_ENV_VAR in msg
+        assert "dev-advisor-token" not in msg
+        assert "dev-compliance-token" not in msg
+
+    def test_empty_flags_count_as_disabled(self, monkeypatch):
+        monkeypatch.setenv(DEV_TOKENS_FLAG_ENV_VAR, "")
+        monkeypatch.setenv(DEMO_MODE_ENV_VAR, "   ")
+        with pytest.raises(AdvisorTokensNotConfiguredError):
+            get_default_advisor_tokens()
+
+    def test_allow_dev_tokens_flag_enables_fallback(self, monkeypatch):
+        monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+        monkeypatch.setenv(DEV_TOKENS_FLAG_ENV_VAR, "1")
+        tokens = get_default_advisor_tokens()
+        assert "dev-advisor-token" in tokens
+
+    def test_demo_mode_flag_enables_fallback(self, monkeypatch):
+        monkeypatch.delenv(DEV_TOKENS_FLAG_ENV_VAR, raising=False)
+        monkeypatch.setenv(DEMO_MODE_ENV_VAR, "1")
+        tokens = get_default_advisor_tokens()
+        assert "dev-compliance-token" in tokens
+
+    def test_explicit_file_ignores_kill_switch(self, tmp_path: Path, monkeypatch):
+        """Con archivo configurado, el kill-switch es irrelevante."""
+        monkeypatch.delenv(DEV_TOKENS_FLAG_ENV_VAR, raising=False)
+        monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+        custom = tmp_path / "custom.yaml"
+        custom.write_text(
+            """\
+tokens:
+  real-token:
+    advisor_id: REAL-001
+    display_name: Real Advisor
+    firm_id: null
+    roles: [advisor]
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(ADVISOR_TOKENS_ENV_VAR, str(custom))
+        tokens = get_default_advisor_tokens()
+        assert "real-token" in tokens
+        assert "dev-advisor-token" not in tokens
+
+    def test_auth_returns_500_when_not_configured(self, monkeypatch):
+        """
+        Vía API: token presentado sin fuente de tokens configurada → 500
+        fail-loud (config ausente es error operativo, no un 401 silencioso).
+        """
+        monkeypatch.delenv(DEV_TOKENS_FLAG_ENV_VAR, raising=False)
+        monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+        from fastapi.testclient import TestClient
+
+        import risk_first_advisory.api_layer.main as main_mod
+
+        client = TestClient(main_mod.app, raise_server_exceptions=False)
+        resp = client.get(
+            "/auth/me", headers={"Authorization": "Bearer dev-advisor-token"}
+        )
+        assert resp.status_code == 500
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -62,7 +62,9 @@ auditado) → `compliance.html` (audit trail, verify, AI logs) → `methodology.
 (fundamento) → `advanced.html` (modo dev).
 
 Tokens dev de fallback: `dev-advisor-token` (workflow) y `dev-compliance-token`
-(verify/ai-logs). Operaciones admin requieren `config/advisor_tokens.yaml` propio
+(verify/ai-logs). Solo se habilitan con `RFA_ALLOW_DEV_TOKENS=1` o `RFA_DEMO_MODE=1`
+(kill-switch fail-closed, DD-016 — el paso 3 de arriba ya lo cubre). Operaciones
+admin requieren `config/advisor_tokens.yaml` propio
 (ver `config/advisor_tokens.yaml.example`).
 
 ## Verificación

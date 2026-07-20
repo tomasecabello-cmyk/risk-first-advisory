@@ -23,6 +23,7 @@ import pytest
 from risk_first_advisory.persistence_layer.entity_repository import (
     compute_input_hash,
     redact_ai_input,
+    redact_ai_output,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,6 +246,142 @@ class TestSafetyNets:
     def test_non_dict_payload_raises(self) -> None:
         with pytest.raises(ValueError):
             redact_ai_input(["not", "a", "dict"])  # type: ignore[arg-type]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Output redaction — raw_response del modelo (I-022 ext. 2026-07)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestOutputRedaction:
+    """
+    La respuesta del modelo puede CITAR el texto libre del cliente
+    (contradictions, follow_up_questions, advisor_notes). `redact_ai_output`
+    redacta esos campos siempre — incluso elementos cortos de listas — y
+    conserva las claves estructuradas (perfil, confidence, flags).
+    """
+
+    def test_contradictions_list_fully_redacted(self) -> None:
+        out = redact_ai_output(
+            {
+                "contradictions": [
+                    "Dice 'me asusta perder' pero eligió agresivo.",
+                    "corto",
+                ]
+            }
+        )
+        assert all(
+            item.startswith("<REDACTED:text_") for item in out["contradictions"]
+        )
+
+    def test_follow_up_questions_redacted(self) -> None:
+        out = redact_ai_output(
+            {"follow_up_questions": ["¿Confirmás que tolerás -20%?"]}
+        )
+        assert out["follow_up_questions"][0].startswith("<REDACTED:text_")
+
+    def test_advisor_notes_redacted(self) -> None:
+        out = redact_ai_output({"advisor_notes": ["El cliente mencionó a su hija."]})
+        assert out["advisor_notes"][0].startswith("<REDACTED:text_")
+
+    def test_profile_change_reason_redacted(self) -> None:
+        out = redact_ai_output({"profile_change_reason": "Revisado tras respuestas."})
+        assert out["profile_change_reason"].startswith("<REDACTED:text_")
+
+    def test_structured_keys_preserved(self) -> None:
+        out = redact_ai_output(
+            {
+                "preliminary_profile": "moderado",
+                "confidence": 0.82,
+                "advisor_review_required": True,
+            }
+        )
+        assert out["preliminary_profile"] == "moderado"
+        assert out["confidence"] == 0.82
+        assert out["advisor_review_required"] is True
+
+    def test_nested_dict_under_redacted_key_preserves_shape(self) -> None:
+        out = redact_ai_output(
+            {"contradictions": [{"field": "riesgo", "detail": "cita del cliente"}]}
+        )
+        entry = out["contradictions"][0]
+        assert set(entry.keys()) == {"field", "detail"}
+        assert entry["detail"].startswith("<REDACTED:text_")
+
+    def test_api_key_in_output_redacted(self) -> None:
+        out = redact_ai_output({"debug": "sk-aBcDeF1234567890XYZ"})
+        assert "sk-aBcDeF" not in json.dumps(out)
+
+    def test_long_unknown_output_string_redacted(self) -> None:
+        out = redact_ai_output({"unexpected_blob": "y" * 120})
+        assert out["unexpected_blob"].startswith("<REDACTED:text_")
+
+    def test_no_mutation_of_output_payload(self) -> None:
+        original = {"contradictions": ["algo"], "confidence": 0.5}
+        snapshot = {"contradictions": ["algo"], "confidence": 0.5}
+        redact_ai_output(original)
+        assert original == snapshot
+
+    def test_non_dict_output_raises(self) -> None:
+        with pytest.raises(ValueError):
+            redact_ai_output("not a dict")  # type: ignore[arg-type]
+
+
+class TestRepositoryRedactsRawResponse:
+    """El repositorio redacta raw_response en TODOS los paths de escritura."""
+
+    def test_create_persists_redacted_raw_response(self, tmp_path) -> None:
+        from risk_first_advisory.persistence_layer.entity_repository import (
+            SQLiteAIRequestLogRepository,
+            SQLiteEntityStore,
+        )
+
+        with SQLiteEntityStore(tmp_path / "t.db") as store:
+            # DDL mínimo de 0001_phase2_core_schema.sql sin FKs (unit test:
+            # case_id / requested_by_advisor_id van NULL).
+            store._conn.execute(
+                """
+                CREATE TABLE ai_request_logs (
+                    request_id              TEXT PRIMARY KEY,
+                    case_id                 TEXT,
+                    requested_by_advisor_id TEXT,
+                    endpoint                TEXT NOT NULL,
+                    model                   TEXT NOT NULL,
+                    prompt_version          TEXT NOT NULL,
+                    input_redacted_json     TEXT NOT NULL,
+                    input_hash              TEXT NOT NULL,
+                    raw_response_json       TEXT,
+                    validation_status       TEXT NOT NULL,
+                    latency_ms              INTEGER,
+                    prompt_tokens           INTEGER,
+                    completion_tokens       INTEGER,
+                    error_message           TEXT,
+                    created_at_utc          TEXT NOT NULL
+                )
+                """
+            )
+            repo = SQLiteAIRequestLogRepository(store)
+            data = repo.create(
+                endpoint="/test",
+                model="test-model",
+                prompt_version="v1",
+                input_redacted={"age": 40},
+                input_hash="deadbeef",
+                validation_status="parsed_ok",
+                raw_response={
+                    "preliminary_profile": "moderado",
+                    "contradictions": ["cita literal del cliente"],
+                },
+            )
+            # El dict devuelto ya está redactado
+            assert data["raw_response"]["contradictions"][0].startswith(
+                "<REDACTED:text_"
+            )
+            assert data["raw_response"]["preliminary_profile"] == "moderado"
+            # Y lo persistido también
+            stored = repo.get(data["request_id"])
+            assert stored is not None
+            assert "cita literal" not in json.dumps(stored["raw_response"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

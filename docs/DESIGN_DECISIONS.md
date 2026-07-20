@@ -351,3 +351,19 @@ El smoke check ahora ejercita este path en vez de esquivarlo: registra el overri
 **Alternativas descartadas:** (a) dejar el quirk documentado (confunde a quien lee el summary y rompe la semántica de "caso completo"); (b) evaluar SIEMPRE contra la selección (antes de seleccionar no hay selección: el proposal es la única señal disponible para guiar la revisión); (c) contar el override approval huérfano en el ratio (mezclaría un paso no requerido en el denominador de otro path).
 
 **Consecuencias:** el summary es la única superficie afectada — los endpoints de override/selección no cambian sus validaciones (I-016/I-019 intactos). La vista del cliente no cambia (solo usa el copy de progreso pre-selección).
+
+## DD-016 — Hardening post-auditoría: kill-switch de dev tokens + redacción del output de IA
+
+**Estado:** Aceptado
+**Fecha:** 2026-07-18
+**Área:** `config_layer/advisor_tokens.py`, `persistence_layer/entity_repository.py`, `tests/conftest.py`
+
+**Contexto:** la auditoría de seguridad 2026-07-17 (ROADMAP) marcó dos hallazgos accionables: (1) el fallback de tokens dev-* (públicos en el repo) autenticaba siempre que no hubiera archivo de tokens — fail-open ante un backend expuesto por accidente; (2) `raw_response_json` de `ai_request_logs` se persistía sin redacción: I-022 cubría el input, pero el modelo puede CITAR el texto libre del cliente en contradicciones/follow-ups/notas, re-introduciendo PII al log por la puerta del output.
+
+**Decisión:**
+- **Kill-switch fail-closed**: `get_default_advisor_tokens()` solo devuelve el fallback dev-only si `RFA_ALLOW_DEV_TOKENS` o `RFA_DEMO_MODE` (ya la señal explícita de "demo local sin llaves", misma semántica truthy) tienen valor no vacío. Sin fuente de tokens y sin kill-switch → `AdvisorTokensNotConfiguredError` (500 fail-loud, mensaje operable sin eco de tokens). Con `ADVISOR_TOKENS_FILE` o `config/advisor_tokens.yaml` presentes, el kill-switch es irrelevante (el archivo sigue reemplazando todo). La suite corre con `RFA_ALLOW_DEV_TOKENS=1` seteado en `tests/conftest.py`.
+- **Redacción del output a nivel repositorio**: `redact_ai_output()` se aplica dentro de `SQLiteAIRequestLogRepository.create` — ningún caller (endpoints de casos, backfill `POST /admin/ai-logs`) puede persistir la respuesta sin redactar. Campos de texto libre generado → redacción total (incluso elementos cortos de listas); claves estructuradas (perfil, confidence, flags) se conservan. I-022 actualizado.
+
+**Alternativas descartadas:** (a) deshabilitar el fallback solo con bind no-loopback (el loader no conoce el bind de uvicorn); (b) devolver mapa vacío sin flag (401 silencioso en vez de error operativo — confunde más de lo que protege); (c) redactar el output en los endpoints (deja abierto el path de backfill y cada endpoint nuevo tendría que acordarse); (d) no persistir `raw_response` en absoluto (pierde valor de debugging/auditoría del formato de respuesta).
+
+**Consecuencias:** correr uvicorn para la demo requiere `RFA_ALLOW_DEV_TOKENS=1` (o `RFA_DEMO_MODE=1`, que la demo guiada ya usa) salvo que exista un YAML de tokens propio; `bootstrap_local_demo.py` lo imprime en el launch block. `raw_response` en las respuestas de `GET /admin/ai-logs` y `/cases/{id}/ai-logs` ahora devuelve el contenido redactado (ningún consumidor dependía del texto en claro; el análisis completo vive en `ai_profile_analyses`).

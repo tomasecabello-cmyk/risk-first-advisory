@@ -26,13 +26,15 @@ python scripts/migrate.py                          # apply migrations only
 python scripts/seed_demo_data.py                   # seed demo firm/advisor/client/case
 python scripts/run_case_workflow_smoke_check.py    # end-to-end via TestClient, mocked AI, no server, no key. Exit 0 = PASS
 
+$env:RFA_ALLOW_DEV_TOKENS="1"                                       # habilita dev tokens (kill-switch, DD-016)
 python -m uvicorn risk_first_advisory.api_layer.main:app --reload   # backend on :8000 (Swagger at /docs)
 python -m http.server 5500 -d frontend                              # static frontend on :5500
 ```
 
 - **`ruff` and `mypy` are passing gates** (backlog cleaned 2026-07): run both before committing Python and keep them at zero. FastAPI's `Depends(...)`-in-defaults idiom is allowlisted via `extend-immutable-calls` in `pyproject.toml`.
 - **`OPENAI_API_KEY`** is required only for the real `/ai/*` and `/cases/{id}/ai/profile-analysis` paths. Tests and the smoke check use deterministic mocks.
-- **`RFA_DEMO_MODE=1`** before uvicorn activates a deterministic, key-free profile client so the guided demo (incl. the Risk Gap step) runs without `OPENAI_API_KEY`. Without the env var the case AI endpoint still requires a real key.
+- **`RFA_DEMO_MODE=1`** before uvicorn activates a deterministic, key-free profile client so the guided demo (incl. the Risk Gap step) runs without `OPENAI_API_KEY`. Without the env var the case AI endpoint still requires a real key. It also enables the dev-token fallback (see next bullet).
+- **Dev tokens are fail-closed (DD-016)**: the `dev-advisor-token`/`dev-compliance-token` fallback only works if `RFA_ALLOW_DEV_TOKENS` or `RFA_DEMO_MODE` is set (non-empty). Without a token source and without the flag, any authenticated request returns 500 with an actionable error. The test suite sets `RFA_ALLOW_DEV_TOKENS=1` in `tests/conftest.py`.
 - Frontend API base is hardcoded to `http://127.0.0.1:8000` in `frontend/js/common.js`. Run the backend on 8000.
 
 ## Architecture
@@ -61,7 +63,7 @@ Two API surfaces:
 
 **Audit & compliance plumbing (do not weaken):**
 - Every case-scoped mutation appends an `AuditEvent` with a SHA-256 hash chain (`previous_hash` + `event_hash` over canonical JSON). `GET /cases/{id}/audit/verify` must return `is_intact=true` after any valid flow.
-- `AIRequestLog` redacts PII (`redact_ai_input()`) before persisting any OpenAI payload; API keys redacted everywhere, `client_id` hashed.
+- `AIRequestLog` redacts PII (`redact_ai_input()` on the payload, `redact_ai_output()` on the model's `raw_response` — applied at repository level, I-022) before persisting; API keys redacted everywhere, `client_id` hashed.
 - All case-scoped entities are **append-only at the API level** — no update/delete endpoints; state changes are new rows (`is_current` / version bump).
 
 **Auth is dev-only:** Bearer tokens from a YAML map (`config/advisor_tokens.yaml` or `ADVISOR_TOKENS_FILE`), with a built-in dev fallback (`dev-advisor-token`, `dev-compliance-token`). RBAC roles: `admin` / `advisor` / `compliance` / `viewer`. No JWT/IdP, no firm-level access control. NOT production auth.

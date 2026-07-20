@@ -110,9 +110,11 @@ Ningún endpoint genera automáticamente una `CasePortfolioSelection`. Solo `POS
 
 `audit_events` es append-only a nivel API. Cada evento incluye `previous_hash` + `event_hash` (SHA-256 sobre canonical JSON). `GET /cases/{id}/audit/verify` debe devolver `is_intact=true` después de cualquier flujo válido del workflow. Si un test, script o endpoint hace que `verify` devuelva `is_intact=false` sin manipulación explícita de DB, es un bug crítico de compliance, no un edge case.
 
-## I-022 — AIRequestLog no persiste input sensible sin redacción
+## I-022 — AIRequestLog no persiste input NI output sensible sin redacción
 
 Toda llamada a OpenAI registrada en `ai_request_logs` aplica `redact_ai_input()` al payload original antes de persistirlo. Las claves redactadas explícitamente (`natural_language_preferences`, `open_*`, `kyc_context`, `previous_profile_analysis`) y `client_id` (hasheado a `client_<sha256[:8]>`) NO deben aparecer en claro en `input_redacted_json`. API keys (`sk-`, `Bearer`) siempre redactadas en cualquier posición (incluso anidadas en dicts/lists). El `input_hash` se computa sobre el original (no el redactado) para correlación sin exposición.
+
+**Extensión al output (2026-07):** la respuesta cruda del modelo también puede citar el texto libre del cliente (contradicciones, follow-ups, notas). `SQLiteAIRequestLogRepository.create` aplica `redact_ai_output()` a `raw_response` ANTES de persistir `raw_response_json` — a nivel repositorio, para que ningún caller (endpoints de casos o backfill `POST /admin/ai-logs`) pueda esquivarla. Se redactan siempre los campos de texto libre generado (`contradictions`, `remaining_contradictions`, `follow_up_questions`, `advisor_notes`, `profile_change_reason`, `summary`, `rationale`, `reasoning` — incluso elementos cortos de listas); las claves estructuradas (`preliminary_profile`, `confidence`, flags) se conservan porque son el valor de auditoría del log. El análisis de dominio completo sigue viviendo en `ai_profile_analyses`, que no es un log sino una entidad del workflow.
 
 ## I-023 — Append-only a nivel API en todas las entidades case-scoped
 

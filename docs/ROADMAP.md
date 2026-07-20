@@ -109,27 +109,13 @@
 > (queries parametrizadas) ni de leak de tokens en errores/logs (error policy
 > genérica en auth). Severidades para el contexto "demo local que aspira a piloto".
 
-- **[Alta] Fallback de dev tokens siempre activo**: sin `ADVISOR_TOKENS_FILE` ni
-  `config/advisor_tokens.yaml`, los tokens `dev-advisor-token`/`dev-compliance-token`
-  (públicos en el repo) autentican con roles advisor/compliance. Si el backend se
-  expone fuera de localhost, es bypass de auth con credenciales conocidas. Fix barato
-  y previo a todo lo de Fase 4: kill-switch explícito (p.ej. exigir
-  `RFA_ALLOW_DEV_TOKENS=1` para habilitar el fallback) o rehusar el fallback cuando
-  el bind no es loopback.
 - **[Alta — refuerza ítem existente de Fase 4] Sin firm-level access control**:
   cualquier token con rol advisor lee KYC, casos y AI logs de CUALQUIER firma
   (PII cross-tenant). Ya está en Fase 4; esta auditoría lo confirma como el gap de
   autorización más serio del estado actual.
-- **[Media] `raw_response_json` se persiste sin redacción**: I-022 redacta el INPUT
-  de `ai_request_logs`, pero la respuesta cruda del modelo puede citar texto libre
-  del cliente (`open_*`, preferencias) y queda en claro en la DB. Extender la
-  política de redacción al output (o redactar campos citados) y actualizar I-022.
 - **[Media] Tokens en claro en el YAML de advisors**: el archivo de tokens guarda el
   token literal; guardar hash (SHA-256) y comparar por hash — complementa la
   rotación/revocación ya listada en Fase 4.
-- **[Baja] `POST /admin/ai-logs` acepta `raw_response` arbitrario**: es admin-only y
-  redacta el input, pero es una vía de backfill que escribe contenido no redactado
-  al log (mismo fondo que el hallazgo Media de arriba).
 - **[Baja] CORS con `allow_credentials=True`**: inocuo hoy (orígenes locales fijos);
   revisar la lista de orígenes al desplegar (no pasar nunca a `*`).
 

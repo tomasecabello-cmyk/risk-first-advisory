@@ -1385,6 +1385,77 @@ def compute_input_hash(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
+# Campos de la RESPUESTA del modelo que se redactan siempre: texto libre
+# generado que puede citar las respuestas abiertas del cliente (open_*,
+# preferencias) y re-introducir PII al log por la puerta del output (I-022 ext.
+# 2026-07). Las claves estructuradas (preliminary_profile, confidence, flags)
+# se conservan: son el valor de auditoría del log.
+_AI_LOG_OUTPUT_REDACTED_KEYS: frozenset[str] = frozenset({
+    "contradictions",
+    "remaining_contradictions",
+    "follow_up_questions",
+    "advisor_notes",
+    "profile_change_reason",
+    "summary",
+    "rationale",
+    "reasoning",
+})
+
+
+def _fully_redact(value: Any) -> Any:
+    """
+    Redacción total preservando estructura: strings → placeholder con longitud,
+    dicts/lists → recursión, números/bools/None → se conservan (no son texto).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _redact_string(value)
+    if isinstance(value, list):
+        return [_fully_redact(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _fully_redact(v) for k, v in value.items()}
+    return value
+
+
+def _redact_output_value(key: str | None, value: Any) -> Any:
+    """
+    Política de redacción para la RESPUESTA del modelo.
+
+    - key en _AI_LOG_OUTPUT_REDACTED_KEYS → redacción total (los elementos de
+      una lista de contradicciones se redactan aunque sean cortos: citan al
+      cliente).
+    - dict/list → recursión con esta misma política.
+    - resto → política base de input (_redact_value): hash de client_id,
+      API keys, heurística de longitud para texto libre no anticipado.
+    """
+    if key in _AI_LOG_OUTPUT_REDACTED_KEYS:
+        return _fully_redact(value)
+    if isinstance(value, dict):
+        return redact_ai_output(value)
+    if isinstance(value, list):
+        return [_redact_output_value(None, item) for item in value]
+    return _redact_value(key, value)
+
+
+def redact_ai_output(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    Redacta la respuesta cruda del modelo antes de persistirla en
+    `ai_request_logs.raw_response_json` (I-022 extendido al output).
+
+    Igual contrato que `redact_ai_input`: dict in / dict out, estructura
+    top-level preservada, no muta el original.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            f"redact_ai_output requiere un mapping; recibido {type(payload).__name__}."
+        )
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        out[str(key)] = _redact_output_value(str(key), value)
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLiteAIRequestLogRepository
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1458,9 +1529,15 @@ class SQLiteAIRequestLogRepository:
         now = _now_utc()
 
         input_redacted_json = _canonical_json(dict(input_redacted))
+        # I-022 (ext. output): la respuesta del modelo se redacta SIEMPRE acá,
+        # a nivel repositorio, para que ningún caller (endpoints de casos,
+        # backfill admin) pueda persistir texto libre del cliente citado por
+        # el modelo.
+        raw_response_redacted: dict[str, Any] | None = None
         raw_response_json: str | None = None
         if raw_response is not None:
-            raw_response_json = _canonical_json(dict(raw_response))
+            raw_response_redacted = redact_ai_output(raw_response)
+            raw_response_json = _canonical_json(raw_response_redacted)
 
         try:
             with self._store._conn:
@@ -1496,7 +1573,7 @@ class SQLiteAIRequestLogRepository:
             "prompt_version":          prompt_version,
             "input_redacted":          dict(input_redacted),
             "input_hash":              input_hash,
-            "raw_response":            dict(raw_response) if raw_response is not None else None,
+            "raw_response":            raw_response_redacted,
             "validation_status":       validation_status,
             "latency_ms":              latency_ms,
             "prompt_tokens":           prompt_tokens,

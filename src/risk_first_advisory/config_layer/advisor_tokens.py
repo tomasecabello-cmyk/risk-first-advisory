@@ -9,7 +9,11 @@ externo no cambia.
 Resolución de `get_default_advisor_tokens()`:
     1. ENV var `ADVISOR_TOKENS_FILE` (si está set y no vacío)
     2. `config/advisor_tokens.yaml` (si existe)
-    3. Fallback hardcoded development-only (siempre disponible)
+    3. Fallback hardcoded development-only — SOLO si el kill-switch lo habilita:
+       env var `RFA_ALLOW_DEV_TOKENS` o `RFA_DEMO_MODE` con valor no vacío.
+       Sin fuente de tokens y sin kill-switch → AdvisorTokensNotConfiguredError
+       (fail-closed: los tokens dev-* son públicos en el repo y no deben
+       autenticar por accidente en un backend expuesto).
 
 Cuando se usan (1) o (2), el archivo REEMPLAZA por completo al fallback —
 no hay merge. Los tokens dev-* no resuelven si el env var / archivo apunta
@@ -51,6 +55,18 @@ _CONFIG_DIR: Path = _PROJECT_ROOT / "config"
 
 DEFAULT_ADVISOR_TOKENS_PATH: Path = _CONFIG_DIR / "advisor_tokens.yaml"
 ADVISOR_TOKENS_ENV_VAR: str = "ADVISOR_TOKENS_FILE"
+
+# Kill-switch del fallback dev-only (auditoría de seguridad 2026-07-17).
+# El fallback con tokens dev-* (públicos en el repo) solo se habilita si
+# alguna de estas env vars tiene valor no vacío. `RFA_DEMO_MODE` cuenta
+# porque ya es la señal explícita de "demo local sin llaves" (misma
+# semántica truthy que usa api_layer.main para el profile client demo).
+DEV_TOKENS_FLAG_ENV_VAR: str = "RFA_ALLOW_DEV_TOKENS"
+DEMO_MODE_ENV_VAR: str = "RFA_DEMO_MODE"
+
+
+class AdvisorTokensNotConfiguredError(RuntimeError):
+    """No hay fuente de tokens y el fallback dev-only no está habilitado."""
 
 # Roles permitidos en `roles[]`. Cualquier otro valor → ValueError.
 # (No hay enforcement de RBAC todavía — esto es solo validación de schema.)
@@ -224,6 +240,14 @@ def _validate_token_entry(
     }
 
 
+def _dev_fallback_enabled() -> bool:
+    """True si alguna env var del kill-switch tiene valor no vacío."""
+    for var in (DEV_TOKENS_FLAG_ENV_VAR, DEMO_MODE_ENV_VAR):
+        if os.environ.get(var, "").strip():
+            return True
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # API pública
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,7 +306,8 @@ def get_default_advisor_tokens() -> dict[str, dict[str, Any]]:
 
         1. ENV var `ADVISOR_TOKENS_FILE` (si está set y no vacío después de strip).
         2. `config/advisor_tokens.yaml` (si existe).
-        3. Fallback hardcoded dev-only.
+        3. Fallback hardcoded dev-only — SOLO con kill-switch habilitado
+           (`RFA_ALLOW_DEV_TOKENS` o `RFA_DEMO_MODE` no vacías).
 
     Las opciones (1) y (2) REEMPLAZAN al fallback completamente (no hay merge).
 
@@ -294,6 +319,9 @@ def get_default_advisor_tokens() -> dict[str, dict[str, Any]]:
     Raises:
         FileNotFoundError: si la env var apunta a un archivo inexistente.
         ValueError: si el archivo cargado tiene schema inválido.
+        AdvisorTokensNotConfiguredError: sin fuente de tokens y sin kill-switch.
+            Fail-closed y fail-loud (FastAPI lo convierte en 500): preferimos
+            un error operable a que tokens públicos autentiquen en silencio.
     """
     env_path = os.environ.get(ADVISOR_TOKENS_ENV_VAR)
     if env_path is not None and env_path.strip():
@@ -301,6 +329,16 @@ def get_default_advisor_tokens() -> dict[str, dict[str, Any]]:
 
     if DEFAULT_ADVISOR_TOKENS_PATH.exists():
         return load_advisor_tokens(DEFAULT_ADVISOR_TOKENS_PATH)
+
+    if not _dev_fallback_enabled():
+        raise AdvisorTokensNotConfiguredError(
+            "No hay fuente de advisor tokens: ni ADVISOR_TOKENS_FILE, ni "
+            f"{DEFAULT_ADVISOR_TOKENS_PATH.name} en config/, ni el fallback "
+            "dev-only habilitado. Para desarrollo local, setear "
+            f"{DEV_TOKENS_FLAG_ENV_VAR}=1 (o {DEMO_MODE_ENV_VAR}=1 si es la "
+            "demo guiada). Para cualquier otro entorno, proveer un YAML de "
+            "tokens propio."
+        )
 
     # Fallback: devolver copia profunda para evitar mutación accidental
     # del fallback compartido entre llamadas.

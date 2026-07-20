@@ -193,9 +193,12 @@ def _detect_tokens_config(repo_root: Path) -> dict[str, Any]:
         "exists":  False,
         "note":    (
             "Sin YAML custom — backend usará dev-only fallback "
-            "(solo dev-advisor-token + dev-compliance-token). "
-            "Operaciones admin (crear firm/advisor en Dashboard) fallarán con "
-            "403 sin un YAML custom con rol admin."
+            "(solo dev-advisor-token + dev-compliance-token) SOLO si "
+            "RFA_ALLOW_DEV_TOKENS=1 o RFA_DEMO_MODE=1 está seteada al "
+            "arrancar uvicorn (kill-switch de seguridad; sin la env var, "
+            "cualquier token da 500 con error operativo). Operaciones admin "
+            "(crear firm/advisor en Dashboard) fallarán con 403 sin un YAML "
+            "custom con rol admin."
         ),
     }
 
@@ -214,6 +217,8 @@ def _print_launch_block(repo_root: Path, demo_ids: dict[str, str | None],
     print("=" * 70)
     print("  Start backend (Terminal 1)")
     print("=" * 70)
+    if config.get("source") == "fallback":
+        print('    $env:RFA_ALLOW_DEV_TOKENS="1"   # habilita los dev tokens (kill-switch)')
     print("    python -m uvicorn risk_first_advisory.api_layer.main:app --reload")
 
     print()
