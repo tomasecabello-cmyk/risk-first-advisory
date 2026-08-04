@@ -21,6 +21,10 @@ QUÉ ARREGLA (vs. la estimación naive del path live anterior):
       forward-looking mucho mejor que la media histórica post-rally.
       Es shrinkage de la media histórica hacia un ancla con estructura
       económica — mismo espíritu que Ledoit-Wolf pero para μ.
+      Confianza por view (Idzorek 2007, ext. 2026-07-18): una view `explicit`
+      pesa más que una `hist_mean` en Ω (`EXPLICIT_VIEW_CONFIDENCE` vs
+      `HIST_MEAN_VIEW_CONFIDENCE`) — el YTM ya es un ancla, no hace falta
+      moderarlo tanto como a la media histórica cruda.
     - Saltos de ratio: los rebasings multiplicativos de CEDEARs (cambio de
       ratio sin re-ajustar el histórico) se corrigen por back-scaling sobre la
       serie ya en USD (providers.adjust_ratio_jumps), con nota auditada por
@@ -70,6 +74,16 @@ _DEFAULT_RF: float = 0.04   # tasa libre de riesgo anual (igual que markowitz-op
 
 DEFAULT_DELTA: float = 2.5  # aversión al riesgo del inversor representativo
 DEFAULT_TAU: float = 0.05   # incertidumbre del prior de equilibrio
+
+# Confianza por view en el posterior de BL (Idzorek 2007; ext. DD-014 2026-07-18).
+# HIST_MEAN_VIEW_CONFIDENCE=1.0 reproduce el comportamiento original (Ω=τΣ).
+# Una view EXPLICIT (p.ej. el YTM de un bono) es un ancla forward-looking, no
+# una media muestral ruidosa post-rally — merece una Ω más chica (más peso a
+# Q en el posterior). El multiplicador es deliberadamente moderado: sigue
+# dejando que Σ y τ regulen cuánto se acerca el posterior a la view; no es
+# un "view exacto" (eso requeriría confidence → ∞).
+HIST_MEAN_VIEW_CONFIDENCE: float = 1.0
+EXPLICIT_VIEW_CONFIDENCE: float = 4.0
 
 # ── Exención cross-sectional del ajuste de saltos de ratio (DD-014 ext.) ─────
 # Un día de EVENTO de mercado genuino (p.ej. rally post-electoral 2025-10-27)
@@ -155,7 +169,7 @@ def black_litterman_returns(
     w_ref: np.ndarray | None = None,
     delta: float = DEFAULT_DELTA,
     tau: float = DEFAULT_TAU,
-    view_confidence: float = 1.0,
+    view_confidence: float | np.ndarray = 1.0,
 ) -> np.ndarray:
     """
     Retorno esperado posterior de Black-Litterman (en niveles, incluye r_f).
@@ -165,6 +179,13 @@ def black_litterman_returns(
     Views: la media histórica por activo (P = I, Q = μ_hist − r_f) con
     incertidumbre Ω = diag(τΣ)/confianza (He & Litterman, 2002). Más
     view_confidence acerca μ a la media histórica; menos, al equilibrio.
+
+    `view_confidence` puede ser un escalar (misma confianza para todas las
+    views, comportamiento original) o un vector de largo N — confianza
+    POR ACTIVO (Idzorek 2007): cada view puede merecer una Ω distinta según
+    qué tan forward-looking sea su fuente (ver `estimate_joint_moments`,
+    que usa esto para pesar más las views `explicit` como el YTM de un bono
+    que la media histórica cruda).
     """
     sigma = np.asarray(sigma, dtype=float)
     mu_hist = np.asarray(mu_hist, dtype=float)
@@ -173,13 +194,25 @@ def black_litterman_returns(
         w_ref = np.full(n, 1.0 / n)
     w_ref = np.asarray(w_ref, dtype=float)
 
+    confidence = np.asarray(view_confidence, dtype=float)
+    if confidence.ndim == 0:
+        confidence = np.full(n, float(confidence))
+    elif confidence.shape != (n,):
+        raise ValueError(
+            f"view_confidence debe ser escalar o vector de largo {n}; "
+            f"shape recibido: {confidence.shape}."
+        )
+    confidence = np.clip(confidence, 1e-9, None)
+
     pi = implied_equilibrium_returns(sigma, w_ref, delta)   # prior (exceso)
     tau_sigma = tau * sigma
     p = np.eye(n)
     q = mu_hist - rf                                         # views como exceso
 
-    omega = np.diag(np.diag(p @ tau_sigma @ p.T)) / max(view_confidence, 1e-9)
-    omega += np.eye(n) * 1e-12
+    # Ω = diag(P τΣ Pᵀ) / confianza, elemento a elemento (P=I ⇒ diag(τΣ)/confianza
+    # por activo). Con confidence escalar, idéntico al comportamiento original.
+    omega_diag = np.diag(p @ tau_sigma @ p.T) / confidence
+    omega = np.diag(omega_diag) + np.eye(n) * 1e-12
 
     inv_tau_sigma = np.linalg.inv(tau_sigma)
     inv_omega = np.linalg.inv(omega)
@@ -222,6 +255,8 @@ def estimate_joint_moments(
     min_obs: int = _MIN_OBS,
     max_sane_vol: float = MAX_SANE_VOL,
     views: dict[str, float] | None = None,
+    explicit_view_confidence: float = EXPLICIT_VIEW_CONFIDENCE,
+    hist_mean_view_confidence: float = HIST_MEAN_VIEW_CONFIDENCE,
     max_workers: int = 16,
     _fetch: Callable[[str, str, str], PriceSeries] | None = None,
     _fx: Callable[[str, str], pd.Series] | None = None,
@@ -236,6 +271,13 @@ def estimate_joint_moments(
     siendo la identidad; solo cambia Q para esos tickers. Los que no aparecen
     en `views` conservan la media histórica como view. Queda trazado en
     `meta[ticker]["view"]` ("explicit" | "hist_mean").
+
+    Confianza por view (Idzorek 2007, ext. DD-014 2026-07-18): las views
+    `explicit` (YTM u otra ancla forward-looking) usan `explicit_view_confidence`
+    en Ω; las `hist_mean` usan `hist_mean_view_confidence`. Con los defaults,
+    una view explícita pesa más en el posterior que la media histórica cruda
+    de la misma serie — la media histórica post-rally es la que DD-014 buscaba
+    moderar; el YTM ya es un ancla, no hace falta moderarlo tanto.
 
     Corrige saltos de ratio (rebasings de CEDEARs) por back-scaling sobre la
     serie ya en USD, con nota auditada por salto en `adjusted`. Descarta, con
@@ -399,7 +441,14 @@ def estimate_joint_moments(
             q_arr[i] = view_map[t]
             explicit_view.add(t)
 
-    mu_bl_arr = black_litterman_returns(sigma_annual, q_arr, rf=rf)
+    confidence_arr = np.full(len(ordered), hist_mean_view_confidence)
+    for i, t in enumerate(ordered):
+        if t in explicit_view:
+            confidence_arr[i] = explicit_view_confidence
+
+    mu_bl_arr = black_litterman_returns(
+        sigma_annual, q_arr, rf=rf, view_confidence=confidence_arr
+    )
     mu_bl_arr = np.clip(mu_bl_arr, -1.0, 1.0)
 
     d = np.sqrt(np.clip(np.diag(sigma_annual), 0.0, None))
@@ -420,6 +469,10 @@ def estimate_joint_moments(
     if explicit_view:
         method_notes.append(
             f"views=explicit para {len(explicit_view)} tickers (resto: media histórica)"
+        )
+        method_notes.append(
+            f"view_confidence(explicit={explicit_view_confidence}, "
+            f"hist_mean={hist_mean_view_confidence})"
         )
 
     covariance = CovarianceMatrix(

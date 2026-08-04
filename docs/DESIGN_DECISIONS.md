@@ -333,6 +333,22 @@ estimador posible de su retorno esperado; el YTM es el retorno contractual a
 vencimiento sin default — sigue sin ajustar por pérdida esperada de crédito
 (supuesto DEMO, documentado en COMPLIANCE_NOTES/limitaciones generales).
 
+**Extensión (2026-08-04) — confianza por view en Ω (Idzorek 2007):**
+`view_confidence` de `black_litterman_returns` acepta ahora un vector de largo
+N además del escalar (con P=I, Ω = diag(τΣ)/confianza elemento a elemento; el
+escalar reproduce exactamente el comportamiento original — no-regresión
+testeada). `estimate_joint_moments` lo usa para diferenciar la calidad de la
+fuente de cada view: las `explicit` (YTM, ancla forward-looking contractual)
+usan `EXPLICIT_VIEW_CONFIDENCE=4.0`; las `hist_mean` (media muestral ruidosa,
+lo que DD-014 buscaba moderar) mantienen `HIST_MEAN_VIEW_CONFIDENCE=1.0`. El
+multiplicador es deliberadamente moderado: Σ y τ siguen regulando el posterior
+(no es un view exacto, que requeriría confianza → ∞). Trazabilidad: nota
+`view_confidence(explicit=…, hist_mean=…)` en notes cuando hay views
+explícitas. Nota metodológica: con Σ correlacionada la confianza de un activo
+contagia a los demás vía la actualización bayesiana conjunta — comportamiento
+correcto de BL, cubierto en tests con Σ diagonal para aislar el efecto
+per-asset.
+
 ## DD-015 — El requisito de override del progreso se evalúa contra la selección vigente
 
 **Estado:** Aceptado

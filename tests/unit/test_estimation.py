@@ -11,6 +11,8 @@ import pandas as pd
 import pytest
 
 from risk_first_advisory.data_layer.estimation import (
+    EXPLICIT_VIEW_CONFIDENCE,
+    HIST_MEAN_VIEW_CONFIDENCE,
     EstimationError,
     black_litterman_returns,
     estimate_joint_moments,
@@ -119,6 +121,13 @@ def _toy_sigma() -> np.ndarray:
     return corr * np.outer(vols, vols)
 
 
+def _diag_sigma() -> np.ndarray:
+    """Σ SIN correlación: con P=I, Ω diagonal, cada activo se actualiza de
+    forma independiente — aísla el efecto per-asset de la confianza sin el
+    contagio bayesiano vía correlaciones que introduce `_toy_sigma`."""
+    return np.diag(np.array([0.10, 0.20, 0.30]) ** 2)
+
+
 def test_bl_posterior_between_equilibrium_and_history():
     sigma = _toy_sigma()
     mu_hist = np.array([0.40, 0.35, 0.50])  # medias infladas estilo post-rally
@@ -146,6 +155,74 @@ def test_bl_low_confidence_converges_to_equilibrium():
     pi = implied_equilibrium_returns(sigma, np.full(3, 1 / 3)) + rf
     mu_bl = black_litterman_returns(sigma, mu_hist, rf=rf, view_confidence=1e-9)
     assert np.allclose(mu_bl, pi, atol=1e-4)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Black-Litterman — confianza por view (vector), Idzorek 2007 ext. 2026-07-18
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_bl_scalar_and_uniform_vector_confidence_match():
+    """Un vector con el mismo valor en todos los activos debe reproducir
+    EXACTAMENTE el resultado del escalar equivalente (no-regresión)."""
+    sigma = _toy_sigma()
+    mu_hist = np.array([0.40, 0.35, 0.50])
+    scalar = black_litterman_returns(sigma, mu_hist, rf=0.04, view_confidence=2.5)
+    vector = black_litterman_returns(
+        sigma, mu_hist, rf=0.04, view_confidence=np.full(3, 2.5)
+    )
+    assert np.allclose(scalar, vector)
+
+
+def test_bl_per_asset_confidence_pulls_only_that_asset_to_its_view():
+    """Con Σ diagonal (sin correlación) la actualización es estrictamente
+    por activo: confianza alta en UNO acerca SOLO ese posterior a su view;
+    confianza baja en el resto los deja en equilibrio. (Con Σ correlacionada
+    la confianza de un activo SÍ contagia a los demás vía la actualización
+    bayesiana conjunta — comportamiento correcto de BL, no un bug; por eso
+    este test aísla el efecto con Σ diagonal.)"""
+    sigma = _diag_sigma()
+    mu_hist = np.array([0.40, 0.35, 0.50])  # todas "infladas" vs equilibrio
+    rf = 0.04
+    pi = implied_equilibrium_returns(sigma, np.full(3, 1 / 3)) + rf
+
+    confidence = np.array([1e9, 1e-9, 1e-9])
+    mu_bl = black_litterman_returns(sigma, mu_hist, rf=rf, view_confidence=confidence)
+
+    assert mu_bl[0] == pytest.approx(mu_hist[0], abs=1e-4)   # alta confianza → view
+    assert mu_bl[1] == pytest.approx(pi[1], abs=1e-4)         # baja confianza → equilibrio
+    assert mu_bl[2] == pytest.approx(pi[2], abs=1e-4)
+
+
+def test_bl_higher_confidence_pulls_posterior_closer_to_view():
+    """Entre dos confianzas > 0 para el mismo activo, la mayor debe acercar
+    más el posterior a la view (monotonía, sin necesidad de los extremos).
+    Σ diagonal para aislar el efecto (ver nota del test anterior)."""
+    sigma = _diag_sigma()
+    mu_hist = np.array([0.40, 0.35, 0.50])
+    rf = 0.04
+    low = black_litterman_returns(
+        sigma, mu_hist, rf=rf,
+        view_confidence=np.array([HIST_MEAN_VIEW_CONFIDENCE, 1.0, 1.0]),
+    )
+    high = black_litterman_returns(
+        sigma, mu_hist, rf=rf,
+        view_confidence=np.array([EXPLICIT_VIEW_CONFIDENCE, 1.0, 1.0]),
+    )
+    assert abs(high[0] - mu_hist[0]) < abs(low[0] - mu_hist[0])
+    # El resto (misma confianza en ambas corridas) no se mueve: Σ diagonal
+    # ⇒ sin contagio bayesiano entre activos.
+    assert high[1] == pytest.approx(low[1], abs=1e-9)
+    assert high[2] == pytest.approx(low[2], abs=1e-9)
+
+
+def test_bl_confidence_vector_wrong_length_raises():
+    sigma = _toy_sigma()
+    mu_hist = np.array([0.40, 0.35, 0.50])
+    with pytest.raises(ValueError):
+        black_litterman_returns(
+            sigma, mu_hist, rf=0.04, view_confidence=np.array([1.0, 2.0])
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +328,38 @@ def test_joint_moments_explicit_view_pulls_mu_toward_view():
     # mu_hist sigue siendo la media histórica (trazabilidad intacta).
     assert est.mu_hist["GD30"] == pytest.approx(base.mu_hist["GD30"])
     assert any("views=explicit" in n for n in est.notes)
+
+
+def test_joint_moments_explicit_view_confidence_stronger_than_uniform():
+    """La confianza diferenciada (Idzorek ext.) debe acercar el μ posterior
+    de la view explícita MÁS que si esa misma view se evaluara con la
+    confianza uniforme de las views hist_mean (comportamiento pre-ext.)."""
+    ytm = 0.09
+    with_default_confidence = estimate_joint_moments(
+        _sources(), views={"GD30": ytm},
+        _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    with_uniform_confidence = estimate_joint_moments(
+        _sources(), views={"GD30": ytm},
+        explicit_view_confidence=HIST_MEAN_VIEW_CONFIDENCE,
+        _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+
+    assert abs(with_default_confidence.mu["GD30"] - ytm) < abs(
+        with_uniform_confidence.mu["GD30"] - ytm
+    )
+
+
+def test_joint_moments_view_confidence_note_only_when_explicit_view_present():
+    est_no_views = estimate_joint_moments(
+        _sources(), _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    assert not any("view_confidence(" in n for n in est_no_views.notes)
+
+    est_with_view = estimate_joint_moments(
+        _sources(), views={"GD30": 0.09},
+        _fetch=_fetch_factory(_base_specs()), _fx=_fx_flat)
+    assert any(
+        f"view_confidence(explicit={EXPLICIT_VIEW_CONFIDENCE}" in n
+        for n in est_with_view.notes
+    )
 
 
 def test_joint_moments_view_for_unknown_ticker_is_ignored():

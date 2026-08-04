@@ -124,12 +124,6 @@
 > DD-014 (Σ Ledoit-Wolf + μ Black-Litterman) es sólido; esto es afinación con buena
 > relación costo/beneficio, no rediseño. Ordenado por prioridad.
 
-- **Confianza por view en Ω (Idzorek 2007)**: hoy `view_confidence` es un escalar
-  (=1.0) para todas las views. El YTM de un bono (ancla forward-looking) merece una
-  Ω más chica que la media histórica de una acción ARG. Cambio local: aceptar un
-  vector de confianza por ticker en `black_litterman_returns` y dar más peso a las
-  views `explicit` que a las `hist_mean`. Costo bajo, beneficio directo sobre la
-  renta fija (misma dirección que la ext. DD-014 del YTM).
 - **Guard de solapamiento en el inner join**: la serie más corta recorta la ventana
   común de TODOS los tickers (`concat(...).dropna()`). Descartar, con razón auditada
   (patrón `dropped`), series cuya inclusión reduzca la ventana común por debajo de un
