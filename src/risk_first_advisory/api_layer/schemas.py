@@ -193,12 +193,33 @@ class KYCDataRequest(BaseModel):
     tradeoff_loss_usd:           float | None = Field(default=None, ge=0.0)
     tradeoff_certain_amount_usd: float | None = None
 
+    # ── Contexto patrimonial y fiscal — INFORMATIVO (auditoría compliance
+    # 2026-07-17). Misma doctrina que declared_return_expectation_pct (DD-003):
+    # documentan el cuadro completo del cliente para el asesor (y para que la
+    # IA detecte contradicciones), pero NUNCA entran a perfil determinístico,
+    # risk budget, feasibility ni Risk Number. La propuesta sigue viendo solo
+    # el capital del caso (I-015: no se re-pregunta lo que ya está en el KYC).
+    # held_away = posiciones fuera de la firma (otras cuentas/brokers).
+    held_away_investments_usd: float | None = Field(default=None, ge=0.0)
+    held_away_notes:           str | None   = None
+    total_liabilities_usd:     float | None = Field(default=None, ge=0.0)
+    # Situación fiscal declarada (en ARG: p.ej. residencia fiscal, condición
+    # frente a ganancias/bienes personales). String libre informativo.
+    tax_status:                str | None   = None
+
     # ESG — opcional. Por defecto se construye un ESGProfile vacío
     # (strictness_level=none, sin exclusions/preferences) que reproduce
     # el comportamiento previo del endpoint.
     esg_strictness_level: str                          = "none"
     esg_exclusions:       list[ESGExclusionRequest]    = Field(default_factory=list)
     esg_preferences:      list[ESGPreferenceRequest]   = Field(default_factory=list)
+
+    @field_validator("held_away_notes", "tax_status", mode="before")
+    @classmethod
+    def _informational_text_not_whitespace(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("no puede ser cadena vacía ni solo espacios.")
+        return v
 
     @field_validator("investment_experience")
     @classmethod

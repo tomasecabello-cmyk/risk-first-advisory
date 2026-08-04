@@ -89,6 +89,26 @@ class TestFreeTextRedaction:
         )
         assert out["open_concerns"].startswith("<REDACTED:text_")
 
+    def test_held_away_notes_redacted(self) -> None:
+        """Contexto patrimonial informativo (DD-017 ext.): texto libre corto
+        que nombra bancos/brokers — debe redactarse por clave explícita, no
+        depender de la heurística de longitud."""
+        out = redact_ai_input({"held_away_notes": "PF en Banco Galicia"})
+        assert out["held_away_notes"].startswith("<REDACTED:text_")
+        assert "Galicia" not in out["held_away_notes"]
+
+    def test_tax_status_redacted(self) -> None:
+        out = redact_ai_input({"tax_status": "Monotributista, residente AR"})
+        assert out["tax_status"].startswith("<REDACTED:text_")
+
+    def test_held_away_amounts_preserved(self) -> None:
+        """Los montos son numéricos: se conservan igual que net_worth."""
+        out = redact_ai_input(
+            {"held_away_investments_usd": 120_000.0, "total_liabilities_usd": 30_000.0}
+        )
+        assert out["held_away_investments_usd"] == 120_000.0
+        assert out["total_liabilities_usd"] == 30_000.0
+
     def test_redaction_includes_length(self) -> None:
         original = "abc def ghi"
         out = redact_ai_input({"open_concerns": original})

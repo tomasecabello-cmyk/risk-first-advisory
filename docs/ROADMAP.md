@@ -61,12 +61,10 @@
 
 ### Suitability / perfil del cliente
 
-- **Sin "otras inversiones" ni pasivos en `KYCData`**: la propuesta solo ve el capital
-  del caso; no hay análisis de concentración a nivel cliente (posiciones held-away,
-  deudas). Agregar campos opcionales informativos (additive, sin romper I-015).
-- **Sin tax status en `KYCData`**: factor estándar del perfil de suitability; en ARG
-  relevante para bonos exentos vs CEDEARs (ganancias / bienes personales). Primero
-  como campo informativo para el asesor.
+- **Análisis de concentración a nivel cliente**: el KYC ya captura held-away,
+  pasivos y tax status como campos informativos (DD-017 ext. 2026-08-04); falta
+  que el proposal USE esos datos (p.ej. warning de concentración si la cartera
+  propuesta duplica exposición que el cliente ya tiene afuera).
 - **Reconfirmación de KYC ante eventos de vida**: el TTL por antigüedad ya avisa
   (`KYC_012`/`KYC_STALE`, DD-017 — `RFA_KYC_MAX_AGE_DAYS`, default 365); falta un
   mecanismo para que el asesor marque un evento de vida (jubilación, herencia) que
@@ -74,10 +72,11 @@
 - **Sin registro de negativa a informar**: todos los campos del KYC son obligatorios
   (conservador, bien), pero no se puede documentar "el cliente se negó a responder X"
   — práctica estándar: registrar la negativa y estrechar el universo recomendable.
-- **Sin marca de "producto complejo"**: la matriz cubre (instrument_type × perfil) pero
-  no distingue productos que exigen diligencia reforzada de reasonable-basis (p.ej.
-  CEDEARs: riesgo de ratio y CCL implícito). Usar `requires_advisor_note` de forma
-  sistemática + nota de producto en el report.
+- **Suitability per-instrument en el case flow (Fase 4)**: la marca de producto
+  complejo ya es sistemática (DD-017 ext.: catálogo `rules_layer/complex_products`,
+  flag + nota en holdings y report); sigue pendiente evaluar la matriz de
+  suitability por instrumento en el pipeline case-scoped (`suitability_status`
+  del holding hoy es `None`).
 
 ### Identidad y onboarding (para Fase 4 — piloto real)
 

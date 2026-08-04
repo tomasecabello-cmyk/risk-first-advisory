@@ -186,6 +186,7 @@ from risk_first_advisory.reporting_layer import (
     MarkdownReport,
     MarkdownReportGenerator,
 )
+from risk_first_advisory.rules_layer.complex_products import complex_product_note
 from risk_first_advisory.rules_layer.esg_compliance import ESGMetadataStore
 from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityMatrix,
@@ -5312,6 +5313,11 @@ def _serialize_candidate_for_proposal(
         risk_flags: list[str] = []
         if isinstance(max_single_asset, (int, float)) and max_single_asset > 0 and float(weight) > float(max_single_asset) + 1e-9:
             risk_flags.append("exceeds_max_single_asset")
+        # Producto complejo (DD-017 ext.): marca sistemática + nota de producto.
+        # Informativo — no excluye ni cambia pesos; el report la formatea.
+        product_note = complex_product_note(instr.get("instrument_type"))
+        if product_note is not None:
+            risk_flags.append("complex_product")
         # rationale humano-legible derivado de metadata del instrumento
         rationale_bits: list[str] = []
         if instr.get("asset_class"):
@@ -5328,6 +5334,10 @@ def _serialize_candidate_for_proposal(
             inclusion_reason_codes.append(f"asset_class:{instr['asset_class']}")
         if instr.get("hard_dollar"):
             inclusion_reason_codes.append("hard_dollar")
+        if product_note is not None:
+            inclusion_reason_codes.append(
+                ReasonCode.SUITABILITY_REQUIRES_ADVISOR_NOTE.value
+            )
         holdings.append({
             "instrument_id":          ticker,
             "ticker":                 ticker,
@@ -5344,6 +5354,7 @@ def _serialize_candidate_for_proposal(
             "inclusion_reason_codes": inclusion_reason_codes,
             "risk_flags":             risk_flags,
             "suitability_status":     None,  # TODO Fase 4: suitability per-instrument
+            "complex_product_note":   product_note,
         })
 
     # Risk Number de esta cartera (None si faltan retornos/covarianza para los

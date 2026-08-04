@@ -183,6 +183,10 @@ def _normalize_holdings(candidate: dict[str, Any]) -> list[dict[str, Any]]:
                 "currency":        h.get("currency"),
                 "weight":          h.get("weight"),
                 "rationale":       h.get("rationale"),
+                # Nota de producto complejo (DD-017 ext.): viaja en el snapshot
+                # del holding; el report solo la formatea (I-013). Snapshots
+                # anteriores sin el campo → None (sin sección).
+                "complex_product_note": h.get("complex_product_note"),
             })
         return out
     weights = candidate.get("weights")
@@ -245,6 +249,22 @@ def _section_holdings(candidate: dict[str, Any]) -> str:
         safe_name = label.replace("|", "\\|")
         safe_rat = rationale.replace("|", "\\|")
         lines.append(f"| {safe_name} | {itype} | {curr} | {weight} | {safe_rat} |")
+
+    # Notas de producto complejo (DD-017 ext.): una por tipo de producto
+    # presente en la cartera, con los tickers afectados. Solo formatea lo que
+    # ya viene en el snapshot del holding — sin recalcular (I-013).
+    notes_by_text: dict[str, list[str]] = {}
+    for h in sorted_h:
+        note = h.get("complex_product_note")
+        if isinstance(note, str) and note.strip():
+            notes_by_text.setdefault(note, []).append(h.get("ticker") or "?")
+    if notes_by_text:
+        lines.append("")
+        lines.append("### Notas de producto")
+        lines.append("")
+        for note, tickers in notes_by_text.items():
+            joined = ", ".join(f"`{t}`" for t in tickers)
+            lines.append(f"- **{joined}** — {note}")
     return "\n".join(lines)
 
 

@@ -161,3 +161,54 @@ def test_risk_number_section_no_kyc_but_candidate_has_number():
     assert "Número del cliente" in md
     assert "no disponible" in md
     assert "68/100" in md
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notas de producto complejo (DD-017 ext.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _holdings_with_cedear():
+    note = (
+        "Producto complejo: certificado argentino sobre una acción extranjera."
+    )
+    return [
+        {"ticker": "SPY", "asset_class": "EQUITY", "sector": "Equity",
+         "currency": "USD", "weight": 0.50, "instrument_type": "ETF",
+         "complex_product_note": None},
+        {"ticker": "AAPL", "asset_class": "EQUITY", "sector": "Technology",
+         "currency": "USD", "weight": 0.30, "instrument_type": "CEDEAR",
+         "complex_product_note": note},
+        {"ticker": "KO", "asset_class": "EQUITY", "sector": "Consumer",
+         "currency": "USD", "weight": 0.20, "instrument_type": "CEDEAR",
+         "complex_product_note": note},
+    ]
+
+
+def test_product_notes_section_lists_complex_holdings():
+    """Los holdings con complex_product_note generan la sección 'Notas de
+    producto', agrupando tickers por nota (el report solo formatea, I-013)."""
+    cand = _candidate(
+        holdings=_holdings_with_cedear(), holdings_count=3,
+        diversification=assess_diversification(_holdings_with_cedear()),
+    )
+    md, _ = CaseMarkdownReportGenerator().generate(
+        case_data={"case_id": "c1", "title": "Juan Pérez", "status": "PORTFOLIO_SELECTED"},
+        selection_data={"selected_variant": "GROWTH", "selected_candidate": cand,
+                        "selection_id": "s1", "proposal_id": "p1",
+                        "override_approval_id": None},
+        approval_data={"approved_profile": "agresivo", "decision": "approve"},
+        override_data=None,
+        generated_at_utc="2026-06-15T12:00:00Z",
+    )
+    assert "### Notas de producto" in md
+    # Ambos CEDEARs agrupados en la misma nota.
+    assert "`AAPL`" in md and "`KO`" in md
+    assert "Producto complejo" in md
+
+
+def test_product_notes_section_absent_without_complex_holdings():
+    """Snapshots viejos (sin el campo) o carteras sin productos complejos:
+    la sección no aparece y el reporte no rompe."""
+    md = _gen()
+    assert "### Notas de producto" not in md

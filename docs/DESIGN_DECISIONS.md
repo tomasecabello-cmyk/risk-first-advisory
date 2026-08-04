@@ -399,3 +399,26 @@ El smoke check ahora ejercita este path en vez de esquivarlo: registra el overri
 **Alternativas descartadas:** (a) `considered_alternatives` obligatorio (rompería todos los clientes existentes y forzaría texto ritual sin valor — mejor opcional con semántica NULL vs `[]`); (b) bloquear el proposal con KYC vencido (un TTL fijo no distingue un cliente estable de uno con evento de vida; el bloqueo duro contradiría el espíritu asesor-decide); (c) TTL en YAML de config (los toggles operativos del proyecto ya viven en env vars `RFA_*`; un YAML nuevo para un entero es sobre-estructura).
 
 **Consecuencias:** el reporte y el frontend PUEDEN mostrar las alternativas descartadas y el warning de staleness sin cambios de schema adicionales (ya viajan en selection/proposal). Queda en ROADMAP la reconfirmación por eventos de vida (el TTL solo cubre antigüedad) y la estructura de costos por variante (el otro gap de Reg BI, no cubierto acá).
+
+**Extensión (2026-08-04) — contexto patrimonial informativo + marca de producto complejo:**
+- **Campos informativos en `KYCDataRequest`** (`held_away_investments_usd`,
+  `held_away_notes`, `total_liabilities_usd`, `tax_status`): opcionales,
+  misma doctrina que `declared_return_expectation_pct` (DD-003) — documentan
+  el cuadro completo (posiciones held-away, deudas, situación fiscal) para el
+  asesor y para que la IA detecte contradicciones, pero NUNCA entran a perfil
+  determinístico, risk budget, feasibility ni Risk Number (`_build_kyc_data`
+  no los mapea). Los dos campos de texto libre se suman a
+  `_AI_LOG_REDACTED_KEYS` (I-022): pueden nombrar bancos/brokers y la
+  heurística de 80 chars no atraparía strings cortos. Los montos son numéricos
+  y se conservan en los logs, igual que `net_worth`.
+- **Catálogo de productos complejos** (`rules_layer/complex_products.py`):
+  tipos que exigen diligencia reforzada de reasonable-basis, con nota de
+  producto por tipo. Arranca con CEDEAR (riesgo de ratio + CCL implícito, el
+  ejemplo explícito de la auditoría); agregar un tipo al dict basta para que
+  proposals nuevos lo marquen. Cada holding serializado lleva
+  `complex_product_note` (None si simple), flag `complex_product` en
+  `risk_flags` y `SUIT_003` en `inclusion_reason_codes`; el report agrega la
+  subsección "Notas de producto" agrupando tickers por nota — solo formatea
+  el snapshot (I-013), snapshots viejos sin el campo no muestran la sección.
+  La marca es informativa: no excluye instrumentos ni cambia al optimizador
+  (la suitability per-instrument del case flow sigue siendo TODO Fase 4).

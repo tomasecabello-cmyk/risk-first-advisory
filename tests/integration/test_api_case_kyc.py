@@ -236,6 +236,56 @@ def _post_kyc(c: TestClient, case_id: str, **overrides) -> Any:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Contexto patrimonial/fiscal informativo (DD-017 ext. — auditoría compliance
+# 2026-07-17): held_away_*, total_liabilities_usd, tax_status. Opcionales,
+# solo informativos: NUNCA entran a perfil/risk budget/feasibility.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestInformationalWealthContext:
+    def test_omitted_fields_default_none(self, client: TestClient) -> None:
+        """Payloads existentes sin los campos siguen funcionando (additive)."""
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"])
+        assert r.status_code == 201, r.text
+        payload = r.json()["payload"]
+        assert payload["held_away_investments_usd"] is None
+        assert payload["held_away_notes"] is None
+        assert payload["total_liabilities_usd"] is None
+        assert payload["tax_status"] is None
+
+    def test_round_trip(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(
+            client, case["case_id"],
+            held_away_investments_usd=120_000.0,
+            held_away_notes="Plazo fijo y acciones en otro broker.",
+            total_liabilities_usd=45_000.0,
+            tax_status="Residente fiscal AR, monotributo.",
+        )
+        assert r.status_code == 201, r.text
+        payload = r.json()["payload"]
+        assert payload["held_away_investments_usd"] == 120_000.0
+        assert payload["held_away_notes"] == "Plazo fijo y acciones en otro broker."
+        assert payload["total_liabilities_usd"] == 45_000.0
+        assert payload["tax_status"] == "Residente fiscal AR, monotributo."
+
+    def test_negative_amounts_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r1 = _post_kyc(client, case["case_id"], held_away_investments_usd=-1.0)
+        r2 = _post_kyc(client, case["case_id"], total_liabilities_usd=-100.0)
+        assert r1.status_code == 422
+        assert r2.status_code == 422
+
+    def test_whitespace_text_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r1 = _post_kyc(client, case["case_id"], tax_status="   ")
+        r2 = _post_kyc(client, case["case_id"], held_away_notes="")
+        assert r1.status_code == 422
+        assert r2.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Happy path: create / list
 # ─────────────────────────────────────────────────────────────────────────────
 

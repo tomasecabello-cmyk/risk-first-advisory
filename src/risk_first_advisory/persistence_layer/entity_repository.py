@@ -1269,6 +1269,12 @@ _AI_LOG_REDACTED_KEYS: frozenset[str] = frozenset({
     "open_concerns",
     "kyc_context",
     "previous_profile_analysis",
+    # Contexto patrimonial/fiscal informativo (DD-017 ext.): texto libre que
+    # puede nombrar bancos, brokers o situación fiscal del cliente — PII.
+    # Los montos (held_away_investments_usd, total_liabilities_usd) son
+    # numéricos y se conservan, igual que net_worth.
+    "held_away_notes",
+    "tax_status",
 })
 
 

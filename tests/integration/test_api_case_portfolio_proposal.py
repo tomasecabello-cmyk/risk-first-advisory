@@ -982,6 +982,41 @@ class TestNoRegression:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Producto complejo (DD-017 ext.) — flag sistemático en holdings
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestComplexProductFlag:
+    def test_holdings_carry_complex_product_contract(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Todo holding serializado lleva complex_product_note (None para
+        productos simples). Los CEDEAR llevan nota + flag + SUIT_003."""
+        ctx = _full_setup(client, patch_ai_client)
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["status"] == "completed"
+        seen_cedear = False
+        for cand in body["candidates"]:
+            for h in cand["holdings"]:
+                assert "complex_product_note" in h
+                if h.get("instrument_type") == "CEDEAR":
+                    seen_cedear = True
+                    assert h["complex_product_note"] is not None
+                    assert "complex_product" in h["risk_flags"]
+                    assert "SUIT_003" in h["inclusion_reason_codes"]
+                else:
+                    assert h["complex_product_note"] is None
+                    assert "complex_product" not in h["risk_flags"]
+        if not seen_cedear:
+            pytest.skip(
+                "El optimizador no asignó peso a ningún CEDEAR en este "
+                "fixture; el contrato simple quedó verificado igual."
+            )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # KYC_STALE (KYC_012) — vigencia del KYC que respalda el proposal
 # (auditoría compliance 2026-07-17; TTL via RFA_KYC_MAX_AGE_DAYS, default 365)
 # ═════════════════════════════════════════════════════════════════════════════
