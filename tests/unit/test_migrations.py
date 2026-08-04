@@ -87,7 +87,7 @@ PHASE2_TABLES: frozenset[str] = frozenset({
 
 # Total de archivos .sql en migrations/. Cada vez que se agrega una migración,
 # este número se actualiza (los tests de count usan TOTAL_MIGRATIONS).
-TOTAL_MIGRATIONS: int = 9
+TOTAL_MIGRATIONS: int = 10
 
 LEGACY_TABLES: frozenset[str] = frozenset({"records", "counters"})
 
@@ -321,6 +321,11 @@ def test_schema_migrations_records_0001_with_metadata(tmp_path):
     assert version9 == "0009"
     assert "report" in description9.lower()
     assert applied_at9.endswith("Z")
+    # La décima fila debe ser 0010 — considered_alternatives en selections.
+    version10, description10, applied_at10 = rows[9]
+    assert version10 == "0010"
+    assert "alternatives" in description10.lower()
+    assert applied_at10.endswith("Z")
 
 
 # ── Legacy coexistence ──────────────────────────────────────────────────────

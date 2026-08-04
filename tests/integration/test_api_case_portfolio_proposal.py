@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -977,3 +979,107 @@ class TestNoRegression:
         r = client.get("/auth/me", headers={"Authorization": _ADVISOR})
         assert r.status_code == 200
         assert r.json()["advisor_id"] == "ADV-CPP-001"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# KYC_STALE (KYC_012) — vigencia del KYC que respalda el proposal
+# (auditoría compliance 2026-07-17; TTL via RFA_KYC_MAX_AGE_DAYS, default 365)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _backdate_kyc(db_path: Path, kyc_submission_id: str, created_at_utc: str) -> None:
+    """Envejece la submission directamente en la DB (el API es append-only;
+    esto es setup de test, no un path de producto)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE kyc_submissions SET created_at_utc = ? "
+                "WHERE kyc_submission_id = ?",
+                (created_at_utc, kyc_submission_id),
+            )
+    finally:
+        conn.close()
+
+
+class TestKYCStaleWarning:
+    def test_fresh_kyc_no_warning(self, client: TestClient, patch_ai_client) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201, r.text
+        assert not any("KYC_012" in w for w in r.json()["warnings"])
+
+    def test_stale_kyc_warns(
+        self, client: TestClient, patch_ai_client, cpp_db: Path
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        kyc_id = ctx["kyc"]["kyc_submission_id"]
+        _backdate_kyc(cpp_db, kyc_id, "2020-01-01T00:00:00Z")
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201, r.text
+        stale = [w for w in r.json()["warnings"] if "KYC_012" in w]
+        assert stale, r.json()["warnings"]
+        # El warning identifica QUÉ KYC está vencido (trazabilidad).
+        assert kyc_id in stale[0]
+
+    def test_stale_warning_is_nonblocking(
+        self, client: TestClient, patch_ai_client, cpp_db: Path
+    ) -> None:
+        """KYC_012 es warning: el proposal se genera igual (completed)."""
+        ctx = _full_setup(client, patch_ai_client)
+        _backdate_kyc(
+            cpp_db, ctx["kyc"]["kyc_submission_id"], "2020-01-01T00:00:00Z"
+        )
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201
+        assert r.json()["status"] == "completed"
+        assert len(r.json()["candidates"]) > 0
+
+    def test_ttl_zero_disables_check(
+        self,
+        client: TestClient,
+        patch_ai_client,
+        cpp_db: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("RFA_KYC_MAX_AGE_DAYS", "0")
+        ctx = _full_setup(client, patch_ai_client)
+        _backdate_kyc(
+            cpp_db, ctx["kyc"]["kyc_submission_id"], "2020-01-01T00:00:00Z"
+        )
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201
+        assert not any("KYC_012" in w for w in r.json()["warnings"])
+
+    def test_custom_ttl_from_env(
+        self,
+        client: TestClient,
+        patch_ai_client,
+        cpp_db: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Con TTL de 5 días, un KYC de ~10 días dispara el warning."""
+        monkeypatch.setenv("RFA_KYC_MAX_AGE_DAYS", "5")
+        ctx = _full_setup(client, patch_ai_client)
+        ten_days_ago = (
+            datetime.now(timezone.utc) - timedelta(days=10)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _backdate_kyc(cpp_db, ctx["kyc"]["kyc_submission_id"], ten_days_ago)
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201
+        warnings = r.json()["warnings"]
+        assert any("KYC_012" in w for w in warnings)
+        assert any("máximo configurado: 5" in w for w in warnings)
+
+    def test_invalid_ttl_env_falls_back_to_default(
+        self,
+        client: TestClient,
+        patch_ai_client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Env var no numérica → default 365; un KYC fresco no avisa."""
+        monkeypatch.setenv("RFA_KYC_MAX_AGE_DAYS", "not-a-number")
+        ctx = _full_setup(client, patch_ai_client)
+        r = _post_proposal(client, ctx["case"]["case_id"])
+        assert r.status_code == 201
+        assert not any("KYC_012" in w for w in r.json()["warnings"])

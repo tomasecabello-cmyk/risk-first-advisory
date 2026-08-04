@@ -67,10 +67,10 @@
 - **Sin tax status en `KYCData`**: factor estándar del perfil de suitability; en ARG
   relevante para bonos exentos vs CEDEARs (ganancias / bienes personales). Primero
   como campo informativo para el asesor.
-- **Sin vigencia/staleness del KYC**: las submissions son versionadas pero nada marca
-  un KYC viejo ni exige reconfirmación ante eventos de vida (jubilación, herencia).
-  Propuesta barata: TTL configurable + reason_code `KYC_STALE` como warning del
-  proposal cuando el KYC current supera la antigüedad máxima.
+- **Reconfirmación de KYC ante eventos de vida**: el TTL por antigüedad ya avisa
+  (`KYC_012`/`KYC_STALE`, DD-017 — `RFA_KYC_MAX_AGE_DAYS`, default 365); falta un
+  mecanismo para que el asesor marque un evento de vida (jubilación, herencia) que
+  exija reconfirmación antes del TTL.
 - **Sin registro de negativa a informar**: todos los campos del KYC son obligatorios
   (conservador, bien), pero no se puede documentar "el cliente se negó a responder X"
   — práctica estándar: registrar la negativa y estrechar el universo recomendable.
@@ -96,10 +96,6 @@
 - **Sin registro de conflictos de interés de la firma** (productos propios,
   retrocesiones) ni sección de disclosure en el report: los 4 disclaimers fijos de
   I-020 no cubren fees, conflictos ni capacidad en la que actúa el asesor.
-- **Alternativas consideradas sin estructura**: la selección exige `rationale` libre
-  pero no registra por qué se descartaron las otras variantes del proposal. Campo
-  opcional `considered_alternatives` en el payload de selection — barato y alinea con
-  la doctrina de "reasonably available alternatives".
 - **Sin documento tipo relationship summary** (análogo Form CRS) en onboarding —
   Fase 4, junto con PDF/branding del report.
 

@@ -34,7 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -3054,6 +3054,7 @@ class SQLiteCasePortfolioSelectionRepository:
         source: str = "manual",
         override_approval_id: str | None = None,
         advisor_id: str | None = None,
+        considered_alternatives: Sequence[Mapping[str, Any]] | None = None,
         is_current: bool = True,
     ) -> dict[str, Any]:
         if not isinstance(selected_candidate, Mapping):
@@ -3065,6 +3066,17 @@ class SQLiteCasePortfolioSelectionRepository:
         selection_id = self._store._next_id("case_portfolio_selection_")
         now = _now_utc()
         candidate_dict = dict(selected_candidate)
+        # NULL = no documentado; "[]" = documentó que no consideró otras.
+        alternatives_list: list[dict[str, Any]] | None = (
+            None
+            if considered_alternatives is None
+            else [dict(a) for a in considered_alternatives]
+        )
+        alternatives_json: str | None = (
+            None
+            if alternatives_list is None
+            else json.dumps(alternatives_list, ensure_ascii=False)
+        )
 
         try:
             with self._store._conn:
@@ -3074,32 +3086,35 @@ class SQLiteCasePortfolioSelectionRepository:
                         (selection_id, case_id, proposal_id,
                          override_approval_id, selected_variant,
                          selected_candidate_json, rationale, source,
-                         advisor_id, created_at_utc, is_current)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         advisor_id, considered_alternatives_json,
+                         created_at_utc, is_current)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         selection_id, case_id, proposal_id,
                         override_approval_id, selected_variant,
                         _canonical_json(candidate_dict),
                         rationale, source,
-                        advisor_id, now, 1 if is_current else 0,
+                        advisor_id, alternatives_json,
+                        now, 1 if is_current else 0,
                     ),
                 )
         except sqlite3.IntegrityError as exc:
             raise EntityConflictError(str(exc)) from exc
 
         return {
-            "selection_id":          selection_id,
-            "case_id":               case_id,
-            "proposal_id":           proposal_id,
-            "override_approval_id":  override_approval_id,
-            "selected_variant":      selected_variant,
-            "selected_candidate":    candidate_dict,
-            "rationale":             rationale,
-            "source":                source,
-            "advisor_id":            advisor_id,
-            "is_current":            bool(is_current),
-            "created_at_utc":        now,
+            "selection_id":            selection_id,
+            "case_id":                 case_id,
+            "proposal_id":             proposal_id,
+            "override_approval_id":    override_approval_id,
+            "selected_variant":        selected_variant,
+            "selected_candidate":      candidate_dict,
+            "rationale":               rationale,
+            "source":                  source,
+            "advisor_id":              advisor_id,
+            "considered_alternatives": alternatives_list,
+            "is_current":              bool(is_current),
+            "created_at_utc":          now,
         }
 
     def get(self, selection_id: str) -> dict[str, Any] | None:
@@ -3108,7 +3123,8 @@ class SQLiteCasePortfolioSelectionRepository:
             SELECT selection_id, case_id, proposal_id,
                    override_approval_id, selected_variant,
                    selected_candidate_json, rationale, source,
-                   advisor_id, created_at_utc, is_current
+                   advisor_id, considered_alternatives_json,
+                   created_at_utc, is_current
             FROM case_portfolio_selections WHERE selection_id = ?
             """,
             (selection_id,),
@@ -3123,7 +3139,8 @@ class SQLiteCasePortfolioSelectionRepository:
             SELECT selection_id, case_id, proposal_id,
                    override_approval_id, selected_variant,
                    selected_candidate_json, rationale, source,
-                   advisor_id, created_at_utc, is_current
+                   advisor_id, considered_alternatives_json,
+                   created_at_utc, is_current
             FROM case_portfolio_selections
             WHERE case_id = ?
             ORDER BY created_at_utc ASC, selection_id ASC
@@ -3138,7 +3155,8 @@ class SQLiteCasePortfolioSelectionRepository:
             SELECT selection_id, case_id, proposal_id,
                    override_approval_id, selected_variant,
                    selected_candidate_json, rationale, source,
-                   advisor_id, created_at_utc, is_current
+                   advisor_id, considered_alternatives_json,
+                   created_at_utc, is_current
             FROM case_portfolio_selections
             WHERE case_id = ? AND is_current = 1
             ORDER BY created_at_utc DESC, selection_id DESC
@@ -3177,18 +3195,22 @@ class SQLiteCasePortfolioSelectionRepository:
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        raw_alternatives = row["considered_alternatives_json"]
         return {
-            "selection_id":          row["selection_id"],
-            "case_id":               row["case_id"],
-            "proposal_id":           row["proposal_id"],
-            "override_approval_id":  row["override_approval_id"],
-            "selected_variant":      row["selected_variant"],
-            "selected_candidate":    json.loads(row["selected_candidate_json"]),
-            "rationale":             row["rationale"],
-            "source":                row["source"],
-            "advisor_id":            row["advisor_id"],
-            "is_current":            bool(row["is_current"]),
-            "created_at_utc":        row["created_at_utc"],
+            "selection_id":            row["selection_id"],
+            "case_id":                 row["case_id"],
+            "proposal_id":             row["proposal_id"],
+            "override_approval_id":    row["override_approval_id"],
+            "selected_variant":        row["selected_variant"],
+            "selected_candidate":      json.loads(row["selected_candidate_json"]),
+            "rationale":               row["rationale"],
+            "source":                  row["source"],
+            "advisor_id":              row["advisor_id"],
+            "considered_alternatives": (
+                None if raw_alternatives is None else json.loads(raw_alternatives)
+            ),
+            "is_current":              bool(row["is_current"]),
+            "created_at_utc":          row["created_at_utc"],
         }
 
 

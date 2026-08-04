@@ -1984,12 +1984,59 @@ _ALLOWED_SELECTION_VARIANTS: frozenset[str] = frozenset(
 )
 
 
+class ConsideredAlternative(BaseModel):
+    """
+    Alternativa del proposal que el asesor consideró y descartó al seleccionar
+    (doctrina de "reasonably available alternatives" — auditoría compliance
+    2026-07-17). Opcional en el request; si se envía, la razón es obligatoria.
+    """
+
+    variant:         str
+    reason_rejected: str = Field(min_length=1)
+
+    @field_validator("variant")
+    @classmethod
+    def _variant_allowed(cls, v: str) -> str:
+        if v not in _ALLOWED_SELECTION_VARIANTS:
+            raise ValueError(
+                f"variant inválido en considered_alternatives: {v!r}. "
+                f"Permitidos: {sorted(_ALLOWED_SELECTION_VARIANTS)}."
+            )
+        return v
+
+    @field_validator("reason_rejected")
+    @classmethod
+    def _reason_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reason_rejected no puede ser solo espacios.")
+        return v
+
+
 class CasePortfolioSelectionCreateRequest(BaseModel):
-    proposal_id:          str | None = None
-    selected_variant:     str
-    override_approval_id: str | None = None
-    rationale:            str        = Field(min_length=1)
-    source:               str        = "manual"
+    proposal_id:             str | None = None
+    selected_variant:        str
+    override_approval_id:    str | None = None
+    rationale:               str        = Field(min_length=1)
+    source:                  str        = "manual"
+    # None = no documentado (compatibilidad hacia atrás); [] = el asesor
+    # documenta explícitamente que no consideró otras variantes.
+    considered_alternatives: list[ConsideredAlternative] | None = None
+
+    @field_validator("considered_alternatives")
+    @classmethod
+    def _alternatives_without_duplicates(
+        cls, v: list[ConsideredAlternative] | None
+    ) -> list[ConsideredAlternative] | None:
+        if v is None:
+            return v
+        variants = [a.variant for a in v]
+        duplicates = {x for x in variants if variants.count(x) > 1}
+        if duplicates:
+            raise ValueError(
+                "considered_alternatives con variants duplicados: "
+                f"{sorted(duplicates)}."
+            )
+        return v
 
     @field_validator("proposal_id", mode="before")
     @classmethod
@@ -2031,17 +2078,18 @@ class CasePortfolioSelectionCreateRequest(BaseModel):
 
 
 class CasePortfolioSelectionResponse(BaseModel):
-    selection_id:          str
-    case_id:               str
-    proposal_id:           str
-    override_approval_id:  str | None
-    selected_variant:      str
-    selected_candidate:    dict[str, Any]
-    rationale:             str
-    source:                str
-    advisor_id:            str | None
-    is_current:            bool
-    created_at_utc:        str
+    selection_id:            str
+    case_id:                 str
+    proposal_id:             str
+    override_approval_id:    str | None
+    selected_variant:        str
+    selected_candidate:      dict[str, Any]
+    rationale:               str
+    source:                  str
+    advisor_id:              str | None
+    considered_alternatives: list[dict[str, Any]] | None = None
+    is_current:              bool
+    created_at_utc:          str
 
 
 class CasePortfolioSelectionListResponse(BaseModel):

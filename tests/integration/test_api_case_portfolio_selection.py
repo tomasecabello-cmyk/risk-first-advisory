@@ -980,6 +980,193 @@ class TestAudit:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# considered_alternatives (auditoría compliance 2026-07-17 — "reasonably
+# available alternatives")
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestConsideredAlternatives:
+    def test_omitted_persists_none(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Sin el campo (compatibilidad hacia atrás) → None: no documentado."""
+        ctx = _full_setup(client, patch_ai_client)
+        variant = _find_non_override_variant(ctx["proposal"])
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["considered_alternatives"] is None
+
+    def test_documented_alternatives_roundtrip(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        proposal = ctx["proposal"]
+        variant = _find_non_override_variant(proposal)
+        others = [
+            c["variant"] for c in proposal["candidates"]
+            if c["variant"] != variant
+        ]
+        assert others, "Fixture must produce more than one candidate"
+        alternatives = [
+            {"variant": v, "reason_rejected": f"Descartada {v}: no encaja."}
+            for v in others
+        ]
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=alternatives,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["considered_alternatives"] == alternatives
+
+        # y sobrevive el roundtrip por GET (persistido, no solo eco)
+        listing = client.get(
+            f"/cases/{ctx['case']['case_id']}/portfolio-selection",
+            headers={"Authorization": _ADVISOR},
+        )
+        assert listing.status_code == 200
+        assert (
+            listing.json()["selections"][-1]["considered_alternatives"]
+            == alternatives
+        )
+
+    def test_empty_list_is_explicit_and_distinct_from_none(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """[] = el asesor documenta que no consideró otras variantes."""
+        ctx = _full_setup(client, patch_ai_client)
+        variant = _find_non_override_variant(ctx["proposal"])
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[],
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["considered_alternatives"] == []
+
+    def test_selected_variant_in_alternatives_422(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        variant = _find_non_override_variant(ctx["proposal"])
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[
+                {"variant": variant, "reason_rejected": "x"}
+            ],
+        )
+        assert r.status_code == 422
+        assert "variant seleccionada" in r.json()["detail"]
+
+    def test_variant_not_in_proposal_422(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Variant válida del enum pero ausente del proposal → 422."""
+        ctx = _full_setup(client, patch_ai_client)
+        proposal = ctx["proposal"]
+        variant = _find_non_override_variant(proposal)
+        present = {c["variant"] for c in proposal["candidates"]}
+        missing = sorted({"DEFENSIVE", "BALANCED", "GROWTH"} - present)
+        if not missing:
+            pytest.skip("El proposal del fixture generó las 3 variantes")
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[
+                {"variant": missing[0], "reason_rejected": "x"}
+            ],
+        )
+        assert r.status_code == 422
+
+    def test_unknown_variant_name_422(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        variant = _find_non_override_variant(ctx["proposal"])
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[
+                {"variant": "YOLO", "reason_rejected": "x"}
+            ],
+        )
+        assert r.status_code == 422
+
+    def test_duplicate_variants_422(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        proposal = ctx["proposal"]
+        variant = _find_non_override_variant(proposal)
+        others = [
+            c["variant"] for c in proposal["candidates"]
+            if c["variant"] != variant
+        ]
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[
+                {"variant": others[0], "reason_rejected": "a"},
+                {"variant": others[0], "reason_rejected": "b"},
+            ],
+        )
+        assert r.status_code == 422
+
+    def test_blank_reason_422(self, client: TestClient, patch_ai_client) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        proposal = ctx["proposal"]
+        variant = _find_non_override_variant(proposal)
+        others = [
+            c["variant"] for c in proposal["candidates"]
+            if c["variant"] != variant
+        ]
+        r = _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=[
+                {"variant": others[0], "reason_rejected": "   "}
+            ],
+        )
+        assert r.status_code == 422
+
+    def test_audit_event_includes_alternatives(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _full_setup(client, patch_ai_client)
+        proposal = ctx["proposal"]
+        variant = _find_non_override_variant(proposal)
+        others = [
+            c["variant"] for c in proposal["candidates"]
+            if c["variant"] != variant
+        ]
+        alternatives = [{"variant": others[0], "reason_rejected": "no encaja"}]
+        _post_selection(
+            client, ctx["case"]["case_id"],
+            selected_variant=variant, rationale="ok",
+            considered_alternatives=alternatives,
+        )
+        events = client.get(
+            f"/cases/{ctx['case']['case_id']}/audit",
+            headers={"Authorization": _ADVISOR},
+        ).json()["events"]
+        selected = [e for e in events if e["event_type"] == "portfolio_selected"]
+        assert selected
+        assert selected[-1]["payload"]["considered_alternatives"] == alternatives
+
+        # y la cadena sigue verificable (I-021)
+        verify = client.get(
+            f"/cases/{ctx['case']['case_id']}/audit/verify",
+            headers={"Authorization": _COMPLIANCE},
+        )
+        assert verify.status_code == 200
+        assert verify.json()["is_intact"] is True
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # No regression
 # ═════════════════════════════════════════════════════════════════════════════
 

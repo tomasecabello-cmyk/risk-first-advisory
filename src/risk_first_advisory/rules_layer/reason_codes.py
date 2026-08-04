@@ -26,6 +26,7 @@ class ReasonCode(str, Enum):
     KYC_CONTRADICTION_NEED_EXCEEDS_APTITUDE = "KYC_007"
     KYC_INSUFFICIENT_INFORMATION = "KYC_010"
     KYC_AMBIGUOUS_OPEN_RESPONSE = "KYC_011"
+    KYC_STALE = "KYC_012"
 
     # ─── Goal feasibility ─────────────────────────────────────────────────
     GOAL_INFEASIBLE_REQUIRED_RETURN = "GOAL_001"
@@ -145,6 +146,16 @@ REASON_CODE_CATALOG: dict[ReasonCode, dict[str, Any]] = {
         "domain": "kyc",
         "severity": "baja",
         "description": "Respuesta abierta del cliente es ambigua y requiere aclaración.",
+        "implies_follow_up": True,
+        "blocks_advancement": False,
+    },
+    ReasonCode.KYC_STALE: {
+        "domain": "kyc",
+        "severity": "media",
+        "description": (
+            "El KYC que respalda la propuesta supera la antigüedad máxima "
+            "configurada; el asesor debe reconfirmar los datos del cliente."
+        ),
         "implies_follow_up": True,
         "blocks_advancement": False,
     },

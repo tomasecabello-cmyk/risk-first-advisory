@@ -383,3 +383,19 @@ El smoke check ahora ejercita este path en vez de esquivarlo: registra el overri
 **Alternativas descartadas:** (a) deshabilitar el fallback solo con bind no-loopback (el loader no conoce el bind de uvicorn); (b) devolver mapa vacío sin flag (401 silencioso en vez de error operativo — confunde más de lo que protege); (c) redactar el output en los endpoints (deja abierto el path de backfill y cada endpoint nuevo tendría que acordarse); (d) no persistir `raw_response` en absoluto (pierde valor de debugging/auditoría del formato de respuesta).
 
 **Consecuencias:** correr uvicorn para la demo requiere `RFA_ALLOW_DEV_TOKENS=1` (o `RFA_DEMO_MODE=1`, que la demo guiada ya usa) salvo que exista un YAML de tokens propio; `bootstrap_local_demo.py` lo imprime en el launch block. `raw_response` en las respuestas de `GET /admin/ai-logs` y `/cases/{id}/ai-logs` ahora devuelve el contenido redactado (ningún consumidor dependía del texto en claro; el análisis completo vive en `ai_profile_analyses`).
+
+## DD-017 — Quick wins de la auditoría de compliance: considered_alternatives + KYC_STALE
+
+**Estado:** Aceptado
+**Fecha:** 2026-08-04
+**Área:** `api_layer` (portfolio-selection, portfolio-proposal), `persistence_layer` (migración 0010), `rules_layer/reason_codes.py`
+
+**Contexto:** la auditoría de compliance 2026-07-17 (ROADMAP) marcó, entre otros, dos gaps baratos de cerrar: (1) la selección exige `rationale` libre pero no registra por qué se descartaron las otras variantes del proposal (doctrina de "reasonably available alternatives", usada como referencia adaptada); (2) las KYC submissions son versionadas pero nada marca un KYC viejo ni pide reconfirmación — un proposal podía apoyarse en un KYC de años atrás sin ninguna señal.
+
+**Decisión:**
+- **`considered_alternatives` (migración 0010, columna NULL-able)**: campo opcional del payload de `POST /cases/{id}/portfolio-selection` — lista de `{variant, reason_rejected}`. Semántica de tres estados: `NULL` = no documentado (compatibilidad hacia atrás, filas históricas), `[]` = el asesor documenta explícitamente que no consideró otras, lista = alternativas descartadas con su razón. La API valida: variant real del proposal, distinta de la seleccionada, sin duplicados, razón no vacía. Va al AuditEvent `portfolio_selected` y a las responses de selection.
+- **`KYC_STALE` (`KYC_012`, warning del proposal)**: al generar un proposal se calcula la antigüedad del KYC que lo respalda (el mismo que ancla el Risk Number: el de la aprobación usada, fallback al current). Si supera `RFA_KYC_MAX_AGE_DAYS` (default 365; `<= 0` desactiva; valor inválido cae al default), el proposal antepone un warning con el reason code, el id del KYC vencido y la acción esperada. Warning transversal a todos los status del proposal, nunca bloquea (severity media, `blocks_advancement: false` en el catálogo): la decisión de reconfirmar es del asesor (I-001).
+
+**Alternativas descartadas:** (a) `considered_alternatives` obligatorio (rompería todos los clientes existentes y forzaría texto ritual sin valor — mejor opcional con semántica NULL vs `[]`); (b) bloquear el proposal con KYC vencido (un TTL fijo no distingue un cliente estable de uno con evento de vida; el bloqueo duro contradiría el espíritu asesor-decide); (c) TTL en YAML de config (los toggles operativos del proyecto ya viven en env vars `RFA_*`; un YAML nuevo para un entero es sobre-estructura).
+
+**Consecuencias:** el reporte y el frontend PUEDEN mostrar las alternativas descartadas y el warning de staleness sin cambios de schema adicionales (ya viajan en selection/proposal). Queda en ROADMAP la reconfirmación por eventos de vida (el TTL solo cubre antigüedad) y la estructura de costos por variante (el otro gap de Reg BI, no cubierto acá).

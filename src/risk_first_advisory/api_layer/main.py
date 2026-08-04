@@ -20,6 +20,7 @@ Constantes monkeypatcheables en tests:
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -190,6 +191,7 @@ from risk_first_advisory.rules_layer.instrument_suitability import (
     InstrumentSuitabilityMatrix,
 )
 from risk_first_advisory.rules_layer.product_governance import ApprovedProductUniverse
+from risk_first_advisory.rules_layer.reason_codes import ReasonCode
 from risk_first_advisory.universe_layer import (
     CSVInstrumentUniverseProvider,
     PreferenceFilterEngine,
@@ -4851,6 +4853,48 @@ def list_case_universe_filter_runs(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# TTL de vigencia del KYC (auditoría compliance 2026-07-17). El proposal avisa
+# con KYC_012 (KYC_STALE) cuando el KYC que lo respalda supera esta antigüedad.
+# Warning, no bloqueo: la decisión de reconfirmar sigue siendo del asesor.
+# Configurable con RFA_KYC_MAX_AGE_DAYS; <= 0 desactiva el chequeo.
+DEFAULT_KYC_MAX_AGE_DAYS: int = 365
+
+
+def _kyc_staleness_warning(
+    kyc_created_at_utc: str | None,
+    kyc_submission_id: str | None,
+) -> str | None:
+    """
+    Devuelve el warning KYC_STALE si el KYC que respalda el proposal supera
+    la antigüedad máxima; None si está vigente, si el chequeo está
+    desactivado, o si no hay timestamp parseable (nunca bloquea el proposal).
+    """
+    if not kyc_created_at_utc:
+        return None
+    raw_ttl = os.environ.get("RFA_KYC_MAX_AGE_DAYS", "")
+    try:
+        max_age_days = int(raw_ttl) if raw_ttl.strip() else DEFAULT_KYC_MAX_AGE_DAYS
+    except ValueError:
+        max_age_days = DEFAULT_KYC_MAX_AGE_DAYS
+    if max_age_days <= 0:
+        return None
+    try:
+        created = datetime.strptime(
+            kyc_created_at_utc, "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    age_days = (datetime.now(timezone.utc) - created).days
+    if age_days <= max_age_days:
+        return None
+    return (
+        f"reason_code: {ReasonCode.KYC_STALE.value} — el KYC que respalda "
+        f"esta propuesta ({kyc_submission_id or 'desconocido'}) tiene "
+        f"{age_days} días (máximo configurado: {max_age_days}). Reconfirmar "
+        "los datos del cliente y registrar un KYC nuevo antes de presentar."
+    )
+
+
 def _reconstruct_instrument_from_dict(d: dict[str, Any]) -> Any:
     """
     Reconstruye un FinancialInstrument desde el dict persistido por
@@ -5483,11 +5527,19 @@ def create_case_portfolio_proposal(
             or case_data.get("current_kyc_submission_id")
         )
         rn_kyc_payload: dict[str, Any] | None = None
+        kyc_created_at_utc: str | None = None
         if rn_kyc_submission_id is not None:
             kyc_row = SQLiteKYCSubmissionRepository(store).get(rn_kyc_submission_id)
             payload_raw = (kyc_row or {}).get("payload")
             if isinstance(payload_raw, dict):
                 rn_kyc_payload = payload_raw
+            kyc_created_at_utc = (kyc_row or {}).get("created_at_utc")
+
+    # Vigencia del KYC (KYC_012): warning transversal a todos los status del
+    # proposal — lo antepone _persist_and_return.
+    kyc_stale_warning = _kyc_staleness_warning(
+        kyc_created_at_utc, rn_kyc_submission_id
+    )
 
     # ── 2. Reconstruir instrumentos desde el snapshot del filter run ────────
     eligible_dicts = filter_data["eligible_instruments"]
@@ -5501,7 +5553,6 @@ def create_case_portfolio_proposal(
     # Estimación CONJUNTA sobre series reales: μ Black-Litterman + Σ Ledoit-Wolf
     # (correlaciones reales). Sin la env var, sigue el fixture con la covarianza
     # mock por asset_class → tests y smoke check deterministas.
-    import os
     live_covariance: Any | None = None
     live_warnings: list[str] = []
     if os.environ.get("RFA_LIVE_DATA"):
@@ -5520,6 +5571,8 @@ def create_case_portfolio_proposal(
     def _persist_and_return(
         status: str, candidates: list[dict[str, Any]], warnings: list[str]
     ) -> CasePortfolioProposalResponse:
+        if kyc_stale_warning is not None:
+            warnings = [kyc_stale_warning] + warnings
         with SQLiteEntityStore(db_path) as store:
             proposal_repo = SQLiteCasePortfolioProposalRepository(store)
             audit_repo = SQLiteAuditEventRepository(store)
@@ -5980,6 +6033,9 @@ def list_case_override_approvals(
 #       - Si no hay override válido: 409.
 #   - Si candidate NO requiere override:
 #       - 422 si override_approval_id se pasa explícito (rechazo: no debe usarse).
+#   - considered_alternatives (opcional, auditoría compliance 2026-07-17):
+#       - 422 si incluye la variant seleccionada o una variant que no está en
+#         el proposal. None = no documentado; [] = "no consideré otras".
 #   - Persiste selection + mark_previous_not_current + actualiza
 #     advisory_cases.current_portfolio_selection_id + transiciona status a
 #     PORTFOLIO_SELECTED (si la FSM lo permite desde el status actual).
@@ -6078,6 +6134,34 @@ def create_case_portfolio_selection(
             )
         chosen_candidate = candidates_by_variant[req.selected_variant]
         requires_override = _candidate_requires_override(chosen_candidate)
+
+        # ── 3b. considered_alternatives (opcional) ────────────────────────
+        # Cada alternativa descartada debe ser una variant REAL del proposal
+        # y distinta de la elegida (el schema ya validó formato y duplicados).
+        considered_alternatives: list[dict[str, Any]] | None = None
+        if req.considered_alternatives is not None:
+            for alt in req.considered_alternatives:
+                if alt.variant == req.selected_variant:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"considered_alternatives no puede incluir la "
+                            f"variant seleccionada ({req.selected_variant!r})."
+                        ),
+                    )
+                if alt.variant not in candidates_by_variant:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"considered_alternatives incluye "
+                            f"{alt.variant!r}, que no es una variant del "
+                            f"proposal {proposal_data['proposal_id']!r}. "
+                            f"Disponibles: {sorted(candidates_by_variant)}."
+                        ),
+                    )
+            considered_alternatives = [
+                a.model_dump() for a in req.considered_alternatives
+            ]
 
         # ── 4. resolver override (si aplica) ──────────────────────────────
         resolved_override_id: str | None = None
@@ -6178,6 +6262,7 @@ def create_case_portfolio_selection(
                 source=req.source,
                 override_approval_id=resolved_override_id,
                 advisor_id=advisor_id_for_row,
+                considered_alternatives=considered_alternatives,
                 is_current=True,
             )
         except EntityConflictError as exc:
@@ -6230,6 +6315,8 @@ def create_case_portfolio_selection(
                     "override_approval_id": selection_data["override_approval_id"],
                     "selected_variant":     selection_data["selected_variant"],
                     "advisor_id":           selection_data["advisor_id"],
+                    "considered_alternatives":
+                        selection_data["considered_alternatives"],
                 },
             )
         except Exception as exc:
