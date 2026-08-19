@@ -78,6 +78,38 @@
   suitability por instrumento en el pipeline case-scoped (`suitability_status`
   del holding hoy es `None`).
 
+### Perfilamiento CNV — lo que falta después de DD-018 (2026-08-18)
+
+> Las Normas CNV (N.T. 2013 y mod.), Título VII, art. 12 inc. j) Cap. I y art. 16
+> inc. j) Cap. II, enumeran los mínimos que debe cubrir el perfil de riesgo del
+> cliente. DD-018 cerró los tres que faltaban en el KYC (conocimiento de los
+> instrumentos, % de ahorros destinado, % dispuesto a arriesgar) y rompió la
+> derivación circular de la caída tolerada (I-024). Mapa completo de cobertura en
+> `docs/COMPLIANCE_NOTES.md` §14. Lo que sigue abierto:
+
+- **Constancia del cliente sobre su propio perfilamiento**: la CNV exige acreditar
+  que el cliente tuvo conocimiento efectivo del resultado del perfilamiento inicial
+  y de cada revisión posterior. Hoy el perfil lo aprueba el asesor
+  (`POST /cases/{id}/profile-approval`) y no hay ningún registro del lado del
+  cliente. Es el gap más caro de los tres: implica una superficie que el cliente
+  toque (link con token de un solo uso) y un evento de auditoría propio.
+- **Manifestación del cliente por operación fuera de perfil**: la norma pide
+  manifestación inequívoca **por cada operación** cuando el cliente no es inversor
+  calificado e insiste con un instrumento no acorde a su perfil. Hoy existe el
+  override del asesor con rationale auditado, que es otra cosa (decide el asesor,
+  no el cliente).
+- **`instrument_knowledge` como insumo de suitability**: hoy se captura y se reporta,
+  pero no cambia decisiones. El paso natural es que un instrumento con conocimiento
+  declarado `ninguno` levante un warning (o un cap) en la matriz de suitability —
+  se descartó meterlo en DD-018 porque cambia decisiones de cartera y merece su
+  propio DD con tests. Encaja con "Suitability per-instrument en el case flow".
+- **Inversor calificado**: el sistema no modela la categoría (art. 12, Sección I,
+  Cap. VI, Título II — umbral llevado a 350.000 UVAs en las modificaciones de 2025).
+  Cambia el régimen aplicable: sin la categoría, todo cliente se trata como
+  minorista, que es el default conservador y por eso no urge.
+- **Personas jurídicas**: el KYC asume persona humana. Para entidades la CNV suma
+  las políticas de inversión definidas por el órgano de administración.
+
 ### Identidad y onboarding (para Fase 4 — piloto real)
 
 - **Cliente = `display_name` + jurisdiction**: sin identidad verificable (DNI/CUIT),

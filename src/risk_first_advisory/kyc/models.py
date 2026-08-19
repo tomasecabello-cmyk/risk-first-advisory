@@ -36,6 +36,12 @@ class InvestorExperience(str, Enum):
     EXPERT = "experto"
 
 
+# Niveles válidos de `KYCData.instrument_knowledge` (DD-018). Escala corta y
+# deliberadamente gruesa: la CNV pide constatar el grado de conocimiento, no
+# medirlo con precisión psicométrica.
+KNOWLEDGE_LEVELS: frozenset[str] = frozenset({"ninguno", "basico", "avanzado"})
+
+
 class ESGStrictnessLevel(str, Enum):
     NONE = "none"
     LIGHT = "light"
@@ -176,6 +182,31 @@ class KYCData:
     # Campo informativo opcional — NO interviene en cálculos
     declared_return_expectation_pct: float | None = None
 
+    # ── Mínimos de perfilamiento CNV (DD-018) ─────────────────────────────
+    # Normas CNV (N.T. 2013 y mod.), Título VII, art. 12 inc. j) Cap. I y
+    # art. 16 inc. j) Cap. II: el agente debe conocer el perfil de riesgo
+    # considerando como mínimo, entre otros aspectos, el grado de conocimiento
+    # de los instrumentos disponibles, el porcentaje de ahorros destinado a
+    # estas inversiones y el nivel de ahorros que el cliente está dispuesto a
+    # arriesgar.
+    #
+    # `instrument_knowledge`: instrument_type → "ninguno" | "basico" | "avanzado".
+    # Es más granular que `experience` (que es una sola etiqueta global) y por
+    # eso convive con ella: la CNV pide el conocimiento DE LOS INSTRUMENTOS.
+    #
+    # Los tres son opcionales (default vacío / None) para no romper KYCs
+    # existentes. Cuando faltan, el perfil queda incompleto frente al mínimo
+    # regulatorio y el motor lo señala con KYC_013 — nunca bloquea.
+    instrument_knowledge: dict[str, str] = field(default_factory=dict)
+    savings_allocated_pct: float | None = None
+    savings_at_risk_pct: float | None = None
+
+    CNV_PROFILING_NOTE = (
+        "Mínimos de perfilamiento exigidos por las Normas CNV (Título VII, "
+        "art. 12 inc. j Cap. I / art. 16 inc. j Cap. II). Se capturan y se "
+        "reportan; la decisión sobre el perfil sigue siendo del asesor."
+    )
+
     DECLARED_RETURN_NOTE = (
         "Campo informativo de la expectativa de retorno verbalizada por el cliente. "
         "No se usa en cálculos de viabilidad ni de construcción de cartera. "
@@ -209,3 +240,32 @@ class KYCData:
             raise ValueError("preferred_currency no puede estar vacío.")
         if not self.jurisdiction.strip():
             raise ValueError("jurisdiction no puede estar vacío.")
+        for pct_name in ("savings_allocated_pct", "savings_at_risk_pct"):
+            pct = getattr(self, pct_name)
+            if pct is not None and not 0.0 <= pct <= 100.0:
+                raise ValueError(
+                    f"{pct_name} debe estar en [0.0, 100.0], recibido {pct}."
+                )
+        for instrument_type, level in self.instrument_knowledge.items():
+            if level not in KNOWLEDGE_LEVELS:
+                raise ValueError(
+                    f"nivel de conocimiento inválido para {instrument_type!r}: "
+                    f"{level!r}. Opciones: {sorted(KNOWLEDGE_LEVELS)}."
+                )
+
+    def missing_cnv_profiling_minimums(self) -> list[str]:
+        """
+        Mínimos de perfilamiento CNV que este KYC NO tiene cargados.
+
+        Devuelve los nombres de campo faltantes (lista vacía = completo). Es
+        una consulta informativa: no bloquea nada y no decide el perfil —
+        alimenta el warning KYC_013 y la vista de compliance.
+        """
+        missing: list[str] = []
+        if not self.instrument_knowledge:
+            missing.append("instrument_knowledge")
+        if self.savings_allocated_pct is None:
+            missing.append("savings_allocated_pct")
+        if self.savings_at_risk_pct is None:
+            missing.append("savings_at_risk_pct")
+        return missing

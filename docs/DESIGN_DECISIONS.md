@@ -422,3 +422,31 @@ El smoke check ahora ejercita este path en vez de esquivarlo: registra el overri
   el snapshot (I-013), snapshots viejos sin el campo no muestran la sección.
   La marca es informativa: no excluye instrumentos ni cambia al optimizador
   (la suitability per-instrument del case flow sigue siendo TODO Fase 4).
+
+---
+
+## DD-018
+
+**Título:** Mínimos de perfilamiento CNV en el KYC y fin de la caída tolerada circular
+
+**Fecha:** 2026-08-18
+**Área:** `api_layer` (schemas, `_build_kyc_data`, `POST /cases/{id}/kyc`), `kyc/models.py`, `ai_layer/risk_scoring.py`, `reporting_layer/case_markdown_report.py`, `rules_layer/reason_codes.py`, `frontend`
+
+**Contexto:** el cuestionario de tolerancia del sistema es la escala Grable-Lytton (1999), un instrumento académico validado que mide tolerancia DECLARADA. Las Normas CNV (N.T. 2013 y mod.), Título VII — art. 12 inc. j) Cap. I para Agentes de Negociación y art. 16 inc. j) Cap. II para ALyC — exigen conocer el perfil de riesgo del cliente considerando **como mínimo**: experiencia en el mercado de capitales, grado de conocimiento de los instrumentos disponibles, objetivo de inversión, situación financiera, horizonte previsto, porcentaje de ahorros destinado a estas inversiones, nivel de ahorros que está dispuesto a arriesgar, y toda otra circunstancia relevante (para personas jurídicas, además, las políticas de inversión del órgano de administración).
+
+De esos mínimos, el KYC ya cubría cuatro (experiencia, objetivo, situación financiera, horizonte) y el cuestionario cubría uno (tolerancia). Faltaban tres. Peor: el `max_acceptable_drawdown_pct` que el frontend enviaba no se preguntaba, se fabricaba como `tolerancia_estimada × 3` — o sea que salía del mismo cuestionario que la tolerancia y no aportaba información independiente sobre cuánto estaba dispuesto a perder el cliente.
+
+**Decisión:**
+- **Tres campos nuevos en `KYCDataRequest` y `KYCData`**, opcionales para no romper KYCs existentes:
+  - `instrument_knowledge: dict[str, str]` — `instrument_type` (valores de `universe_layer.InstrumentType`) → `"ninguno" | "basico" | "avanzado"`. Convive con `experience`, que es una etiqueta global: la CNV pide el conocimiento **de los instrumentos**, no una autoevaluación única.
+  - `savings_allocated_pct: float | None` — % de los ahorros destinado a estas inversiones.
+  - `savings_at_risk_pct: float | None` — % de los ahorros que declara estar dispuesto a arriesgar.
+- **`compute_drawdown_from_savings`** (`ai_layer/risk_scoring.py`, función pura): la caída tolerada de la CARTERA se deriva de los dos porcentajes declarados — `at_risk / allocated × 100`, acotada a 100. Arriesgar el 10% de los ahorros con el 50% invertido acá equivale a tolerar una caída del 20% de esta cartera.
+- **Gate `drawdown_from_savings: bool = False`**, mismo idioma que `capacity_from_facts` y `tolerance_from_questionnaire`: con el gate encendido y ambos porcentajes presentes, `_build_kyc_data` usa el valor derivado y `max_acceptable_drawdown_pct` pasa a ser placeholder. Sin gate, o sin datos para derivar, el comportamiento legacy queda intacto.
+- **`KYC_013` / `KYC_CNV_PROFILING_INCOMPLETE`**: `POST /cases/{id}/kyc` devuelve el warning en el campo nuevo `warnings` de `KYCSubmissionResponse` cuando falta alguno de los tres, nombrando cuáles. El `AuditEvent kyc_submitted` registra `cnv_profiling_complete: bool`. Severity media, `blocks_advancement: false`: avisa, no bloquea.
+- **Sección nueva del reporte** ("Mínimos de perfilamiento (Normas CNV)"): formatea lo declarado y marca lo no relevado. No deriva ni completa nada (I-013/I-020); la caída derivada se muestra en la sección de capacidad. La metadata del reporte lleva `cnv_profiling_complete` (tri-estado: `None` = sin KYC para evaluar).
+- **Frontend**: el paso 1 del wizard del cliente pregunta los tres, muestra en vivo la traducción a caída de cartera, y manda `drawdown_from_savings: true`.
+
+**Alternativas descartadas:** (a) hacer los tres campos obligatorios — rompería todos los KYCs y clientes existentes, y la CNV no exige rechazar un legajo incompleto sino conocerlo y poder acreditarlo; el warning + el registro en auditoría cubren el requisito sin romper nada. (b) Bloquear el proposal si el KYC está incompleto — mismo argumento que en DD-017 con `KYC_STALE`: la decisión de completar es del asesor (I-001). (c) Derivar el % de ahorros destinado desde `FinancialGoal.initial_capital_usd / liquid_net_worth` en vez de preguntarlo — la CNV pide el dato declarado, y la derivación fallaría en casos sin goal cargado. (d) Usar `instrument_knowledge` como filtro duro de suitability (bloquear instrumentos con conocimiento `ninguno`) — es tentador y muy CNV, pero cambia decisiones de cartera y merece su propio DD con tests de suitability; queda en ROADMAP.
+
+**Consecuencias:** el perfil deja de tener una entrada circular (la caída tolerada ahora es un hecho declarado, no un eco del cuestionario — ver I-024). El KYC cubre los ocho mínimos del art. 16 inc. j). Quedan pendientes en ROADMAP: usar `instrument_knowledge` en la matriz de suitability, la constancia del cliente sobre el resultado de su perfilamiento (la CNV exige acreditar conocimiento efectivo, hoy solo aprueba el asesor), y la manifestación inequívoca del cliente por operación fuera de perfil (hoy hay override del asesor).

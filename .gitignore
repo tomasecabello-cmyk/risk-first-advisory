@@ -25,3 +25,6 @@ skills-lock.json
 
 # pitch decks generados por scripts/build_*_pitch_deck.py (artefactos, no fuente)
 *.pptx
+
+# salida generada por graphify (no es codigo)
+graphify-out/

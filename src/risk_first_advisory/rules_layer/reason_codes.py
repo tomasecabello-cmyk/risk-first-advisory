@@ -27,6 +27,7 @@ class ReasonCode(str, Enum):
     KYC_INSUFFICIENT_INFORMATION = "KYC_010"
     KYC_AMBIGUOUS_OPEN_RESPONSE = "KYC_011"
     KYC_STALE = "KYC_012"
+    KYC_CNV_PROFILING_INCOMPLETE = "KYC_013"
 
     # ─── Goal feasibility ─────────────────────────────────────────────────
     GOAL_INFEASIBLE_REQUIRED_RETURN = "GOAL_001"
@@ -155,6 +156,19 @@ REASON_CODE_CATALOG: dict[ReasonCode, dict[str, Any]] = {
         "description": (
             "El KYC que respalda la propuesta supera la antigüedad máxima "
             "configurada; el asesor debe reconfirmar los datos del cliente."
+        ),
+        "implies_follow_up": True,
+        "blocks_advancement": False,
+    },
+    ReasonCode.KYC_CNV_PROFILING_INCOMPLETE: {
+        "domain": "kyc",
+        "severity": "media",
+        "description": (
+            "El KYC no cubre todos los mínimos de perfilamiento exigidos por "
+            "las Normas CNV (Título VII, art. 12 inc. j / art. 16 inc. j): "
+            "conocimiento de los instrumentos, porcentaje de ahorros destinado "
+            "a la inversión y nivel de ahorros que el cliente está dispuesto a "
+            "arriesgar."
         ),
         "implies_follow_up": True,
         "blocks_advancement": False,

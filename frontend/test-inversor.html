@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Test de inversor — Escala Grable-Lytton</title>
+  <meta name="description" content="El cuestionario de tolerancia al riesgo de Grable y Lytton (1999), 13 ítems, en una página autónoma: se responde, se puntúa y se explica de dónde sale cada número." />
+  <link rel="stylesheet" href="css/base.css">
+  <style>
+    /* Estilos propios de esta página. No tocan base.css. */
+    .gl-question {
+      background: var(--rf-card);
+      border: 1px solid var(--rf-border);
+      border-left: 4px solid var(--rf-border-strong);
+      border-radius: var(--rf-radius);
+      padding: 18px 20px;
+      margin-bottom: 14px;
+      box-shadow: var(--rf-shadow-sm);
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .gl-question.is-answered { border-left-color: var(--rf-emerald-600); }
+    .gl-q-head { display: flex; gap: 12px; align-items: flex-start; }
+    .gl-q-num {
+      flex: 0 0 26px; height: 26px; border-radius: 50%;
+      background: var(--rf-navy-900); color: #fff;
+      font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .gl-q-text { font-size: 15px; font-weight: 600; color: var(--rf-text); line-height: 1.5; }
+    .gl-q-meta {
+      display: flex; align-items: center; gap: 8px;
+      margin: 8px 0 12px 38px; flex-wrap: wrap;
+    }
+    .gl-orig { font-size: 11.5px; color: var(--rf-text-faint); }
+    .gl-options { display: flex; flex-direction: column; gap: 6px; margin-left: 38px; }
+    .gl-option {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border: 1px solid var(--rf-border);
+      border-radius: var(--rf-radius-sm); cursor: pointer;
+      font-size: 13.5px; color: var(--rf-text-body);
+      transition: background .12s ease, border-color .12s ease;
+    }
+    .gl-option:hover { background: var(--rf-bg-soft); border-color: var(--rf-border-strong); }
+    .gl-option.is-picked {
+      background: var(--rf-blue-100); border-color: var(--rf-navy-600); color: var(--rf-text);
+      font-weight: 600;
+    }
+    .gl-option input { accent-color: var(--rf-navy-600); flex: 0 0 auto; }
+    .gl-option-text { flex: 1; }
+    .gl-points {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px; font-weight: 700; color: var(--rf-navy-600);
+      background: var(--rf-blue-100); border-radius: var(--rf-radius-pill);
+      padding: 1px 8px;
+    }
+
+    .gl-progress-bar {
+      position: sticky; top: 66px; z-index: 20;
+      background: rgba(255,255,255,.94); backdrop-filter: blur(6px);
+      border: 1px solid var(--rf-border); border-radius: var(--rf-radius);
+      padding: 12px 16px; margin-bottom: 18px; box-shadow: var(--rf-shadow-sm);
+    }
+    .gl-progress-head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12.5px; color: var(--rf-text-muted); margin-bottom: 8px;
+    }
+    .gl-progress-track { height: 6px; background: var(--rf-bg-soft); border-radius: var(--rf-radius-pill); overflow: hidden; }
+    .gl-progress-fill {
+      height: 100%; width: 0%; border-radius: var(--rf-radius-pill);
+      background: linear-gradient(90deg, var(--rf-cyan-500), var(--rf-navy-600));
+      transition: width .25s ease;
+    }
+
+    .gl-scale-wrap { margin: 26px 0 8px; }
+    .gl-scale-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+                      color: var(--rf-text-muted); margin-bottom: 10px; }
+    /* overflow visible: la burbuja del marcador sobresale por arriba. Las puntas
+       redondeadas se resuelven en las bandas extremas, no con overflow:hidden. */
+    .gl-scale { position: relative; display: flex; height: 38px; margin-top: 30px; }
+    .gl-scale-band {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10.5px; font-weight: 600; color: #fff; text-align: center;
+    }
+    .gl-scale-band:first-child { border-radius: var(--rf-radius-sm) 0 0 var(--rf-radius-sm); }
+    .gl-scale-band:last-child  { border-radius: 0 var(--rf-radius-sm) var(--rf-radius-sm) 0; }
+    /* Anchos proporcionales a los cortes 13-18 / 19-22 / 23-28 / 29-32 / 33-47 */
+    .gl-band-1 { flex: 6;  background: #64748b; }
+    .gl-band-2 { flex: 4;  background: #059669; }
+    .gl-band-3 { flex: 6;  background: #2563eb; }
+    .gl-band-4 { flex: 4;  background: #d97706; }
+    .gl-band-5 { flex: 15; background: #dc2626; }
+    .gl-scale-marker { position: absolute; top: -6px; bottom: -6px; width: 3px; background: var(--rf-text); }
+    .gl-scale-bubble {
+      position: absolute; top: -26px; left: 50%; transform: translateX(-50%);
+      background: var(--rf-text); color: #fff; font-size: 12px; font-weight: 700;
+      padding: 2px 9px; border-radius: var(--rf-radius-pill);
+    }
+    .gl-scale-axis {
+      display: flex;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 10.5px; color: var(--rf-text-faint); margin-top: 6px;
+    }
+    .gl-scale-axis span { text-align: left; }
+    .gl-scale-axis .gl-axis-end { flex: 0 0 auto; }
+
+    .gl-factor-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+    .gl-factor-name { flex: 0 0 250px; display: flex; flex-direction: column; gap: 3px; }
+    .gl-factor-sub { font-size: 11px; color: var(--rf-text-faint); }
+    .gl-factor-val { flex: 0 0 60px; text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace;
+                     font-size: 13px; font-weight: 700; }
+
+    .gl-source {
+      background: var(--rf-navy-900); color: #cbd5e1;
+      border-radius: var(--rf-radius); padding: 20px 24px; margin-top: 26px;
+      font-size: 13px; line-height: 1.65;
+    }
+    .gl-source h3 { color: #fff; font-size: 14px; margin-bottom: 10px; }
+    .gl-source a { color: #93c5fd; }
+    .gl-source .ref { display: block; margin-bottom: 8px; padding-left: 18px; text-indent: -18px; }
+
+    @media (max-width: 640px) {
+      .gl-options, .gl-q-meta { margin-left: 0; }
+      .gl-factor-name { flex: 0 0 150px; }
+    }
+    @media print {
+      .top-nav, .gl-progress-bar, .actions, .gl-source { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-brand" style="text-decoration:none;"><span class="nav-brand-dot"></span>Risk-First Advisory</a>
+    <span class="nav-spacer"></span>
+    <a href="test-inversor.html" class="nav-item is-active">Test de inversor</a>
+    <a href="client.html" class="nav-item is-client">Cliente</a>
+    <a href="advisor.html" class="nav-item is-advisor">Asesor</a>
+    <a href="methodology.html" class="nav-item">Metodología</a>
+  </div>
+</nav>
+
+<main class="page">
+
+  <div class="role-hero">
+    <div class="role-hero-eyebrow">📋 Instrumento de perfilamiento</div>
+    <div class="role-hero-title">Test de tolerancia al riesgo</div>
+    <div class="role-hero-sub">
+      La escala de <strong>Grable &amp; Lytton (1999)</strong>: 13 ítems, puntaje de 13 a 47,
+      validada sobre 160.279 respuestas en 2015 (Cronbach's α = 0,77). Es el mismo instrumento
+      que usa el motor de perfilamiento, acá aislado para poder verlo funcionar solo.
+    </div>
+  </div>
+
+  <div class="msg msg-info">
+    <strong>Página de demostración.</strong> Corre entera en el navegador: no llama a la API, no guarda
+    nada y no genera ningún perfil de inversor. Sirve para mostrar el instrumento y su forma de puntuar.
+    En el flujo real las respuestas viajan dentro del KYC del caso y el puntaje se calcula en el servidor.
+  </div>
+
+  <div class="card" id="gl-form-card">
+    <div class="card-header">
+      <div>
+        <h2>Las 13 preguntas</h2>
+        <div class="subtitle">Cada opción vale entre 1 y 4 puntos. El resultado es la suma simple — sin ponderaciones ni modelos.</div>
+      </div>
+      <div class="pill-cluster">
+        <button class="btn-secondary btn-sm" id="gl-toggle-points">Mostrar puntajes de cada opción</button>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <div class="gl-progress-bar">
+        <div class="gl-progress-head">
+          <span id="gl-progress-label">0 de 13 respondidas</span>
+          <span>Contestá con honestidad: no hay respuesta correcta</span>
+        </div>
+        <div class="gl-progress-track"><div class="gl-progress-fill" id="gl-progress-fill"></div></div>
+      </div>
+
+      <div id="gl-items"></div>
+
+      <div class="actions" style="margin-top:22px;">
+        <button class="btn-primary btn-lg" id="gl-submit" disabled>Faltan 13 respuestas</button>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="gl-result"></div>
+
+  <div class="gl-source">
+    <h3>De dónde sale este test</h3>
+    <p style="margin-bottom:12px;">
+      No es un cuestionario propio. Es una escala publicada, con métricas de fiabilidad y validez
+      revisadas por pares, elegida justamente porque se puede auditar: los ítems, los puntajes y los
+      cortes son públicos. Las preguntas están traducidas y ambientadas en el contexto argentino
+      (plazo fijo, dólar, activos duros), pero la estructura de opciones y sus puntajes son los
+      originales — cambiarlos rompería la validez psicométrica reportada.
+    </p>
+    <span class="ref">
+      Grable, J. E., &amp; Lytton, R. H. (1999). <em>Financial risk tolerance revisited: the development
+      of a risk assessment instrument.</em> Financial Services Review, 8(3), 163–181.
+      <a href="https://openjournals.libs.uga.edu/fsr/article/view/3890" target="_blank" rel="noopener">Ver paper</a>
+    </span>
+    <span class="ref">
+      Kuzniak, S., Rabbani, A., Heo, W., Ruiz-Menjivar, J., &amp; Grable, J. E. (2015). <em>The Grable and
+      Lytton risk-tolerance scale: A 15-year retrospective.</em> Financial Services Review, 24(2), 177–192.
+      <a href="https://openjournals.libs.uga.edu/fsr/article/view/3240" target="_blank" rel="noopener">Ver paper</a>
+    </span>
+    <p style="margin-top:12px;font-size:12px;color:#94a3b8;">
+      Los ítems 9 y 10 son el par de <em>prospect theory</em> (Kahneman &amp; Tversky, 1979): la misma
+      apuesta planteada como ganancia y como pérdida. La mayoría elige lo seguro en el marco de
+      ganancia y se arriesga en el de pérdida, aunque el valor esperado sea idéntico.
+    </p>
+  </div>
+
+</main>
+
+<script src="js/test-inversor.js"></script>
+</body>
+</html>

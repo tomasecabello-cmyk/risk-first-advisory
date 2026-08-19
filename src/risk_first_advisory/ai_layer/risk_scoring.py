@@ -163,6 +163,47 @@ def compute_capacity_score(payload: dict[str, Any]) -> float:
     return round(1.0 + total * 9.0, 1)  # 1-10
 
 
+def compute_drawdown_from_savings(payload: dict[str, Any]) -> float | None:
+    """
+    Caída máxima tolerada de la CARTERA (%) derivada de dos hechos DECLARADOS
+    por el cliente (mínimos CNV art. 16 inc. j — DD-018):
+
+        savings_allocated_pct — % de sus ahorros destinado a estas inversiones
+        savings_at_risk_pct   — % de sus ahorros que está dispuesto a arriesgar
+
+    La caída de cartera equivalente es la proporción entre ambos:
+
+        drawdown = at_risk / allocated * 100
+
+    Ejemplo: dispuesto a arriesgar el 10% de sus ahorros, con el 50% de sus
+    ahorros invertidos acá → tolera una caída del 20% de ESTA cartera.
+
+    Sustituye la derivación circular anterior (caída ≈ tolerancia × 3), donde
+    la caída tolerada salía del mismo cuestionario que la tolerancia y por lo
+    tanto no aportaba información independiente (I-024).
+
+    Devuelve None si falta alguno de los dos datos o si `allocated` es 0
+    (no hay cartera sobre la cual expresar la caída). El resultado se acota a
+    100.0: si el cliente declara arriesgar más de lo que asignó, el techo es
+    perder todo lo invertido.
+
+    Función pura.
+    """
+    p = payload or {}
+    allocated = p.get("savings_allocated_pct")
+    at_risk = p.get("savings_at_risk_pct")
+    if allocated is None or at_risk is None:
+        return None
+    try:
+        allocated_f = float(allocated)
+        at_risk_f = float(at_risk)
+    except (TypeError, ValueError):
+        return None
+    if allocated_f <= 0.0:
+        return None
+    return round(min(at_risk_f / allocated_f * 100.0, 100.0), 2)
+
+
 def _profile_from_score(score_0_100: float) -> str:
     """Mapea un score 0-100 a uno de los 5 perfiles por bandas de 20."""
     idx = int(score_0_100 // 20)

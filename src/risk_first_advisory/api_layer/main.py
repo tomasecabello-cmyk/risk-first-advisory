@@ -428,10 +428,30 @@ def _build_kyc_data(req: KYCDataRequest) -> KYCData:
     """
     experience = _EXPERIENCE_MAP.get(req.investment_experience, InvestorExperience.MODERATE)
     needs_income = req.income_stability.lower() != "stable"
-    # La tolerancia psicológica es el mínimo entre el score y el drawdown declarado.
+
+    # Caída máxima tolerada de la cartera.
+    #   - drawdown_from_savings=True (DD-018): se DERIVA de dos hechos declarados
+    #     por el cliente (% de ahorros asignado y % que está dispuesto a
+    #     arriesgar), que son mínimos exigidos por la CNV. Rompe la circularidad
+    #     de derivarla de la propia tolerancia (I-024).
+    #   - si el gate está apagado o falta alguno de los dos datos, se usa el
+    #     valor declarado en el request (comportamiento legacy).
+    drawdown_pct = req.max_acceptable_drawdown_pct
+    if req.drawdown_from_savings:
+        # Import local: mismo criterio que el resto de los usos de risk_scoring
+        # en este módulo.
+        from risk_first_advisory.ai_layer.risk_scoring import (
+            compute_drawdown_from_savings,
+        )
+
+        derived = compute_drawdown_from_savings(req.model_dump())
+        if derived is not None:
+            drawdown_pct = derived
+
+    # La tolerancia psicológica es el mínimo entre el score y el drawdown.
     emotional_tolerance = min(
         req.risk_tolerance_score * 10.0,
-        req.max_acceptable_drawdown_pct,
+        drawdown_pct,
     )
 
     # annual_income_usd:
@@ -487,6 +507,45 @@ def _build_kyc_data(req: KYCDataRequest) -> KYCData:
         open_past_experience=req.open_past_experience or "",
         open_concerns=req.open_concerns or "",
         declared_return_expectation_pct=req.declared_return_expectation_pct,
+        instrument_knowledge=dict(req.instrument_knowledge),
+        savings_allocated_pct=req.savings_allocated_pct,
+        savings_at_risk_pct=req.savings_at_risk_pct,
+    )
+
+
+def _cnv_profiling_warning(req: KYCDataRequest) -> str | None:
+    """
+    Warning KYC_013 cuando el KYC no cubre los mínimos de perfilamiento de las
+    Normas CNV (Título VII, art. 12 inc. j Cap. I / art. 16 inc. j Cap. II).
+
+    Los mínimos que la CNV enumera y que no estaban cubiertos antes de DD-018:
+    grado de conocimiento de los instrumentos disponibles, porcentaje de
+    ahorros destinado a estas inversiones, y nivel de ahorros que el cliente
+    está dispuesto a arriesgar. Los demás (experiencia, objetivo, situación
+    financiera, horizonte) ya viajaban en el KYC.
+
+    NO bloquea: registrar un KYC incompleto sigue siendo posible y la decisión
+    de completarlo es del asesor (I-001). Devuelve None si está completo.
+    """
+    faltantes: list[str] = []
+    if not req.instrument_knowledge:
+        faltantes.append("conocimiento de los instrumentos (instrument_knowledge)")
+    if req.savings_allocated_pct is None:
+        faltantes.append(
+            "porcentaje de ahorros destinado a la inversión (savings_allocated_pct)"
+        )
+    if req.savings_at_risk_pct is None:
+        faltantes.append(
+            "nivel de ahorros dispuesto a arriesgar (savings_at_risk_pct)"
+        )
+    if not faltantes:
+        return None
+    return (
+        f"reason_code: {ReasonCode.KYC_CNV_PROFILING_INCOMPLETE.value} — el KYC "
+        f"no cubre {len(faltantes)} de los mínimos de perfilamiento de las "
+        f"Normas CNV (Título VII, art. 12 inc. j / art. 16 inc. j): "
+        f"{'; '.join(faltantes)}. Completar antes de presentar la propuesta al "
+        "cliente."
     )
 
 
@@ -3359,6 +3418,10 @@ def create_case_kyc(
     req: KYCDataRequest,
     advisor: AdvisorIdentity = Depends(require_roles("advisor", "admin")),
 ) -> KYCSubmissionResponse:
+    # Mínimos de perfilamiento CNV (DD-018). Se calcula antes de persistir para
+    # que el mismo veredicto viaje en la respuesta y en el audit event.
+    cnv_warning = _cnv_profiling_warning(req)
+
     db_path: Path = DEFAULT_DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with SQLiteEntityStore(db_path) as store:
@@ -3447,6 +3510,9 @@ def create_case_kyc(
                     "version":                 sub_data["version"],
                     "submitted_by_advisor_id": submitted_by_advisor_id,
                     "payload_hash":            sub_data["payload_hash"],
+                    # DD-018: queda asentado en la cadena si el KYC cubría los
+                    # mínimos CNV al momento de registrarse.
+                    "cnv_profiling_complete":  cnv_warning is None,
                 },
             )
         except Exception as exc:
@@ -3458,7 +3524,10 @@ def create_case_kyc(
                 ),
             ) from exc
 
-    return KYCSubmissionResponse(**sub_data)
+    return KYCSubmissionResponse(
+        **sub_data,
+        warnings=[cnv_warning] if cnv_warning else [],
+    )
 
 
 @app.get(
@@ -6504,11 +6573,15 @@ def create_case_report(
         # resumen ejecutivo del reporte. Tolerante: si no hay KYC, queda None.
         capacity_data: dict[str, Any] | None = None
         risk_number_data: dict[str, Any] | None = None
+        # KYC vigente completo: además de capacidad/Risk Number, alimenta la
+        # sección de mínimos de perfilamiento CNV del reporte (DD-018).
+        current_kyc_payload: dict[str, Any] | None = None
         kyc_id = case_data.get("current_kyc_submission_id")
         if kyc_id is not None:
             kyc_row = SQLiteKYCSubmissionRepository(store).get(kyc_id)
             kyc_payload = (kyc_row or {}).get("payload")
             if isinstance(kyc_payload, dict):
+                current_kyc_payload = kyc_payload
                 from risk_first_advisory.ai_layer.risk_scoring import (
                     capacity_gap_from_kyc,
                     deterministic_assessment,
@@ -6539,6 +6612,7 @@ def create_case_report(
                 analysis_data=latest_analysis_data,
                 capacity_data=capacity_data,
                 risk_number_data=risk_number_data,
+                kyc_data=current_kyc_payload,
             )
         except Exception as exc:
             raise HTTPException(

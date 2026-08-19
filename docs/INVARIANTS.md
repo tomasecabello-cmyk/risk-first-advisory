@@ -119,3 +119,17 @@ Toda llamada a OpenAI registrada en `ai_request_logs` aplica `redact_ai_input()`
 ## I-023 — Append-only a nivel API en todas las entidades case-scoped
 
 Ningún endpoint expone update / delete sobre `kyc_submissions`, `ai_profile_analyses`, `advisor_profile_approvals`, `case_investment_preferences`, `case_universe_filter_runs`, `case_portfolio_proposals`, `case_override_approvals`, `case_portfolio_selections`, `case_reports`, `audit_events`, `ai_request_logs`. La única mutación permitida es `mark_previous_not_current(case_id, exclude_id=new_id)` que setea `is_current=0` a los rows previos del case (sin tocar el contenido). Cambios de estado se modelan como nuevos rows con version incremental o `is_current=1` nuevo.
+
+---
+
+## I-024 — La caída tolerada no se deriva de la tolerancia
+
+`max_acceptable_drawdown_pct` (y la `emotional_loss_tolerance_pct` que sale de él) no puede computarse a partir del puntaje de tolerancia ni de las respuestas del cuestionario Grable-Lytton. Sería circular: la caída que el cliente dice aguantar quedaría siendo un reencode del mismo cuestionario, sin aportar información independiente, y el `min(tolerancia, caída)` de `_build_kyc_data` dejaría de acotar nada.
+
+Fuentes admitidas para la caída tolerada, en orden de preferencia:
+1. **Derivada de hechos declarados** (DD-018): `savings_at_risk_pct / savings_allocated_pct × 100`, vía `ai_layer/risk_scoring.compute_drawdown_from_savings` con el gate `drawdown_from_savings=True`. Los dos insumos son mínimos exigidos por las Normas CNV (Título VII, art. 12 inc. j / art. 16 inc. j) y los declara el cliente.
+2. **Declarada directamente** por el cliente o el asesor en `max_acceptable_drawdown_pct` (comportamiento legacy, sin gate).
+
+Lo prohibido es la tercera vía, que existió hasta DD-018 en `frontend/js/investor-demo.js`: fabricarla como `tolerancia_estimada × 3`. Cualquier cliente de la API que arme el payload debe declarar el dato o mandar los dos porcentajes; no inventarlo desde el score.
+
+Test de regresión: `tests/unit/test_cnv_profiling_minimums.py::test_drawdown_no_depende_de_la_tolerancia`.

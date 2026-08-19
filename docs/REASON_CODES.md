@@ -155,3 +155,22 @@ Convención: un reason code en `AdvisoryWorkflowResult.reason_codes` que corresp
 - **Bloquea:** No.
 - **Capa:** `rules_layer` (`InstrumentSuitabilityMatrix`).
 - **Acción esperada:** El asesor verifica que el optimizador respete el cap de asignación del instrumento LIMITED.
+
+---
+
+## Reason codes de KYC
+
+Catálogo completo en `rules_layer/reason_codes.py` (`ReasonCode` + `REASON_CODE_CATALOG`). Acá se documentan los que el flujo case-scoped emite hacia el asesor.
+
+### `KYC_012` — `KYC_STALE`
+- **Significado:** el KYC que respalda el proposal supera la antigüedad máxima configurada (`RFA_KYC_MAX_AGE_DAYS`, default 365; `<= 0` desactiva).
+- **Bloquea:** no (severity media). Aparece como warning antepuesto en el proposal.
+- **Capa:** `api_layer` (`_kyc_staleness_warning`), DD-017.
+- **Acción esperada:** reconfirmar los datos del cliente y registrar un KYC nuevo antes de presentar la propuesta.
+
+### `KYC_013` — `KYC_CNV_PROFILING_INCOMPLETE`
+- **Significado:** el KYC no cubre todos los mínimos de perfilamiento exigidos por las Normas CNV (N.T. 2013 y mod.), Título VII, art. 12 inc. j) Cap. I / art. 16 inc. j) Cap. II. Los tres que se chequean son los que se agregaron en DD-018: `instrument_knowledge` (grado de conocimiento de los instrumentos disponibles), `savings_allocated_pct` (porcentaje de ahorros destinado a estas inversiones) y `savings_at_risk_pct` (nivel de ahorros que el cliente está dispuesto a arriesgar). Los otros mínimos del artículo ya viajaban en el KYC: experiencia en el mercado, objetivo de inversión, situación financiera y horizonte.
+- **Bloquea:** no (severity media, `blocks_advancement: false`). El KYC se registra igual — la decisión de completarlo es del asesor (I-001).
+- **Dónde aparece:** campo `warnings` de la response de `POST /cases/{id}/kyc`, nombrando cuáles faltan; el `AuditEvent kyc_submitted` deja `cnv_profiling_complete: bool`; el reporte del caso lo repite en la sección "Mínimos de perfilamiento (Normas CNV)".
+- **Capa:** `api_layer` (`_cnv_profiling_warning`), DD-018.
+- **Acción esperada:** completar los campos faltantes en el KYC antes de presentar la propuesta al cliente.

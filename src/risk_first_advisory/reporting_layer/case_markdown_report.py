@@ -25,6 +25,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from risk_first_advisory.rules_layer.reason_codes import ReasonCode
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers de formato
 # ─────────────────────────────────────────────────────────────────────────────
@@ -488,6 +490,96 @@ def _section_capacity(capacity_data: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+_CNV_KNOWLEDGE_LABELS: dict[str, str] = {
+    "ninguno": "sin conocimiento",
+    "basico": "conocimiento básico",
+    "avanzado": "conocimiento avanzado",
+}
+
+
+def _cnv_profiling_complete(kyc_data: dict[str, Any] | None) -> bool | None:
+    """
+    True/False si el KYC cubre los tres mínimos CNV agregados en DD-018;
+    None cuando no hay KYC para evaluar (no es lo mismo "incompleto" que
+    "no evaluado").
+    """
+    if not isinstance(kyc_data, dict):
+        return None
+    return bool(
+        kyc_data.get("instrument_knowledge")
+        and kyc_data.get("savings_allocated_pct") is not None
+        and kyc_data.get("savings_at_risk_pct") is not None
+    )
+
+
+def _section_cnv_profiling(kyc_data: dict[str, Any] | None) -> str:
+    """
+    Mínimos de perfilamiento exigidos por las Normas CNV (Título VII,
+    art. 12 inc. j Cap. I / art. 16 inc. j Cap. II) — DD-018.
+
+    FORMATEA lo que el KYC ya declaró; no computa ni completa nada (I-013/I-020).
+    Condicional: sin kyc_data devuelve "" (backward-compat con reportes viejos).
+    Si el KYC es anterior a DD-018 y no trae ninguno de los tres campos, la
+    sección igual se emite marcando qué falta — es información de compliance.
+    """
+    if not isinstance(kyc_data, dict):
+        return ""
+
+    knowledge = kyc_data.get("instrument_knowledge") or {}
+    allocated = kyc_data.get("savings_allocated_pct")
+    at_risk = kyc_data.get("savings_at_risk_pct")
+
+    lines = ["## Mínimos de perfilamiento (Normas CNV)", ""]
+    lines.append(
+        "_Aspectos que las Normas CNV (Título VII, art. 12 inc. j / art. 16 inc. j) "
+        "exigen considerar para conocer el perfil de riesgo del cliente. Se listan "
+        "tal como fueron declarados en el KYC vigente._"
+    )
+    lines.append("")
+
+    if isinstance(knowledge, dict) and knowledge:
+        lines.append("- **Conocimiento de los instrumentos declarado**:")
+        for instrument_type in sorted(knowledge):
+            level = str(knowledge[instrument_type])
+            label = _CNV_KNOWLEDGE_LABELS.get(level, level)
+            lines.append(f"    - `{instrument_type}`: {label}")
+    else:
+        lines.append("- **Conocimiento de los instrumentos declarado**: no relevado")
+
+    if allocated is None:
+        lines.append("- **Porcentaje de ahorros destinado a esta inversión**: no relevado")
+    else:
+        lines.append(
+            f"- **Porcentaje de ahorros destinado a esta inversión**: {_pct(allocated)}"
+        )
+
+    if at_risk is None:
+        lines.append("- **Nivel de ahorros que declara estar dispuesto a arriesgar**: no relevado")
+    else:
+        lines.append(
+            "- **Nivel de ahorros que declara estar dispuesto a arriesgar**: "
+            f"{_pct(at_risk)}"
+        )
+
+    faltantes = [
+        nombre
+        for nombre, valor in (
+            ("conocimiento de los instrumentos", knowledge),
+            ("porcentaje de ahorros destinado", allocated),
+            ("nivel de ahorros a arriesgar", at_risk),
+        )
+        if not valor and valor != 0 and valor != 0.0
+    ]
+    if faltantes:
+        lines.append("")
+        lines.append(
+            f"> **{ReasonCode.KYC_CNV_PROFILING_INCOMPLETE.value}** — quedan sin "
+            f"relevar: {', '.join(faltantes)}. Completar el KYC antes de "
+            "presentar la propuesta al cliente."
+        )
+    return "\n".join(lines)
+
+
 def _section_risk_number(
     candidate: dict[str, Any],
     risk_number_data: dict[str, Any] | None,
@@ -605,6 +697,7 @@ class CaseMarkdownReportGenerator:
         analysis_data: dict[str, Any] | None = None,
         capacity_data: dict[str, Any] | None = None,
         risk_number_data: dict[str, Any] | None = None,
+        kyc_data: dict[str, Any] | None = None,
         generated_at_utc: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -636,6 +729,9 @@ class CaseMarkdownReportGenerator:
         capacity_section = _section_capacity(capacity_data)
         if capacity_section:
             sections.extend([capacity_section, ""])
+        cnv_section = _section_cnv_profiling(kyc_data)
+        if cnv_section:
+            sections.extend([cnv_section, ""])
         risk_number_section = _section_risk_number(candidate, risk_number_data)
         if risk_number_section:
             sections.extend([risk_number_section, ""])
@@ -673,6 +769,9 @@ class CaseMarkdownReportGenerator:
             "expected_return_annual": candidate.get("expected_return_annual"),
             "volatility_annual":      candidate.get("volatility_annual"),
             "asset_count":            len(holdings),
+            # DD-018: queda en la metadata del reporte si el KYC que lo respalda
+            # cubría los mínimos de perfilamiento CNV.
+            "cnv_profiling_complete": _cnv_profiling_complete(kyc_data),
             "holdings_summary":       [
                 {"ticker": h.get("ticker"), "weight": h.get("weight")}
                 for h in holdings

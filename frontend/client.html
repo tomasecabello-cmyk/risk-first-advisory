@@ -107,6 +107,25 @@
             <div class="field"><label>Personas a tu cargo</label><input type="number" id="idemo-dependents" value="0" min="0" /></div>
             <div class="field"><label>¿Gastos esenciales cubiertos sin tocar esta inversión?</label>
               <select id="idemo-expenses-covered"><option value="si" selected>Sí</option><option value="no">No</option></select></div>
+
+            <!-- Mínimos de perfilamiento CNV (DD-018): Normas CNV Título VII,
+                 art. 12 inc. j Cap. I / art. 16 inc. j Cap. II. -->
+            <div class="field"><label>¿Qué % de tus ahorros vas a poner en esta inversión?
+              <span class="hint">0–100</span></label>
+              <input type="number" id="idemo-savings-allocated" value="50" min="0" max="100" oninput="idemoUpdateDrawdownPreview()" /></div>
+            <div class="field"><label>¿Qué % de tus ahorros estarías dispuesto a arriesgar?
+              <span class="hint">no de esta cartera: del total de tus ahorros</span></label>
+              <input type="number" id="idemo-savings-at-risk" value="10" min="0" max="100" oninput="idemoUpdateDrawdownPreview()" /></div>
+            <div class="field full-span">
+              <div id="idemo-drawdown-preview" class="msg msg-info" style="margin:0;font-size:13px;"></div>
+            </div>
+
+            <div class="field full-span">
+              <label>¿Cuánto conocés cada tipo de instrumento?
+                <span class="hint">lo pide la CNV: el grado de conocimiento de los instrumentos disponibles</span></label>
+              <div id="idemo-instrument-knowledge" class="form-grid cols-2" style="margin-top:8px;"></div>
+            </div>
+
             <!-- oculto: lo llena el cuestionario -->
             <input type="hidden" id="idemo-risk-preview" value="" />
           </div>

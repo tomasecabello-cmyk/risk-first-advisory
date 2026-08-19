@@ -137,6 +137,83 @@ function idemoStr(id, fallback) {
 
 // ── Pregunta de trade-off (certainty equivalent) — Slice 4b ────────────
 // G = 10% del patrimonio líquido, L = 5% (docs/RISK_NUMBER_DESIGN.md §5).
+// ── Mínimos de perfilamiento CNV (DD-018) ─────────────────────────────────
+// Normas CNV (N.T. 2013 y mod.), Título VII, art. 12 inc. j) Cap. I y
+// art. 16 inc. j) Cap. II: hay que relevar el grado de conocimiento de los
+// instrumentos disponibles, el % de ahorros destinado a la inversión y el
+// nivel de ahorros que el cliente está dispuesto a arriesgar.
+//
+// El catálogo es editable: las claves son valores de InstrumentType
+// (universe_layer) y el backend valida contra ese enum.
+const IDEMO_INSTRUMENT_TYPES = [
+  ["MONEY_MARKET",   "Plazo fijo / money market"],
+  ["SOVEREIGN_BOND", "Bonos soberanos"],
+  ["CORPORATE_BOND", "Obligaciones negociables"],
+  ["MUTUAL_FUND",    "Fondos comunes (FCI)"],
+  ["STOCK",          "Acciones"],
+  ["CEDEAR",         "CEDEARs"],
+  ["ETF",            "ETFs"],
+];
+
+const IDEMO_KNOWLEDGE_LEVELS = [
+  ["ninguno",  "No lo conozco"],
+  ["basico",   "Lo conozco por arriba"],
+  ["avanzado", "Lo conozco bien"],
+];
+
+function idemoRenderInstrumentKnowledge() {
+  const host = document.getElementById("idemo-instrument-knowledge");
+  if (!host) return;
+  host.innerHTML = IDEMO_INSTRUMENT_TYPES.map(([key, label]) => {
+    const options = IDEMO_KNOWLEDGE_LEVELS.map(
+      ([value, text]) => `<option value="${value}">${escapeHTML(text)}</option>`
+    ).join("");
+    return `<div class="field">
+      <label style="font-weight:500;">${escapeHTML(label)}</label>
+      <select id="idemo-know-${key}" data-instrument-type="${key}">${options}</select>
+    </div>`;
+  }).join("");
+}
+
+// dict instrument_type → nivel, tal como lo espera KYCDataRequest.
+function idemoInstrumentKnowledge() {
+  const out = {};
+  IDEMO_INSTRUMENT_TYPES.forEach(([key]) => {
+    const el = document.getElementById(`idemo-know-${key}`);
+    if (el && el.value) out[key] = el.value;
+  });
+  return out;
+}
+
+// Caída de cartera derivada de los dos porcentajes declarados.
+// Espejo de ai_layer/risk_scoring.compute_drawdown_from_savings — el backend
+// es la fuente de verdad; esto es solo el preview que ve el cliente.
+function idemoDerivedDrawdownPct() {
+  const allocated = idemoNumber("idemo-savings-allocated", 0);
+  const atRisk = idemoNumber("idemo-savings-at-risk", 0);
+  if (!(allocated > 0)) return null;
+  return Math.min((atRisk / allocated) * 100, 100);
+}
+
+function idemoUpdateDrawdownPreview() {
+  const el = document.getElementById("idemo-drawdown-preview");
+  if (!el) return;
+  const dd = idemoDerivedDrawdownPct();
+  if (dd === null) {
+    el.innerHTML =
+      "Indicá qué porcentaje de tus ahorros vas a invertir para poder traducir " +
+      "cuánto estás dispuesto a perder en una caída máxima de esta cartera.";
+    return;
+  }
+  const allocated = idemoNumber("idemo-savings-allocated", 0);
+  const atRisk = idemoNumber("idemo-savings-at-risk", 0);
+  el.innerHTML =
+    `Arriesgar el <strong>${atRisk}%</strong> de tus ahorros con el ` +
+    `<strong>${allocated}%</strong> invertido acá equivale a tolerar una caída de ` +
+    `<strong>${dd.toFixed(0)}%</strong> de esta cartera. ` +
+    `<span style="opacity:.75;">Ese número lo usa el motor: no sale del cuestionario.</span>`;
+}
+
 // Opcional: el checkbox "idemo-tradeoff-enabled" decide si se manda al
 // backend; si no, el KYC queda igual que antes (willingness-only).
 function idemoTradeoffBounds() {
@@ -196,7 +273,11 @@ function idemoUpdateTradeoffPreview() {
 function idemoBuildKycPayload() {
   // Mapeos:
   //   liquidity_need (baja/media/alta) → liquidity_need_score (3/5/8)
-  //   risk_tolerance → max_acceptable_drawdown_pct ≈ risk * 3
+  // CAÍDA TOLERADA: ya NO se fabrica de la tolerancia (era circular: salía del
+  // mismo cuestionario que la tolerancia, ver I-024). Se manda
+  // drawdown_from_savings=true + los dos porcentajes declarados (mínimos CNV,
+  // DD-018) y el backend la deriva. max_acceptable_drawdown_pct queda como
+  // placeholder porque el schema lo exige.
   // CAPACIDAD: ya NO se fabrica de la tolerancia. Se manda capacity_from_facts=true
   // y el backend la computa de hechos (líquido/ingreso/horizonte/estabilidad/
   // dependientes/gastos cubiertos). risk_capacity_score queda como placeholder
@@ -221,6 +302,7 @@ function idemoBuildKycPayload() {
     income_stability:             idemoStr("idemo-income-stability", "stable"),
     net_worth:                    liquidNW * 2,  // estimación razonable
     liquid_net_worth:             liquidNW,
+    // Placeholder: el motor lo recomputa desde savings_* (drawdown_from_savings).
     max_acceptable_drawdown_pct:  Math.min(Math.max(Math.round(tolEst) * 3, 5), 50),
     jurisdiction:                 idemoStr("idemo-jurisdiction", "AR"),
     preferred_currency:           idemoStr("idemo-currency", "USD"),
@@ -233,6 +315,12 @@ function idemoBuildKycPayload() {
     capacity_from_facts:          true,
     dependents_count:             idemoInt("idemo-dependents", 0),
     essential_expenses_covered:   idemoStr("idemo-expenses-covered", "si") === "si",
+    // Mínimos de perfilamiento CNV (DD-018). La caída tolerada se deriva de los
+    // dos porcentajes en el backend (compute_drawdown_from_savings).
+    instrument_knowledge:         idemoInstrumentKnowledge(),
+    savings_allocated_pct:        idemoNumber("idemo-savings-allocated", 50),
+    savings_at_risk_pct:          idemoNumber("idemo-savings-at-risk", 10),
+    drawdown_from_savings:        true,
     open_investment_goal:         idemoStr("idemo-open-goal", "") || null,
     // Señal revelada del Risk Gap: reacción estructurada a una caída del 30%.
     open_risk_reaction:           idemoStr("idemo-open-reaction-choice", "") || null,
@@ -1387,7 +1475,13 @@ function idemoUpdateTolerancePreview() {
 // ── Init: render checklist al cargar ──────────────────────────────────
 
 (function () {
-  function _idemoInit() { idemoRenderProgress(); idemoLoadQuestionnaire(); idemoUpdateTradeoffPreview(); }
+  function _idemoInit() {
+    idemoRenderProgress();
+    idemoLoadQuestionnaire();
+    idemoUpdateTradeoffPreview();
+    idemoRenderInstrumentKnowledge();
+    idemoUpdateDrawdownPreview();
+  }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", _idemoInit);
   } else {

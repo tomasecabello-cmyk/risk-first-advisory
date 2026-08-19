@@ -262,3 +262,46 @@ Los retornos esperados en el universo CSV se derivan de `ytm` (yield to maturity
 - ETFs, CEDEARs y acciones no tienen `ytm` ni `coupon_rate` en el CSV, por lo que el adaptador no genera snapshots usables para esos instrumentos.
 
 Antes de usar este endpoint con clientes reales, los datos de mercado deben reemplazarse por fuentes con SLA de frescura documentado y proceso de validación auditado.
+
+---
+
+## 14. Mínimos de perfilamiento CNV (Argentina)
+
+El sistema se demuestra en jurisdicción argentina (`jurisdiction: "AR"` por defecto), donde el perfilamiento del cliente está normado. Esta sección documenta la cobertura frente a esas exigencias y lo que todavía falta. **No es asesoramiento legal**: las Normas CNV se modifican con frecuencia alta y el texto vigente debe verificarse antes de cualquier uso real.
+
+### La exigencia
+
+Normas CNV (N.T. 2013 y mod.), **Título VII — Agentes registrados**, art. 12 inc. j) del Capítulo I (Agentes de Negociación) y art. 16 inc. j) del Capítulo II (ALyC), con idéntica redacción: el agente debe *"conocer el perfil de riesgo de sus clientes"* considerando **como mínimo** los aspectos de la tabla de abajo. Para personas jurídicas se agregan las políticas de inversión definidas por el órgano de administración. No aplica a inversores institucionales.
+
+**La CNV no publica un cuestionario ni un puntaje.** Fija el contenido mínimo y deja el diseño del instrumento a cada agente. Por eso la escala Grable-Lytton que usa el sistema es una decisión metodológica propia (ver `docs/RISK_SCORING_THEORY.md`), no un requisito regulatorio — y por sí sola no alcanza: cubre la tolerancia declarada, que es **uno** de los ocho mínimos.
+
+### Cobertura actual
+
+| Mínimo del art. 16 inc. j) | Dónde vive | Estado |
+|---|---|---|
+| Experiencia en el mercado de capitales | `investment_experience`, `open_past_experience` | ✅ |
+| Grado de conocimiento de los instrumentos disponibles | `instrument_knowledge` (DD-018) | ✅ |
+| Objetivo de inversión | `investment_objective`, `open_investment_goal`, `FinancialGoal` | ✅ |
+| Situación financiera | `net_worth`, `liquid_net_worth`, `annual_income_usd`, `income_stability`, `dependents_count`, `essential_expenses_covered` | ✅ |
+| Horizonte de inversión previsto | `investment_horizon_years` | ✅ |
+| Porcentaje de ahorros destinado a estas inversiones | `savings_allocated_pct` (DD-018) | ✅ |
+| Nivel de ahorros que está dispuesto a arriesgar | `savings_at_risk_pct` (DD-018) | ✅ |
+| Toda otra circunstancia relevante | `open_concerns`, contexto patrimonial informativo (DD-017 ext.) | parcial |
+| Políticas de inversión del órgano de administración (personas jurídicas) | — | ❌ el KYC asume persona humana |
+
+Los tres campos de DD-018 son opcionales: un KYC que no los trae se registra igual, con el warning `KYC_013` en la response y `cnv_profiling_complete: false` en el `AuditEvent kyc_submitted`. La decisión de completarlo es del asesor (I-001).
+
+### Obligaciones alrededor del perfil
+
+| Obligación | Estado |
+|---|---|
+| Revisión con periodicidad mínima anual, o en la primera oportunidad en que el cliente pretenda operar pasado ese plazo | ✅ `RFA_KYC_MAX_AGE_DAYS` (default 365) con warning `KYC_012`/`KYC_STALE` (DD-017) |
+| Acreditar el conocimiento efectivo del cliente sobre el resultado del perfilamiento inicial y de las revisiones | ❌ hoy el perfil lo aprueba el asesor (`POST /cases/{id}/profile-approval`); no hay constancia del cliente |
+| Manifestación inequívoca del cliente, por cada operación, para operar fuera de su perfil, con advertencia expresa de riesgos | parcial: existe el override del asesor con rationale auditado, no la manifestación del cliente por operación |
+| Distinguir al inversor calificado (art. 12, Sección I, Cap. VI, Título II) | ❌ el sistema no modela la categoría |
+
+Los tres pendientes están en `docs/ROADMAP.md`. Ninguno es estructural: son campos y un endpoint más, no un rediseño.
+
+### Lo que este proyecto NO pretende
+
+No es un sistema homologado ni auditado por la CNV. Es una demo local que toma los mínimos del artículo como criterio de diseño porque son un buen criterio de diseño, no porque el sistema esté en condiciones de operar bajo ese régimen. Un ALyC real necesita además registro ante el organismo, legajo del cliente completo, ficha de apertura de cuenta (Anexo I del Cap. I del Título VII), régimen PLA/FT y todo lo que este proyecto declara explícitamente como fuera de alcance.

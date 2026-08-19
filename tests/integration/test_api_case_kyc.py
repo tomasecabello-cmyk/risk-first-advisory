@@ -765,3 +765,104 @@ class TestNoRegression:
         )
         assert r.status_code != 401
         assert r.status_code != 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mínimos de perfilamiento CNV (DD-018)
+#
+# Normas CNV (N.T. 2013 y mod.), Título VII, art. 12 inc. j) Cap. I y
+# art. 16 inc. j) Cap. II. Los tres campos son opcionales en el schema (los
+# KYC previos siguen siendo válidos) pero su ausencia se avisa con KYC_013 y
+# queda asentada en la cadena de auditoría.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_CNV_MINIMOS: dict[str, Any] = {
+    "instrument_knowledge": {"STOCK": "basico", "CEDEAR": "ninguno"},
+    "savings_allocated_pct": 50.0,
+    "savings_at_risk_pct": 10.0,
+}
+
+
+class TestCNVProfilingMinimums:
+    def test_kyc_completo_no_devuelve_warnings(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"], **_CNV_MINIMOS)
+        assert r.status_code == 201, r.text
+        assert r.json()["warnings"] == []
+
+    def test_kyc_incompleto_devuelve_kyc_013_pero_persiste(
+        self, client: TestClient
+    ) -> None:
+        """El warning avisa, no bloquea: el KYC se registra igual (I-001)."""
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"])
+        assert r.status_code == 201, r.text
+        warnings = r.json()["warnings"]
+        assert len(warnings) == 1
+        assert "KYC_013" in warnings[0]
+        assert r.json()["kyc_submission_id"]
+
+    def test_los_tres_campos_viajan_al_payload_persistido(
+        self, client: TestClient, kyc_db: Path
+    ) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"], **_CNV_MINIMOS)
+        assert r.status_code == 201, r.text
+
+        with SQLiteEntityStore(kyc_db) as store:
+            row = SQLiteKYCSubmissionRepository(store).get(
+                r.json()["kyc_submission_id"]
+            )
+        assert row is not None
+        payload = row["payload"]
+        assert payload["instrument_knowledge"] == {"STOCK": "basico", "CEDEAR": "ninguno"}
+        assert payload["savings_allocated_pct"] == 50.0
+        assert payload["savings_at_risk_pct"] == 10.0
+
+    def test_audit_event_registra_si_el_kyc_cubria_los_minimos(
+        self, client: TestClient
+    ) -> None:
+        case = _full_chain(client)
+        _post_kyc(client, case["case_id"], **_CNV_MINIMOS)
+        _post_kyc(client, case["case_id"])
+
+        r = client.get(
+            f"/cases/{case['case_id']}/audit", headers={"Authorization": _ADVISOR}
+        )
+        assert r.status_code == 200, r.text
+        eventos = [
+            e for e in r.json()["events"] if e["event_type"] == "kyc_submitted"
+        ]
+        assert len(eventos) == 2
+        assert eventos[0]["payload"]["cnv_profiling_complete"] is True
+        assert eventos[1]["payload"]["cnv_profiling_complete"] is False
+
+    def test_la_cadena_de_auditoria_sigue_intacta(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        _post_kyc(client, case["case_id"], **_CNV_MINIMOS)
+        r = client.get(
+            f"/cases/{case['case_id']}/audit/verify",
+            headers={"Authorization": _COMPLIANCE},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["is_intact"] is True
+
+    def test_instrument_type_desconocido_da_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(
+            client, case["case_id"], instrument_knowledge={"CRIPTO": "basico"}
+        )
+        assert r.status_code == 422, r.text
+
+    def test_nivel_de_conocimiento_desconocido_da_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(
+            client, case["case_id"], instrument_knowledge={"STOCK": "muchisimo"}
+        )
+        assert r.status_code == 422, r.text
+
+    def test_porcentaje_fuera_de_rango_da_422(self, client: TestClient) -> None:
+        case = _full_chain(client)
+        r = _post_kyc(client, case["case_id"], savings_at_risk_pct=140.0)
+        assert r.status_code == 422, r.text

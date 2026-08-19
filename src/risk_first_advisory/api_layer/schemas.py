@@ -83,6 +83,17 @@ _VALID_ESG_EXCLUSION_TYPES = frozenset({
     "sector", "activity", "issuer", "country", "tag", "controversy"
 })
 
+# Conocimiento declarado por instrumento (DD-018, mínimo CNV art. 16 inc. j).
+# Las claves son valores de universe_layer.InstrumentType; se listan acá en vez
+# de importar el enum para no acoplar la capa de schemas al universe_layer
+# (mismo criterio que _VALID_ESG_EXCLUSION_TYPES con kyc.models).
+_VALID_INSTRUMENT_TYPES = frozenset({
+    "ETF", "CORPORATE_BOND", "SOVEREIGN_BOND", "STOCK",
+    "CEDEAR", "MUTUAL_FUND", "MONEY_MARKET", "OTHER",
+})
+
+_VALID_KNOWLEDGE_LEVELS = frozenset({"ninguno", "basico", "avanzado"})
+
 
 class ESGExclusionRequest(BaseModel):
     """Mirror de `kyc.models.ESGExclusion` para la API."""
@@ -176,6 +187,54 @@ class KYCDataRequest(BaseModel):
     # risk_tolerance_score (placeholder). Default False → comportamiento legacy.
     tolerance_from_questionnaire: bool           = False
     tolerance_answers:            dict[str, str] = Field(default_factory=dict)
+
+    # ── Mínimos de perfilamiento CNV (DD-018) ─────────────────────────────
+    # Normas CNV (N.T. 2013 y mod.), Título VII: art. 12 inc. j) Cap. I (AN)
+    # y art. 16 inc. j) Cap. II (ALyC) — el agente debe conocer el perfil de
+    # riesgo del cliente considerando como mínimo, entre otros, el grado de
+    # conocimiento de los instrumentos disponibles, el porcentaje de ahorros
+    # destinado a estas inversiones y el nivel de ahorros que está dispuesto
+    # a arriesgar. Los otros mínimos ya estaban cubiertos (experiencia,
+    # objetivo, situación financiera, horizonte).
+    #
+    # Los tres son OPCIONALES para no romper payloads existentes; cuando
+    # faltan, el motor emite KYC_013 (ver docs/REASON_CODES.md) y el perfil
+    # queda marcado como incompleto frente al mínimo regulatorio. Nunca
+    # bloquean: la decisión de completar es del asesor (I-001).
+
+    # instrument_type (universe_layer.InstrumentType) → nivel declarado.
+    # Ej: {"STOCK": "basico", "CEDEAR": "ninguno", "SOVEREIGN_BOND": "avanzado"}
+    instrument_knowledge: dict[str, str] = Field(default_factory=dict)
+
+    # % de los ahorros del cliente destinado a estas inversiones.
+    savings_allocated_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+
+    # % de los ahorros que el cliente declara estar dispuesto a arriesgar.
+    savings_at_risk_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+
+    # Gate, mismo idioma que capacity_from_facts / tolerance_from_questionnaire:
+    # cuando es True y ambos porcentajes están presentes, el motor DERIVA
+    # max_acceptable_drawdown_pct de los dos hechos declarados y el valor que
+    # venga en max_acceptable_drawdown_pct pasa a ser un placeholder.
+    # Rompe la circularidad de derivar la caída tolerada de la propia
+    # tolerancia (I-024).
+    drawdown_from_savings: bool = False
+
+    @field_validator("instrument_knowledge")
+    @classmethod
+    def _validate_instrument_knowledge(cls, v: dict[str, str]) -> dict[str, str]:
+        for instrument_type, level in v.items():
+            if instrument_type not in _VALID_INSTRUMENT_TYPES:
+                raise ValueError(
+                    f"instrument_type inválido en instrument_knowledge: "
+                    f"{instrument_type!r}. Opciones: {sorted(_VALID_INSTRUMENT_TYPES)}."
+                )
+            if level not in _VALID_KNOWLEDGE_LEVELS:
+                raise ValueError(
+                    f"nivel de conocimiento inválido para {instrument_type!r}: "
+                    f"{level!r}. Opciones: {sorted(_VALID_KNOWLEDGE_LEVELS)}."
+                )
+        return v
 
     # ── Trade-off (certainty equivalent → γ CRRA) — opcional ──────────────
     # Segunda elicitación del Risk Number (docs/RISK_NUMBER_DESIGN.md §5,
@@ -1363,6 +1422,11 @@ class KYCSubmissionResponse(BaseModel):
     payload:                 dict[str, Any]
     payload_hash:            str
     created_at_utc:          str
+    # Advertencias no bloqueantes sobre el KYC recién registrado. Hoy solo
+    # KYC_013 (mínimos de perfilamiento CNV incompletos, DD-018). Lista vacía
+    # = el KYC cubre los mínimos. Campo aditivo: los clientes que lo ignoran
+    # siguen funcionando igual.
+    warnings:                list[str] = Field(default_factory=list)
 
 
 class KYCSubmissionListResponse(BaseModel):

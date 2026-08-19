@@ -185,7 +185,7 @@ def _post(c: TestClient, path: str, body: dict, token: str = _ADVISOR) -> Any:
 
 
 def _setup_case_with_selection(
-    c: TestClient, patch_ai_client
+    c: TestClient, patch_ai_client, kyc_overrides: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Pipeline completo hasta tener una portfolio selection vigente."""
     patch_ai_client()
@@ -193,7 +193,7 @@ def _setup_case_with_selection(
     adv = _post(c, "/advisors", _advisor_body(firm["firm_id"], advisor_id="ADV-RPT-001"), _ADMIN).json()
     cli = _post(c, "/clients", _client_body(firm["firm_id"], adv["advisor_id"]), _ADMIN).json()
     case = _post(c, "/cases", _case_body(firm["firm_id"], cli["client_id"], adv["advisor_id"])).json()
-    _post(c, f"/cases/{case['case_id']}/kyc", _kyc_body())
+    _post(c, f"/cases/{case['case_id']}/kyc", _kyc_body(**(kyc_overrides or {})))
     _post(c, f"/cases/{case['case_id']}/ai/profile-analysis", {})
     _post(c, f"/cases/{case['case_id']}/profile-approval",
           {"decision": "approve", "rationale": "ok"})
@@ -723,3 +723,54 @@ class TestNoRegression:
         r = client.get("/auth/me", headers={"Authorization": _ADVISOR})
         assert r.status_code == 200
         assert r.json()["advisor_id"] == "ADV-RPT-001"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mínimos de perfilamiento CNV en el reporte (DD-018)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCNVProfilingSectionInReport:
+    def test_seccion_aparece_con_lo_declarado(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """El reporte formatea los mínimos CNV del KYC vigente."""
+        ctx = _setup_case_with_selection(
+            client,
+            patch_ai_client,
+            kyc_overrides={
+                "instrument_knowledge": {"STOCK": "avanzado", "CEDEAR": "ninguno"},
+                "savings_allocated_pct": 40.0,
+                "savings_at_risk_pct": 8.0,
+            },
+        )
+        md = _post_report(client, ctx["case"]["case_id"]).json()["markdown"]
+        assert "Mínimos de perfilamiento (Normas CNV)" in md
+        assert "`STOCK`: conocimiento avanzado" in md
+        assert "`CEDEAR`: sin conocimiento" in md
+        assert "KYC_013" not in md
+
+    def test_seccion_marca_lo_no_relevado(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        """Con un KYC previo a DD-018, la sección igual sale y avisa qué falta."""
+        ctx = _setup_case_with_selection(client, patch_ai_client)
+        md = _post_report(client, ctx["case"]["case_id"]).json()["markdown"]
+        assert "Mínimos de perfilamiento (Normas CNV)" in md
+        assert "no relevado" in md
+        assert "KYC_013" in md
+
+    def test_metadata_registra_si_estaba_completo(
+        self, client: TestClient, patch_ai_client
+    ) -> None:
+        ctx = _setup_case_with_selection(
+            client,
+            patch_ai_client,
+            kyc_overrides={
+                "instrument_knowledge": {"ETF": "basico"},
+                "savings_allocated_pct": 30.0,
+                "savings_at_risk_pct": 6.0,
+            },
+        )
+        r = _post_report(client, ctx["case"]["case_id"])
+        assert r.json()["metadata"]["cnv_profiling_complete"] is True
